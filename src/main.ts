@@ -11,15 +11,22 @@ interface AppSettings {
     pitchValue: number;
 }
 
-const audioContext = new AudioContext();
-console.log(`AudioContext created, sample rate ${audioContext.sampleRate}Hz`);
+// Lazily initialize audio context to prevent warning logs in Firefox.
+let globalAudioContext: AudioContext;
+function getAudioContext(): AudioContext {
+    if (!globalAudioContext) {
+        globalAudioContext = new AudioContext();
+        console.log(`AudioContext created, sample rate ${globalAudioContext.sampleRate}Hz`);
+    }
+    return globalAudioContext;
+}
 
-let recorder: Recorder;
-try {
-    recorder = await Recorder.create(audioContext);
-} catch (error) {
-    console.log('Error creating Recorder', error);
-    alert(`Error creating Recorder: ${(error as Error).message}`);
+let globalRecorder: Recorder;
+async function getRecorder(): Promise<Recorder> {
+    if (!globalRecorder) {
+        globalRecorder = await Recorder.create(getAudioContext());
+    }
+    return globalRecorder;
 }
 
 let sourceData: Float32Array;
@@ -93,6 +100,7 @@ async function startPlayback() {
         return;
     }
 
+    const audioContext = getAudioContext();
     // At least Chrome requires this
     if (audioContext.state === 'suspended') {
         await audioContext.resume();
@@ -133,6 +141,7 @@ function stopPlayback() {
 }
 
 recordBtn.addEventListener('click', async () => {
+    const recorder = await getRecorder();
     if (!recorder.isRecording) {
         stopPlayback();
         try {
@@ -150,7 +159,7 @@ recordBtn.addEventListener('click', async () => {
         saveBtn.disabled = true;
     } else {
         sourceData = await recorder.stop();
-        sourceSampleRate = audioContext.sampleRate;
+        sourceSampleRate = getAudioContext().sampleRate;
 
         recordBtnEmoji.textContent = '⏺';
         recordBtn.title = 'Record';
@@ -181,7 +190,7 @@ fileInput.addEventListener('change', async () => {
         messageLabel.textContent = `Decoding ${file.name}...`;
         const arrayBuffer = await file.arrayBuffer();
         // Use decoding with global AudioContext to resample data into target sample rate for playback.
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        const audioBuffer = await getAudioContext().decodeAudioData(arrayBuffer);
         sourceData = audioBuffer.getChannelData(0);
         sourceSampleRate = audioBuffer.sampleRate;
         console.log(`Loaded ${file.name} in ${performance.now() - startTime}ms: ${audioBuffer.numberOfChannels}`
