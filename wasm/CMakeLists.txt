@@ -27,7 +27,6 @@ if(EMSCRIPTEN)
     add_executable(main-wasm-module
         3rdparty/kiss_fft/kiss_fft.c
         3rdparty/kiss_fft/kiss_fftr.c
-        3rdparty/pffft/pffft.c
         src/main.cpp
     )
     target_compile_options(main-wasm-module PRIVATE

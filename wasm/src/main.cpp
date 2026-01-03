@@ -885,7 +885,5 @@ EMSCRIPTEN_BINDINGS(main) {
         .constructor<size_t>()
         .function("freeData", &PodArray<float>::freeData)
         .property("dataPtr", &PodArray<float>::dataPtr)
-        .property("beginOffset", &PodArray<float>::beginOffset)
-        .property("endOffset", &PodArray<float>::endOffset)
         .property("size", &PodArray<float>::getSize);
 }

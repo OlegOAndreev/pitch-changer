@@ -35,16 +35,6 @@ struct PodArray {
         return reinterpret_cast<uintptr_t>(data);
     }
 
-    // Make this property read-only.
-    uintptr_t beginOffset() const {
-        return reinterpret_cast<uintptr_t>(data) / 4;
-    }
-
-    // Make this property read-only.
-    uintptr_t endOffset() const {
-        return reinterpret_cast<uintptr_t>(data) / 4 + size;
-    }
-
     // Make this property read-only
     size_t getSize() const {
         return size;
