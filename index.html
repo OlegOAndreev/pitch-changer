@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0" />
+    <title>Pitch Changer</title>
+    <link rel="stylesheet" href="/main.css" />
+    <link rel="icon" href="data:;base64,=" />
+</head>
+
+<body>
+    <div id="content-сontainer">
+        <h1>Pitch Changer</h1>
+        <div id="big-buttons-row">
+            <button id="record-btn" class="big-control-btn control-btn" title="Record"><span id="record-btn-emoji"
+                    class="emoji">⏺</span></button>
+            <button id="play-btn" class="big-control-btn control-btn" title="Play" disabled="true"><span
+                    id="play-btn-emoji" class="emoji">▶</span></button>
+        </div>
+        <div id="small-buttons-row">
+            <button id="load-btn" class="small-control-btn control-btn" title="Load"><span
+                    class="emoji">🡅</span><br>Load</button>
+            <button id="save-btn" class="small-control-btn control-btn" title="Save" disabled="true"><span
+                    class="emoji">🡇</span><br>Save</button>
+        </div>
+        <div id="mode-row">
+            <div class="radio-option">
+                <input type="radio" id="pitch-mode" name="processing-mode" value="pitch" checked>
+                <label for="pitch-mode">Pitch shift</label>
+            </div>
+            <div class="radio-option">
+                <input type="radio" id="time-mode" name="processing-mode" value="time">
+                <label for="time-mode">Time stretch</label>
+            </div>
+        </div>
+        <div id="slider-row">
+            <div id="pitch-label">1.25x</div>
+            <div id="slider-container">
+                <input type="range" id="pitch-slider" min="0.5" max="2.0" step="0.125" value="1.25"
+                    list="pitch-slider-markers">
+                <datalist id="pitch-slider-markers">
+                    <option value="0.5"></option>
+                    <option value="0.625"></option>
+                    <option value="0.75"></option>
+                    <option value="0.875"></option>
+                    <option value="1.0"></option>
+                    <option value="1.125"></option>
+                    <option value="1.25"></option>
+                    <option value="1.375"></option>
+                    <option value="1.5"></option>
+                    <option value="1.625"></option>
+                    <option value="1.75"></option>
+                    <option value="1.875"></option>
+                    <option value="2.0"></option>
+                </datalist>
+                <div id="slider-labels">
+                    <span>0.5x</span>
+                    <span>2.0x</span>
+                </div>
+            </div>
+        </div>
+        <div id="message-row">
+            <p id="message-label"></p>
+        </div>
+    </div>
+
+    <input type="file" id="file-input" accept="audio/*" style="display: none"></input>
+
+    <!-- Save filename dialog, used on non-Chrome browsers as workaround for showSaveFilePicker -->
+    <div id="save-dialog-overlay" class="dialog-overlay" style="display: none;">
+        <div class="dialog">
+            <label for="filename-input">Filename:</label>
+            <input type="text" id="save-filename-input" value="scaled.mp3">
+            <div class="dialog-buttons">
+                <button id="save-dialog-cancel-btn" class="dialog-btn control-btn">Cancel</button>
+                <button id="save-dialog-ok-btn" class="dialog-btn control-btn">OK</button>
+            </div>
+        </div>
+    </div>
+    <a id="save-dialog-link" style="display: none;"></a>
+
+    <script type="module" src="/src/main.ts"></script>
+</body>
+
+</html>

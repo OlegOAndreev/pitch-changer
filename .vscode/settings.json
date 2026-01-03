@@ -1,0 +1,4 @@
+{
+    // This is required for clangd to find the emscripten-specific headers: https://github.com/clangd/clangd/issues/1621#issuecomment-3199030229
+    "clangd.arguments": ["--query-driver=**/emcc,**/em++"]
+}
