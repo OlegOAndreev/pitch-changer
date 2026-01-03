@@ -151,6 +151,7 @@ recordBtn.addEventListener('click', async () => {
             alert(`Could not start recording: ${(error as Error).message}`);
         }
 
+        messageLabel.textContent = 'Recording...';
         recordBtnEmoji.textContent = '⏹';
         recordBtn.title = 'Stop';
         recordBtn.classList.add('recording');
@@ -161,6 +162,7 @@ recordBtn.addEventListener('click', async () => {
         sourceData = await recorder.stop();
         sourceSampleRate = getAudioContext().sampleRate;
 
+        messageLabel.textContent = '';
         recordBtnEmoji.textContent = '⏺';
         recordBtn.title = 'Record';
         recordBtn.classList.remove('recording');
