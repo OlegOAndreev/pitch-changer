@@ -8,4 +8,4 @@
 * Install C++ libraries by adding a Git submodule, unless you are using system libraries
 * When changing C++ files, run `npm run build`
 * When changing TypeScript or html/css files, run `npm run build:ts`
-* When testing UI, the URL for dev server is http://localhost:5173/pitch-changer/ (trailing slash is important!), `npx vite` must be already running
+* Do not attempt opening browser for UI testing, always request the user to test the UI

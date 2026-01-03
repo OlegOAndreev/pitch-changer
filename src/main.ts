@@ -28,25 +28,34 @@ let sourceSampleRate: number;
 let isPlaying = false;
 let playingBufferSource: AudioBufferSourceNode | null;
 
-const recordBtn = document.getElementById('record-btn') as HTMLButtonElement;
-const recordBtnEmoji = document.getElementById('record-btn-emoji') as HTMLButtonElement;
-const playBtn = document.getElementById('play-btn') as HTMLButtonElement;
-const playBtnEmoji = document.getElementById('play-btn-emoji') as HTMLButtonElement;
-const loadBtn = document.getElementById('load-btn') as HTMLButtonElement;
-const saveBtn = document.getElementById('save-btn') as HTMLButtonElement;
-const pitchSlider = document.getElementById('pitch-slider') as HTMLInputElement;
-const pitchLabel = document.getElementById('pitch-label') as HTMLElement;
-const pitchModeRadio = document.getElementById('pitch-mode') as HTMLInputElement;
-const timeModeRadio = document.getElementById('time-mode') as HTMLInputElement;
+function getById<T extends HTMLElement>(elementId: string): T {
+    const element = document.getElementById(elementId);
+    if (!element) {
+        throw new Error(`Element with id "${elementId}" not found`);
+    }
+    return element as T;
+}
 
-const messageLabel = document.getElementById('message-label') as HTMLElement;
+const contentContainer = getById<HTMLDivElement>('content-сontainer');
+const recordBtn = getById<HTMLButtonElement>('record-btn');
+const recordBtnEmoji = getById<HTMLButtonElement>('record-btn-emoji');
+const playBtn = getById<HTMLButtonElement>('play-btn');
+const playBtnEmoji = getById<HTMLButtonElement>('play-btn-emoji');
+const loadBtn = getById<HTMLButtonElement>('load-btn');
+const saveBtn = getById<HTMLButtonElement>('save-btn');
+const pitchSlider = getById<HTMLInputElement>('pitch-slider');
+const pitchLabel = getById<HTMLElement>('pitch-label');
+const pitchModeRadio = getById<HTMLInputElement>('pitch-mode');
+const timeModeRadio = getById<HTMLInputElement>('time-mode');
 
-const fileInput = document.getElementById('file-input') as HTMLInputElement;
+const messageLabel = getById<HTMLElement>('message-label');
 
-const saveDialogOverlay = document.getElementById('save-dialog-overlay') as HTMLDivElement;
-const saveInput = document.getElementById('save-filename-input') as HTMLInputElement;
-const saveOkBtn = document.getElementById('save-dialog-ok-btn') as HTMLButtonElement;
-const saveCancelBtn = document.getElementById('save-dialog-cancel-btn') as HTMLButtonElement;
+const fileInput = getById<HTMLInputElement>('file-input');
+
+const saveDialogOverlay = getById<HTMLDivElement>('save-dialog-overlay');
+const saveInput = getById<HTMLInputElement>('save-filename-input');
+const saveOkBtn = getById<HTMLButtonElement>('save-dialog-ok-btn');
+const saveCancelBtn = getById<HTMLButtonElement>('save-dialog-cancel-btn');
 
 const SETTINGS_KEY = 'pitch-changer-settings';
 const settings = loadSettings();
@@ -67,6 +76,10 @@ function loadSettings(): AppSettings {
     }
     pitchSlider.value = settings.pitchValue.toString();
     pitchLabel.textContent = settings.pitchValue + 'x';
+
+    // Show the content container after settings are applied
+    contentContainer.style.visibility = 'visible';
+
     return settings;
 }
 
@@ -265,7 +278,7 @@ async function saveFile(filename: string, fileHandle: FileSystemFileHandle | nul
         console.log(`Saved ${filename} successfully`);
     } else {
         const url = URL.createObjectURL(blob);
-        const element = document.getElementById('save-dialog-link') as HTMLAnchorElement;
+        const element = getById<HTMLAnchorElement>('save-dialog-link');
         element.href = url;
         element.download = filename;
         element.click();
