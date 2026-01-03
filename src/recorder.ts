@@ -6,9 +6,9 @@ export const recorderProcessorName = 'recorder-processor';
 let moduleInitialized = false;
 
 export class Recorder {
+    readonly audioContext: AudioContext;
     isRecording = false;
     recordingFinished: Promise<void> | null = null;
-    audioContext: AudioContext;
     recordedChunks: Float32Array[] = [];
     audioWorkletNode: AudioWorkletNode | null = null;
     mediaStream: MediaStream | null = null;

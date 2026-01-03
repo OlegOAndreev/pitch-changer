@@ -37,13 +37,12 @@ class RecorderProcessor extends AudioWorkletProcessor {
 
                 // Do not bother processing this case, it must be an error.
                 if (channelData.length >= CHUNK_SIZE) {
-                    console.log(`Channel data ${channelData.length} is greater than chunk size ${CHUNK_SIZE},
-                         truncated`);
+                    console.error(`Channel data ${channelData.length} is greater than chunk size ${CHUNK_SIZE}, truncated`);
                 }
 
                 this.buffer.set(channelData, this.bufferOffset);
                 this.bufferOffset += channelData.length;
-                if (this.bufferOffset == CHUNK_SIZE) {
+                if (this.bufferOffset === CHUNK_SIZE) {
                     this.flushBuffer();
                 }
             }

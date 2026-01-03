@@ -2,8 +2,17 @@ import { Recorder } from './recorder';
 
 import MainModuleFactory from '../wasm/build/main-wasm-module';
 import { encodeToBlob } from './media-encoder';
+import { Player } from './player';
+import { saveFile, showSaveDialog } from './save-dialog';
+import { getById } from './utils';
 
 await MainModuleFactory();
+
+const MAX_PITCH_VALUE = 2.0;
+const MIN_PITCH_VALUE = 0.5;
+const PITCH_VALUE_STEP = 0.125;
+const DEFAULT_PITCH_VALUE = 1.25;
+const DEFAULT_PROCESSING_MODE = 'pitch';
 
 // Settings interface and implementation
 interface AppSettings {
@@ -11,12 +20,26 @@ interface AppSettings {
     pitchValue: number;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function onError(message: string, error: any) {
+    console.error(message, error);
+    if (error instanceof Error) {
+        alert(`${message}: ${error.message}`);
+    } else {
+        alert(message);
+    }
+}
+
 // Lazily initialize audio context to prevent warning logs in Firefox.
 let globalAudioContext: AudioContext;
 function getAudioContext(): AudioContext {
     if (!globalAudioContext) {
-        globalAudioContext = new AudioContext();
-        console.log(`AudioContext created, sample rate ${globalAudioContext.sampleRate}Hz`);
+        try {
+            globalAudioContext = new AudioContext();
+            console.log(`AudioContext created, sample rate ${globalAudioContext.sampleRate}Hz`);
+        } catch (error) {
+            onError('Error creating AudioContext', error);
+        }
     }
     return globalAudioContext;
 }
@@ -24,26 +47,28 @@ function getAudioContext(): AudioContext {
 let globalRecorder: Recorder;
 async function getRecorder(): Promise<Recorder> {
     if (!globalRecorder) {
-        globalRecorder = await Recorder.create(getAudioContext());
+        try {
+            globalRecorder = await Recorder.create(getAudioContext());
+        } catch (error) {
+            onError('Error creating Recorder', error);
+        }
     }
     return globalRecorder;
+}
+
+let globalPlayer: Player;
+function getPlayer(): Player {
+    if (!globalPlayer) {
+        globalPlayer = new Player(getAudioContext());
+    }
+    return globalPlayer;
 }
 
 let sourceData: Float32Array;
 let sourceSampleRate: number;
 
-let isPlaying = false;
-let playingBufferSource: AudioBufferSourceNode | null;
 
-function getById<T extends HTMLElement>(elementId: string): T {
-    const element = document.getElementById(elementId);
-    if (!element) {
-        throw new Error(`Element with id "${elementId}" not found`);
-    }
-    return element as T;
-}
-
-const contentContainer = getById<HTMLDivElement>('content-сontainer');
+const contentContainer = getById<HTMLDivElement>('content-container');
 const recordBtn = getById<HTMLButtonElement>('record-btn');
 const recordBtnEmoji = getById<HTMLButtonElement>('record-btn-emoji');
 const playBtn = getById<HTMLButtonElement>('play-btn');
@@ -59,30 +84,34 @@ const messageLabel = getById<HTMLElement>('message-label');
 
 const fileInput = getById<HTMLInputElement>('file-input');
 
-const saveDialogOverlay = getById<HTMLDivElement>('save-dialog-overlay');
-const saveInput = getById<HTMLInputElement>('save-filename-input');
-const saveOkBtn = getById<HTMLButtonElement>('save-dialog-ok-btn');
-const saveCancelBtn = getById<HTMLButtonElement>('save-dialog-cancel-btn');
-
 const SETTINGS_KEY = 'pitch-changer-settings';
 const settings = loadSettings();
 
 function loadSettings(): AppSettings {
     const settings: AppSettings = {
-        processingMode: 'pitch',
-        pitchValue: 1.25
+        processingMode: DEFAULT_PROCESSING_MODE,
+        pitchValue: DEFAULT_PITCH_VALUE
     };
     Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}'));
     if (settings.processingMode !== 'time') {
-        settings.processingMode = 'pitch';
+        settings.processingMode = DEFAULT_PROCESSING_MODE;
     }
     pitchModeRadio.checked = settings.processingMode === 'pitch';
     timeModeRadio.checked = settings.processingMode === 'time';
-    if (settings.pitchValue > 2.0 || settings.pitchValue < 0.5) {
-        settings.pitchValue = 1.25;
+    if (settings.pitchValue > MAX_PITCH_VALUE || settings.pitchValue < MIN_PITCH_VALUE) {
+        settings.pitchValue = DEFAULT_PITCH_VALUE;
     }
+    pitchSlider.min = MIN_PITCH_VALUE.toString();
+    pitchSlider.max = MAX_PITCH_VALUE.toString();
+    pitchSlider.step = PITCH_VALUE_STEP.toString();
     pitchSlider.value = settings.pitchValue.toString();
     pitchLabel.textContent = settings.pitchValue + 'x';
+    const pitchSliderMarkers = getById<HTMLDataListElement>('pitch-slider-markers');
+    for (let v = MIN_PITCH_VALUE; v <= MAX_PITCH_VALUE; v += PITCH_VALUE_STEP) {
+        const node = new Option();
+        node.value = v.toString();
+        pitchSliderMarkers.appendChild(node);
+    }
 
     // Show the content container after settings are applied
     contentContainer.style.visibility = 'visible';
@@ -90,51 +119,19 @@ function loadSettings(): AppSettings {
     return settings;
 }
 
+let saveSettingsTimer: number | null = null;
 function saveSettings() {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    // Debounce saving settings.
+    if (saveSettingsTimer) {
+        clearTimeout(saveSettingsTimer);
+    }
+    saveSettingsTimer = setTimeout(() => {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    }, 500);
 }
 
-async function startPlayback() {
-    if (!sourceData) {
-        console.log('Error: no audio data to play');
-        return;
-    }
-
-    const audioContext = getAudioContext();
-    // At least Chrome requires this
-    if (audioContext.state === 'suspended') {
-        await audioContext.resume();
-    }
-
-    const audioBuffer = audioContext.createBuffer(1, sourceData.length, sourceSampleRate);
-    audioBuffer.getChannelData(0).set(sourceData);
-    playingBufferSource = audioContext.createBufferSource();
-    playingBufferSource.buffer = audioBuffer;
-    playingBufferSource.connect(audioContext.destination);
-    playingBufferSource.onended = (_e: Event) => stopPlayback();
-    playingBufferSource.start();
-    isPlaying = true;
-
-    console.log(`Playing ${audioBuffer.length} samples at ${audioBuffer.sampleRate}Hz`);
-
-    playBtnEmoji.textContent = '⏹';
-    playBtn.title = 'Pause';
-    playBtn.classList.add('playing');
-}
-
-function stopPlayback() {
-    if (!isPlaying) {
-        return;
-    }
-
-    // No need to disconnect the source: "The nodes will automatically get disconnected from the graph and will be
-    // deleted when they have no more references" from https://webaudio.github.io/web-audio-api/#dynamic-lifetime-background
-    playingBufferSource!.stop();
-    playingBufferSource = null;
-    isPlaying = false;
-
+function onStopPlayback() {
     console.log('Stopped playing audio');
-
     playBtnEmoji.textContent = '▶';
     playBtn.title = 'Play';
     playBtn.classList.remove('playing');
@@ -143,7 +140,7 @@ function stopPlayback() {
 recordBtn.addEventListener('click', async () => {
     const recorder = await getRecorder();
     if (!recorder.isRecording) {
-        stopPlayback();
+        getPlayer().stop();
         try {
             await recorder.start();
         } catch (error) {
@@ -173,10 +170,20 @@ recordBtn.addEventListener('click', async () => {
 });
 
 playBtn.addEventListener('click', async () => {
-    if (!isPlaying) {
-        startPlayback();
+    const player = getPlayer();
+    if (!player.isPlaying) {
+        if (!sourceData) {
+            console.error('Error: no audio data to play');
+            return;
+        }
+
+        await getPlayer().play(sourceData, sourceSampleRate, onStopPlayback);
+
+        playBtnEmoji.textContent = '⏹';
+        playBtn.title = 'Pause';
+        playBtn.classList.add('playing');
     } else {
-        stopPlayback();
+        player.stop();
     }
 });
 
@@ -209,94 +216,13 @@ fileInput.addEventListener('change', async () => {
     playBtn.disabled = false;
     loadBtn.disabled = false;
     saveBtn.disabled = false;
-    stopPlayback();
+    getPlayer().stop();
 });
 
 loadBtn.addEventListener('click', async () => {
     loadBtn.disabled = true;
     fileInput.click();
 });
-
-// This callback is set when the dialog is open.
-let saveDialogResolve: ((filename: string | null) => void) | null;
-
-saveOkBtn.addEventListener('click', () => {
-    const filename = saveInput.value.trim();
-    saveDialogOverlay.style.display = 'none';
-    if (!saveDialogResolve) {
-        console.log('Save button is clicked even though the resolve is not set');
-        return;
-    }
-    saveDialogResolve(filename);
-});
-
-saveCancelBtn.addEventListener('click', () => {
-    saveDialogOverlay.style.display = 'none';
-    if (!saveDialogResolve) {
-        console.log('Save button is clicked even though the resolve is not set');
-        return;
-    }
-    saveDialogResolve(null);
-});
-
-saveInput.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'Enter') {
-        saveOkBtn.click();
-    } else if (e.key === 'Escape') {
-        saveCancelBtn.click();
-    }
-});
-
-// Unlike the file upload, the browsers are split on saving files: Chrome supports file system access API, while Safari
-// and Firefox do not and need workarounds with clicking on <a> elements. We want to support both ways of saving files.
-async function showSaveDialog(): Promise<[string | null, FileSystemFileHandle | null]> {
-    if ('showSaveFilePicker' in window) {
-        try {
-            const fileHandle = await window.showSaveFilePicker({
-                suggestedName: 'scaled.mp3',
-                types: [
-                    {
-                        description: 'Audio Files',
-                        accept: {
-                            'audio/mpeg': ['.mp3'],
-                            'audio/wav': ['.wav']
-                        }
-                    }
-                ]
-            });
-            return [fileHandle.name, fileHandle];
-        } catch (error) {
-            if ((error as Error).name === 'AbortError') {
-                return [null, null];
-            }
-            throw error;
-        }
-    } else {
-        saveDialogOverlay.style.display = 'flex';
-        saveInput.focus();
-        saveInput.select();
-        return new Promise((resolve) => {
-            saveDialogResolve = (filename) => resolve([filename, null]);
-        });
-    }
-}
-
-async function saveFile(filename: string, fileHandle: FileSystemFileHandle | null, blob: Blob) {
-    if (fileHandle) {
-        const writable = await fileHandle.createWritable();
-        await writable.write(blob);
-        await writable.close();
-        console.log(`Saved ${filename} successfully`);
-    } else {
-        const url = URL.createObjectURL(blob);
-        const element = getById<HTMLAnchorElement>('save-dialog-link');
-        element.href = url;
-        element.download = filename;
-        element.click();
-        URL.revokeObjectURL(url);
-        console.log(`Downloaded ${filename} successfully`);
-    }
-}
 
 saveBtn.addEventListener('click', async () => {
     if (!sourceData) {
@@ -330,7 +256,7 @@ saveBtn.addEventListener('click', async () => {
     }
     messageLabel.textContent = '';
     saveBtn.disabled = false;
-})
+});
 
 pitchModeRadio.addEventListener('change', () => {
     if (pitchModeRadio.checked) {

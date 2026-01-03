@@ -12,7 +12,7 @@
 </head>
 
 <body>
-    <div id="content-сontainer" style="visibility: hidden;">
+    <div id="content-container" style="visibility: hidden;">
         <h1>Pitch Changer</h1>
         <div id="big-buttons-row">
             <button id="record-btn" class="big-control-btn control-btn" title="Record"><span id="record-btn-emoji"
@@ -37,28 +37,13 @@
             </div>
         </div>
         <div id="slider-row">
-            <div id="pitch-label">1.25x</div>
+            <div id="pitch-label"></div>
             <div id="slider-container">
-                <input type="range" id="pitch-slider" min="0.5" max="2.0" step="0.125" value="1.25"
-                    list="pitch-slider-markers">
-                <datalist id="pitch-slider-markers">
-                    <option value="0.5"></option>
-                    <option value="0.625"></option>
-                    <option value="0.75"></option>
-                    <option value="0.875"></option>
-                    <option value="1.0"></option>
-                    <option value="1.125"></option>
-                    <option value="1.25"></option>
-                    <option value="1.375"></option>
-                    <option value="1.5"></option>
-                    <option value="1.625"></option>
-                    <option value="1.75"></option>
-                    <option value="1.875"></option>
-                    <option value="2.0"></option>
-                </datalist>
+                <input type="range" id="pitch-slider" list="pitch-slider-markers">
+                <datalist id="pitch-slider-markers"></datalist>
                 <div id="slider-labels">
-                    <span>0.5x</span>
-                    <span>2.0x</span>
+                    <span id="min-pitch-scale"></span>
+                    <span id="max-pitch-scale"></span>
                 </div>
             </div>
         </div>
@@ -67,7 +52,7 @@
         </div>
     </div>
 
-    <input type="file" id="file-input" accept="audio/*" style="display: none"></input>
+    <input type="file" id="file-input" accept="audio/*" style="display: none">
 
     <!-- Save filename dialog, used on non-Chrome browsers as workaround for showSaveFilePicker -->
     <div id="save-dialog-overlay" class="dialog-overlay" style="display: none;">
