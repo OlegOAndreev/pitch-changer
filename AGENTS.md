@@ -6,6 +6,6 @@
 * Do absolutely minimal changes to other CSS rules if you do any CSS modification
 * Install JavaScript/TypeScript libraries with `npm install`
 * Install C++ libraries by adding a Git submodule, unless you are using system libraries
-* When changing C++ files, run `npm run build`
-* When changing TypeScript or html/css files, run `npm run build:ts`
+* When changing C++ files, run `npm run build`, do not run any other commands
+* When changing TypeScript or html/css files, run `npm run build:ts`, do not run any other commands
 * Do not attempt opening browser for UI testing, always request the user to test the UI

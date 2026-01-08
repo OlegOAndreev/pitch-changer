@@ -110,6 +110,7 @@ h1 {
 #message-label {
     min-height: 20px;
     font-size: 13px;
+    overflow-wrap: break-word;
 }
 
 #mode-row {

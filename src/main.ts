@@ -44,11 +44,11 @@ function getAudioContext(): AudioContext {
     return globalAudioContext;
 }
 
-let globalRecorder: Recorder;
+let globalRecorder: Promise<Recorder>;
 async function getRecorder(): Promise<Recorder> {
     if (!globalRecorder) {
         try {
-            globalRecorder = await Recorder.create(getAudioContext());
+            globalRecorder = Recorder.create(getAudioContext());
         } catch (error) {
             onError('Error creating Recorder', error);
         }
