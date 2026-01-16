@@ -1,12 +1,12 @@
 import { Recorder } from './recorder';
 
-import MainModuleFactory from '../wasm/build/main-wasm-module';
+import { default as initRustModule } from '../wasm/build/wasm_main_module';
 import { encodeToBlob } from './media-encoder';
 import { Player } from './player';
 import { saveFile, showSaveDialog } from './save-dialog';
 import { getById } from './utils';
 
-await MainModuleFactory();
+await initRustModule();
 
 const MAX_PITCH_VALUE = 2.0;
 const MIN_PITCH_VALUE = 0.5;

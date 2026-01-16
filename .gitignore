@@ -1,11 +1,12 @@
 node_modules
 dist
 
+.cache
 .vscode
 .idea
 .DS_Store
 
 data
 
-.cache
-wasm/build
+wasm*/build
+wasm*/target
