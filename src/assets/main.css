@@ -130,7 +130,7 @@ h1 {
 }
 
 .radio-option input[type="radio"] {
-    accent-color: #777777;
+    /* accent-color: #777777; */
     width: 16px;
     height: 16px;
 }
@@ -156,7 +156,7 @@ h1 {
 }
 
 #pitch-slider {
-    accent-color: #777777;
+    /* accent-color: #777777; */
     width: 100%;
     color: #444444;
 }
