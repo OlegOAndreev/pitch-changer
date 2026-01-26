@@ -165,8 +165,12 @@ struct PitchShift {
     input: String,
 
     /// pitch shift factor (e.g., 2.0 = one octave up, 0.5 = one octave down)
-    #[argh(option, default = "1.5")]
-    shift: f32,
+    #[argh(option, default = "1.0")]
+    pitch_shift: f32,
+
+    /// time stretch factor (e.g., 2.0 = two times longer, 0.5 = two times shorter)
+    #[argh(option, default = "1.0")]
+    time_stretch: f32,
 
     /// pitch shifting method
     #[argh(option, default = "\"basic\".to_string()")]
@@ -201,11 +205,23 @@ fn main() -> Result<()> {
             save_wav(&sine_wave, sample_rate as u32, &output)?;
         }
 
-        Commands::PitchShift(PitchShift { input: input_path, shift, method, output, plot, overlap, fft_size }) => {
+        Commands::PitchShift(PitchShift {
+            input: input_path,
+            pitch_shift,
+            time_stretch,
+            method,
+            output,
+            plot,
+            overlap,
+            fft_size,
+        }) => {
             let input = load_wav(&input_path)?;
-            println!("Pitch shifting {}: {} Hz, shift factor: {}, method: {:?}", input_path, input.rate, shift, method);
+            println!(
+                "Pitch shifting {}: {} Hz, pitch shift: {}, time stretch: {}, method: {:?}",
+                input_path, input.rate, pitch_shift, time_stretch, method
+            );
 
-            let mut params = StretchParams::new(input.rate, shift, 1.0);
+            let mut params = StretchParams::new(input.rate, pitch_shift, time_stretch);
             if method == "basic" {
                 params.method = StretchMethod::Basic;
             } else if method == "phase-gradient" {
