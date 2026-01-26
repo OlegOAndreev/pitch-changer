@@ -38,7 +38,7 @@ pub struct StretchParams {
 impl StretchParams {
     #[wasm_bindgen(constructor)]
     pub fn new(rate: u32, pitch_shift: f32, time_stretch: f32) -> Self {
-        Self { pitch_shift, time_stretch, rate, fft_size: 2048, overlap: 4, method: StretchMethod::Basic }
+        Self { pitch_shift, time_stretch, rate, fft_size: 4096, overlap: 8, method: StretchMethod::Basic }
     }
 }
 
@@ -135,9 +135,6 @@ impl PitchShifter {
         }
         if !params.fft_size.is_multiple_of(params.overlap as usize) {
             error_and_panic!("FFT size must be divisible by overlap");
-        }
-        if params.time_stretch != 1.0 {
-            error_and_panic!("Time stretching is not supported for now");
         }
     }
 
@@ -264,6 +261,7 @@ mod tests {
     use super::*;
     use crate::util::{cross_correlation, generate_sine_wave};
     use anyhow::Result;
+    use rand::Rng;
     use realfft::RealFftPlanner;
 
     fn process_all(shifter: &mut PitchShifter, input: &[f32]) -> Vec<f32> {
@@ -397,6 +395,31 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn test_randomized_pitch_shifter_no_crash() {
+        use rand;
+
+        let mut rng = rand::rng();
+        const ITERATIONS: usize = 300;
+
+        for _ in 0..ITERATIONS {
+            let sample_rate = rng.random_range(10000..=100000);
+            let pitch_shift = rng.random_range(0.1..4.0);
+            let time_stretch = rng.random_range(0.1..4.0);
+            let fft_size = 1 << rng.random_range(9..=12); // 2^9=512, 2^12=4096
+            let mut params = StretchParams::new(sample_rate, pitch_shift, time_stretch);
+            params.fft_size = fft_size;
+            params.overlap = 1 << rng.random_range(2..=5); // 2^2=4, 2^5=32
+            params.method = if rng.random_bool(0.5) { StretchMethod::Basic } else { StretchMethod::PhaseGradient };
+
+            let len = rng.random_range(0..=4 * fft_size);
+            let audio_data: Vec<f32> = (0..len).map(|_| rng.random_range(-1.0..1.0)).collect();
+
+            let mut shifter = PitchShifter::new(&params);
+            let _output = process_all(&mut shifter, &audio_data);
+        }
     }
 
     // #[test]

@@ -177,11 +177,11 @@ struct PitchShift {
     method: String,
 
     /// overlap ratio for pitch shifting
-    #[argh(option, default = "4")]
+    #[argh(option, default = "8")]
     overlap: u32,
 
     /// FFT size for pitch shifting
-    #[argh(option, default = "2048")]
+    #[argh(option, default = "4096")]
     fft_size: usize,
 
     /// output WAV file for shifted audio
