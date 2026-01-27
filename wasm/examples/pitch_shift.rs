@@ -18,8 +18,19 @@ fn load_wav(filename: &str) -> Result<WavContents> {
         println!("Reading only first channel from {}", filename);
     }
     let mut data = vec![];
-    for s in reader.samples::<f32>().step_by(num_channels as usize) {
-        data.push(s?);
+    match reader.spec().sample_format {
+        hound::SampleFormat::Float => {
+            for s in reader.samples::<f32>().step_by(num_channels as usize) {
+                data.push(s?);
+            }
+        }
+        hound::SampleFormat::Int => {
+            if reader.spec().bits_per_sample == 16 {
+                for s in reader.samples::<i16>().step_by(num_channels as usize) {
+                    data.push(s? as f32 / 65536.0);
+                }
+            }
+        }
     }
     Ok(WavContents { data: data, rate: reader.spec().sample_rate })
 }
