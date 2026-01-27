@@ -11,3 +11,5 @@ data
 wasm*/build
 wasm*/target
 wasm*/test_output
+*.svg
+*.wav
