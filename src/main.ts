@@ -1,21 +1,12 @@
 import { Recorder } from './recorder';
 
-import { default as initRustModule, PitchShifter, StretchParams } from '../wasm/build/wasm_main_module';
+import { default as initRustModule } from '../wasm/build/wasm_main_module';
 import { encodeToBlob } from './media-encoder';
 import { Player } from './player';
 import { saveFile, showSaveDialog } from './save-dialog';
 import { getById } from './utils';
 
 await initRustModule();
-
-const shifterParams = new StretchParams(12345, 1.0, 1.0);
-const shifter = new PitchShifter(shifterParams);
-const input = new Float32Array(10);
-for (let i = 0; i < input.length; i++) {
-    input[i] = 888;
-}
-const output = shifter.process(input);
-console.log(`Output`, output);
 
 const MAX_PITCH_VALUE = 2.0;
 const MIN_PITCH_VALUE = 0.5;

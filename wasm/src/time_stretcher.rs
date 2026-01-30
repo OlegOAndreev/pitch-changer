@@ -1,0 +1,328 @@
+use wasm_bindgen::prelude::*;
+
+use crate::phase_gradient_time_stretch::PhaseGradientTimeStretch;
+use crate::stft::Stft;
+use crate::web::WrapAnyhowError;
+use crate::window::get_window_squared_sum;
+use crate::WindowType;
+use anyhow::{bail, Result};
+
+/// Parameters for audio time stretching/.
+#[derive(Debug, Clone, Copy)]
+#[wasm_bindgen]
+pub struct StretchParams {
+    /// Time stretch factor (e.g., 2.0 = twice as long, 0.5 = half length)
+    pub time_stretch: f32,
+    /// Sample rate in Hz
+    pub rate: u32,
+    /// FFT window size in samples
+    pub fft_size: usize,
+    /// Overlap factor (number of windows overlapping one point, must be power of two)
+    pub overlap: u32,
+    /// Window type to use for STFT
+    pub window_type: WindowType,
+}
+
+#[wasm_bindgen]
+impl StretchParams {
+    #[wasm_bindgen(constructor)]
+    pub fn new(rate: u32, time_stretch: f32) -> Self {
+        Self {
+            time_stretch,
+            rate,
+            fft_size: 2048,
+            overlap: 8,
+            window_type: WindowType::Hann,
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub struct TimeStretcher {
+    params: StretchParams,
+    ana_hop_size: usize,
+    syn_hop_size: usize,
+    stft: Stft,
+    phase_gradient_vocoder: PhaseGradientTimeStretch,
+
+    // Buffer management: source data is accumulated in src_buf until there is enough data to run STFT. After each STFT
+    // results are accumulated into dst_accum_buf. After that the src_buf is shifted by ana_hop_size and dst_accum_buf
+    // is shifted by syn_hop_size.
+    //
+    // Note: src_buf is not padded with zeros, so the initial part (until fft_size samples are processed) will be
+    // smoothed by windows of STFT. There is no particular good way to work around this given that syn_hop_size !=
+    // ana_hop_size. See also finish() for reverse problem: smoothing of the final part.
+    src_buf: Vec<f32>,
+    dst_accum_buf: Vec<f32>,
+}
+
+#[wasm_bindgen]
+impl TimeStretcher {
+    #[wasm_bindgen(constructor)]
+    pub fn new(params: &StretchParams) -> std::result::Result<Self, WrapAnyhowError> {
+        Self::validate_params(params).map_err(|e| WrapAnyhowError(e))?;
+
+        let ana_hop_size = params.fft_size / params.overlap as usize;
+        let syn_hop_size = (ana_hop_size as f32 * params.time_stretch) as usize;
+        let stft = Stft::new(params.fft_size, params.window_type);
+        let phase_gradient_vocoder = PhaseGradientTimeStretch::new(params.fft_size);
+        let src_buf = Vec::with_capacity(params.fft_size);
+        let dst_accum_buf = vec![0.0f32; params.fft_size];
+
+        Ok(Self { params: *params, ana_hop_size, syn_hop_size, stft, phase_gradient_vocoder, src_buf, dst_accum_buf })
+    }
+
+    fn validate_params(params: &StretchParams) -> Result<()> {
+        if params.time_stretch > params.overlap as f32 / 3.0 {
+            bail!("Time stretching factor cannot be bigger than overlap/3");
+        }
+        if params.fft_size.next_power_of_two() != params.fft_size {
+            bail!("FFT size must be power of two");
+        }
+        if params.fft_size < 512 || params.fft_size > 32768 {
+            bail!("FFT size must be in [512, 32768] range");
+        }
+        if params.overlap < 4 {
+            bail!("Overlap must be at least 4");
+        }
+        if params.overlap.next_power_of_two() != params.overlap {
+            bail!("Overlap must be power of two");
+        }
+        if !params.fft_size.is_multiple_of(params.overlap as usize) {
+            bail!("FFT size must be divisible by overlap");
+        }
+        Ok(())
+    }
+
+    /// Process a chunk of audio samples through the time stretcher.
+    ///
+    /// Note: you need to call `finish()` to receive the last output chunks after you call `process()` for all input
+    /// samples.
+    #[wasm_bindgen]
+    pub fn process(&mut self, src: &[f32]) -> Vec<f32> {
+        let result_capacity = src.len() / self.ana_hop_size * self.syn_hop_size;
+        let mut result = Vec::with_capacity(result_capacity);
+        let mut src_pos = 0;
+        while src_pos < src.len() {
+            let needed = self.params.fft_size - self.src_buf.len();
+            let available = src.len() - src_pos;
+            let n = available.min(needed);
+            self.src_buf.extend_from_slice(&src[src_pos..src_pos + n]);
+            src_pos += n;
+
+            if self.src_buf.len() == self.params.fft_size {
+                self.do_stft();
+                self.append_dst_and_shift(&mut result);
+            }
+        }
+        result
+    }
+
+    /// Finish processing any remaining audio data in the internal buffers. This method must be called after all input
+    /// has been processed via `process()`.
+    ///
+    /// Note: after calling `finish()`, the pitch shifter is reset and ready to process new audio data.
+    #[wasm_bindgen]
+    pub fn finish(&mut self) -> Vec<f32> {
+        // We want to process all data remaining in src_buf, which is done by running stft fft_size/ana_hop_size times
+        // and padding with zeros after each iteration. After that the dst accum buffer contains a bunch of residual
+        // data, which we simply append to the output. This may become noticeable if the fft size is large (e.g. for fft
+        // size 8192 and sample rate 44100 we append 180ms of audio).
+        let result_capacity =
+            (self.params.fft_size / self.ana_hop_size) * self.syn_hop_size + self.params.fft_size - self.syn_hop_size;
+        let mut result = Vec::with_capacity(result_capacity);
+
+        let iters = self.params.fft_size / self.ana_hop_size;
+        for i in 0..iters {
+            self.src_buf.resize(self.params.fft_size, 0.0);
+            self.do_stft();
+            if i == iters - 1 {
+                // After last iteration append the whole accumulator buffer.
+                result.extend_from_slice(&self.dst_accum_buf);
+            } else {
+                self.append_dst_and_shift(&mut result);
+            }
+        }
+        debug_assert_eq!(result.len(), result_capacity);
+
+        self.reset();
+        result
+    }
+
+    /// Do one iteration of stft
+    fn do_stft(&mut self) {
+        let output = self.stft.process(&self.src_buf, |ana_freq, syn_freq| {
+            // syn_freq.copy_from_slice(ana_freq);
+            self.phase_gradient_vocoder
+                .process(ana_freq, self.ana_hop_size, syn_freq, self.syn_hop_size);
+            // Ensure conjugate symmetry for real-valued inverse FFT. The first bin and last bin should have zero
+            // imaginary part. After processing, they may become non-zero (even if very small).
+            syn_freq[0].im = 0.0;
+            syn_freq[syn_freq.len() - 1].im = 0.0;
+        });
+        // Normalization factor: inverse FFT scaling (1/fft_size) * squared windows sum * time stretch factor
+        // The last factor is based on the fact that synthesis windows have different overlap contained
+        let window_norm = get_window_squared_sum(self.params.window_type, self.params.fft_size, self.ana_hop_size);
+        let norm = self.params.time_stretch / (self.params.fft_size as f32 * window_norm);
+        // let norm = 0.5 / (self.params.fft_size as f32 * window_norm);
+        for (a, o) in self.dst_accum_buf.iter_mut().zip(output) {
+            *a += *o * norm;
+        }
+    }
+
+    /// Append next part of dst accum buf to result and shift the buffers.
+    fn append_dst_and_shift(&mut self, result: &mut Vec<f32>) {
+        result.extend_from_slice(&self.dst_accum_buf[..self.syn_hop_size]);
+        self.dst_accum_buf.drain(0..self.syn_hop_size);
+        self.dst_accum_buf.resize(self.params.fft_size, 0.0);
+        self.src_buf.drain(0..self.ana_hop_size);
+    }
+
+    /// Reset the pitch shifter to its initial state.
+    #[wasm_bindgen]
+    pub fn reset(&mut self) {
+        self.phase_gradient_vocoder.reset();
+        self.src_buf.clear();
+        self.dst_accum_buf.fill(0.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::generate_sine_wave;
+
+    use super::*;
+    use rand::Rng;
+    use realfft::RealFftPlanner;
+
+    fn process_all(stretcher: &mut TimeStretcher, input: &[f32]) -> Vec<f32> {
+        let mut result = stretcher.process(input);
+        result.append(&mut stretcher.finish());
+        result
+    }
+
+    #[test]
+    fn test_randomized_pitch_stretcher_no_crash() {
+        use rand;
+
+        let mut rng = rand::rng();
+        const ITERATIONS: usize = 100;
+
+        for _ in 0..ITERATIONS {
+            let sample_rate = rng.random_range(10000..=100000);
+            let time_stretch = rng.random_range(0.1..1.2);
+            let fft_size = 1 << rng.random_range(9..=12); // 2^9=512, 2^12=4096
+            let mut params = StretchParams::new(sample_rate, time_stretch);
+            params.fft_size = fft_size;
+            params.overlap = 1 << rng.random_range(2..=5); // 2^2=4, 2^5=32
+
+            let len = rng.random_range(0..=4 * fft_size);
+            let audio_data: Vec<f32> = (0..len).map(|_| rng.random_range(-1.0..1.0)).collect();
+
+            let mut stretcher = TimeStretcher::new(&params).unwrap();
+            let _output = process_all(&mut stretcher, &audio_data);
+        }
+    }
+
+    fn compute_dominant_frequency(signal: &[f32], sample_rate: f32) -> f32 {
+        let n = signal.len();
+
+        let fft_size = n.next_power_of_two();
+        let mut planner = RealFftPlanner::<f32>::new();
+        let r2c = planner.plan_fft_forward(fft_size);
+
+        let mut input = vec![0.0; fft_size];
+        input[..n].copy_from_slice(signal);
+        let mut freq = r2c.make_output_vec();
+        r2c.process(&mut input, &mut freq).unwrap();
+
+        let mut max_magn = 0.0;
+        let mut max_bin = 0;
+        for i in 0..freq.len() {
+            let mag = freq[i].norm();
+            if mag > max_magn {
+                max_magn = mag;
+                max_bin = i;
+            }
+        }
+        max_bin as f32 * sample_rate / fft_size as f32
+    }
+
+    fn compute_magnitude(signal: &[f32]) -> f32 {
+        let mut input = Vec::from(signal);
+        input.sort_by(|a, b| a.total_cmp(b));
+        // Remove 5 bottom and top values and compute the difference between remaining min and max.
+        (input[input.len() - 6] - input[5]) * 0.5
+    }
+
+    #[test]
+    fn test_time_stretch_single_sine_wave() -> Result<()> {
+        const DURATION: f32 = 0.5;
+        const MAGNITUDE: f32 = 3.2;
+
+        for sample_rate in [44100.0, 96000.0] {
+            for input_freq in [200.0, 500.0, 800.0, 5000.0] {
+                for fft_size in [1024, 4096] {
+                    for overlap in [8, 16] {
+                        for window_type in [WindowType::Hann, WindowType::SqrtBlackman, WindowType::SqrtHann] {
+                            for time_stretch in [0.5, 0.75, 1.0, 1.25, 1.5, 2.0] {
+                                let input = generate_sine_wave(input_freq, sample_rate, MAGNITUDE, DURATION);
+
+                                let mut params = StretchParams::new(sample_rate as u32, time_stretch);
+                                params.fft_size = fft_size;
+                                params.overlap = overlap;
+                                let mut stretcher = TimeStretcher::new(&params).unwrap();
+                                let output = process_all(&mut stretcher, &input);
+
+                                let expected_freq = input_freq;
+                                let output_freq = compute_dominant_frequency(&output, sample_rate);
+                                let output_magn = compute_magnitude(&output);
+
+                                let bin_width = sample_rate as f32 / params.fft_size as f32;
+                                let tolerance = bin_width * 2.0;
+                                println!(
+                                    "Sample rate {}, fft size {}, overlap {}, window {:?}, stretch {}, input {} Hz, output {} Hz, expected {} Hz, magnitude {}",
+                                    sample_rate,
+                                    fft_size,
+                                    overlap,
+                                    window_type,
+                                    time_stretch,
+                                    input_freq,
+                                    output_freq,
+                                    expected_freq,
+                                    output_magn
+                                );
+                                assert!(
+                                    (output_freq - expected_freq).abs() < tolerance,
+                                    "expected {} Hz, got {} Hz for sample rate {}, fft size {}, overlap {}, window {:?}, stretch {}, input {} Hz",
+                                    expected_freq,
+                                    output_freq,
+                                    sample_rate,
+                                    fft_size,
+                                    overlap,
+                                    window_type,
+                                    time_stretch,
+                                    input_freq,
+                                );
+                                assert!(
+                                    (output_magn - MAGNITUDE).abs() < MAGNITUDE * 0.1,
+                                    "expected magnitude {}, got {} for sample rate {}, fft size {}, overlap {}, window {:?}, stretch {}, input {} Hz",
+                                    MAGNITUDE,
+                                    output_magn,
+                                    sample_rate,
+                                    fft_size,
+                                    overlap,
+                                    window_type,
+                                    time_stretch,
+                                    input_freq,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}

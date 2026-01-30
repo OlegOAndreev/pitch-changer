@@ -4,8 +4,8 @@ use realfft::num_complex::Complex;
 
 use crate::util::normalize_phase;
 
-/// Basic vocoder
-pub struct BasicVocoder {
+/// Basic vocoder pitch shifting
+pub struct BasicVocoderPitchShift {
     num_bins: usize,
 
     prev_ana_phases: Vec<f32>,
@@ -17,7 +17,7 @@ pub struct BasicVocoder {
     max_magnitudes: Vec<f32>,
 }
 
-impl BasicVocoder {
+impl BasicVocoderPitchShift {
     pub fn new(fft_size: usize) -> Self {
         let num_bins = fft_size / 2 + 1;
         let prev_ana_phases = vec![0.0; num_bins];

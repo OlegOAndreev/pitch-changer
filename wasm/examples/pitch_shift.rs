@@ -1,10 +1,19 @@
-use anyhow::{Result, bail};
+use anyhow::{bail, Context, Result};
 use argh::FromArgs;
 use hound::{WavReader, WavSpec, WavWriter};
 use plotters::prelude::*;
 use realfft::RealFftPlanner;
 
-use wasm_main_module::{PitchShifter, StretchMethod, StretchParams, generate_sine_wave};
+use wasm_main_module::{generate_sine_wave, StretchParams, TimeStretcher, WindowType};
+
+fn parse_window_type(s: &str) -> Result<WindowType> {
+    match s.to_lowercase().as_str() {
+        "hann" => Ok(WindowType::Hann),
+        "sqrt-hann" => Ok(WindowType::SqrtHann),
+        "sqrt-blackman" => Ok(WindowType::SqrtBlackman),
+        _ => bail!("Unknown window type '{}'. Supported: hann, sqrt-hann, sqrt-blackman", s),
+    }
+}
 
 struct WavContents {
     data: Vec<f32>,
@@ -48,57 +57,101 @@ fn save_wav(data: &[f32], sample_rate: u32, filename: &str) -> Result<()> {
 }
 
 fn save_plot_data_svg(input: &[f32], output: &[f32], sample_rate: u32, filename: &str) -> Result<()> {
-    const INTERVAL1: (f32, f32) = (0.0, 0.025);
-    const INTERVAL2: (f32, f32) = (0.2, 0.225);
+    const INTERVAL_LENGTH: f32 = 0.05;
 
-    let max_sample = input.len().min(output.len());
-    let from_sample1 = ((sample_rate as f32 * INTERVAL1.0) as usize).min(max_sample);
-    let to_sample1 = ((sample_rate as f32 * INTERVAL1.1) as usize).min(max_sample);
-    let from_sample2 = ((sample_rate as f32 * INTERVAL2.0) as usize).min(max_sample);
-    let to_sample2 = ((sample_rate as f32 * INTERVAL2.1) as usize).min(max_sample);
+    let min_length = input.len().min(output.len());
+    let min_duration = min_length as f32 / sample_rate as f32;
+    let output_length = output.len() as f32 / sample_rate as f32;
 
-    let root = SVGBackend::new(filename, (1200, 1200)).into_drawing_area();
+    let interval1_start = 0.0;
+    let interval1_end = interval1_start + INTERVAL_LENGTH;
+    let interval2_start = min_duration * 0.5;
+    let interval2_end = interval2_start + INTERVAL_LENGTH;
+    let interval3_start = output_length - INTERVAL_LENGTH * 2.0;
+    let interval3_end = output_length - INTERVAL_LENGTH;
+
+    let from_sample1 = (sample_rate as f32 * interval1_start) as usize;
+    let to_sample1 = (sample_rate as f32 * interval1_end) as usize;
+    let from_sample2 = (sample_rate as f32 * interval2_start) as usize;
+    let to_sample2 = (sample_rate as f32 * interval2_end) as usize;
+    let from_sample3 = (sample_rate as f32 * interval3_start) as usize;
+    let to_sample3 = (sample_rate as f32 * interval3_end) as usize;
+
+    let root = SVGBackend::new(filename, (1200, 1800)).into_drawing_area();
     root.fill(&WHITE)?;
-    let (top_area, bottom_area) = root.split_vertically(600);
+    let (top_area, rest_area) = root.split_vertically(600);
+    let (middle_area, bottom_area) = rest_area.split_vertically(600);
 
     let mut top_chart = ChartBuilder::on(&top_area)
-        .caption(format!("{}-{} s", INTERVAL1.0, INTERVAL1.1), ("sans-serif", 40))
+        .caption(format!("Beginning: {:.3}-{:.3} s", interval1_start, interval1_end), ("sans-serif", 40))
         .margin(40)
         .x_label_area_size(40)
         .y_label_area_size(60)
-        .build_cartesian_2d(INTERVAL1.0..INTERVAL1.1, -1.2f32..1.2f32)?;
+        .build_cartesian_2d(interval1_start..interval1_end, -1.2f32..1.2f32)?;
     top_chart.configure_mesh().label_style(("sans-serif", 25)).draw()?;
     top_chart
         .draw_series(LineSeries::new(
-            (from_sample1..to_sample1).into_iter().map(|i| (i as f32 / sample_rate as f32, input[i])),
+            (from_sample1..to_sample1)
+                .into_iter()
+                .map(|i| (i as f32 / sample_rate as f32, *input.get(i).unwrap_or(&0.0))),
             &BLUE,
         ))?
         .label("Input");
     top_chart
         .draw_series(LineSeries::new(
-            (from_sample1..to_sample1).into_iter().map(|i| (i as f32 / sample_rate as f32, output[i])),
+            (from_sample1..to_sample1)
+                .into_iter()
+                .map(|i| (i as f32 / sample_rate as f32, *output.get(i).unwrap_or(&0.0))),
             &RED,
         ))?
         .label("Output");
 
-    // Create second plot (bottom) for interval 2
-    let mut bottom_chart = ChartBuilder::on(&bottom_area)
-        .caption(format!("{}-{} s", INTERVAL2.0, INTERVAL2.1), ("sans-serif", 40))
+    let mut middle_chart = ChartBuilder::on(&middle_area)
+        .caption(format!("Middle: {:.3}-{:.3} s", interval2_start, interval2_end), ("sans-serif", 40))
         .margin(40)
         .x_label_area_size(40)
         .y_label_area_size(60)
-        .build_cartesian_2d(INTERVAL2.0..INTERVAL2.1, -1.2f32..1.2f32)?;
+        .build_cartesian_2d(interval2_start..interval2_end, -1.2f32..1.2f32)?;
+
+    middle_chart.configure_mesh().label_style(("sans-serif", 25)).draw()?;
+    middle_chart
+        .draw_series(LineSeries::new(
+            (from_sample2..to_sample2)
+                .into_iter()
+                .map(|i| (i as f32 / sample_rate as f32, *input.get(i).unwrap_or(&0.0))),
+            &BLUE,
+        ))?
+        .label("Input");
+    middle_chart
+        .draw_series(LineSeries::new(
+            (from_sample2..to_sample2)
+                .into_iter()
+                .map(|i| (i as f32 / sample_rate as f32, *output.get(i).unwrap_or(&0.0))),
+            &RED,
+        ))?
+        .label("Output");
+
+    let mut bottom_chart = ChartBuilder::on(&bottom_area)
+        .caption(format!("End: {:.3}-{:.3} s", interval3_start, interval3_end), ("sans-serif", 40))
+        .margin(40)
+        .x_label_area_size(40)
+        .y_label_area_size(60)
+        .build_cartesian_2d(interval3_start..interval3_end, -1.2f32..1.2f32)?;
 
     bottom_chart.configure_mesh().label_style(("sans-serif", 25)).draw()?;
     bottom_chart
         .draw_series(LineSeries::new(
-            (from_sample2..to_sample2).into_iter().map(|i| (i as f32 / sample_rate as f32, input[i])),
+            (from_sample3..to_sample3)
+                .into_iter()
+                .map(|i| (i as f32 / sample_rate as f32, *input.get(i).unwrap_or(&0.0))),
             &BLUE,
         ))?
         .label("Input");
     bottom_chart
         .draw_series(LineSeries::new(
-            (from_sample2..to_sample2).into_iter().map(|i| (i as f32 / sample_rate as f32, output[i])),
+            (from_sample3..to_sample3)
+                .into_iter()
+                .map(|i| (i as f32 / sample_rate as f32, *output.get(i).unwrap_or(&0.0))),
             &RED,
         ))?
         .label("Output");
@@ -143,7 +196,7 @@ struct Cli {
 #[argh(subcommand)]
 enum Commands {
     Generate(Generate),
-    PitchShift(PitchShift),
+    TimeStretch(TimeStretch),
 }
 
 /// Generate a sine wave and save it as WAV
@@ -167,36 +220,32 @@ struct Generate {
     output: String,
 }
 
-/// Apply pitch shift to a sine wave
+/// Apply time stretch to input
 #[derive(FromArgs)]
-#[argh(subcommand, name = "pitch-shift")]
-struct PitchShift {
+#[argh(subcommand, name = "time-stretch")]
+struct TimeStretch {
     /// input WAV file
     #[argh(option, default = "\"sine_wave.wav\".to_string()")]
     input: String,
 
-    /// pitch shift factor (e.g., 2.0 = one octave up, 0.5 = one octave down)
+    /// time stretch factor (e.g., 2.0 = one octave up, 0.5 = one octave down)
     #[argh(option, default = "1.0")]
-    pitch_shift: f32,
+    stretch: f32,
 
-    /// time stretch factor (e.g., 2.0 = two times longer, 0.5 = two times shorter)
-    #[argh(option, default = "1.0")]
-    time_stretch: f32,
-
-    /// pitch shifting method
-    #[argh(option, default = "\"basic\".to_string()")]
-    method: String,
-
-    /// overlap ratio for pitch shifting
+    /// overlap ratio
     #[argh(option, default = "8")]
     overlap: u32,
 
-    /// FFT size for pitch shifting
+    /// FFT size
     #[argh(option, default = "4096")]
     fft_size: usize,
 
-    /// output WAV file for shifted audio
-    #[argh(option, default = "\"shifted.wav\".to_string()")]
+    /// window type: "hann", "sqrt-hann", or "sqrt-blackman"
+    #[argh(option, default = "\"hann\".to_string()")]
+    window: String,
+
+    /// output WAV file for stretched audio
+    #[argh(option, default = "\"stretched.wav\".to_string()")]
     output: String,
 
     /// save plot comparison SVG
@@ -210,46 +259,38 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Generate(Generate { frequency, sample_rate, duration, output }) => {
             println!("Generating sine wave: {} Hz, {} samples/sec, {} seconds", frequency, sample_rate, duration);
-            let sine_wave = generate_sine_wave(frequency, sample_rate, duration);
+            let sine_wave = generate_sine_wave(frequency, sample_rate, 1.0, duration);
             println!("Generated {} samples", sine_wave.len());
 
             save_wav(&sine_wave, sample_rate as u32, &output)?;
         }
 
-        Commands::PitchShift(PitchShift {
+        Commands::TimeStretch(TimeStretch {
             input: input_path,
-            pitch_shift,
-            time_stretch,
-            method,
-            output,
+            stretch,
+            output: output_path,
             plot,
             overlap,
             fft_size,
+            window,
         }) => {
-            let input = load_wav(&input_path)?;
-            println!(
-                "Pitch shifting {}: {} Hz, pitch shift: {}, time stretch: {}, method: {:?}",
-                input_path, input.rate, pitch_shift, time_stretch, method
-            );
+            let input = load_wav(&input_path).with_context(|| format!("loading {} failed", input_path))?;
+            println!("Time stretching {}: {} Hz, stretch: {}", input_path, input.rate, stretch);
 
-            let mut params = StretchParams::new(input.rate, pitch_shift, time_stretch);
-            if method == "basic" {
-                params.method = StretchMethod::Basic;
-            } else if method == "phase-gradient" {
-                params.method = StretchMethod::PhaseGradient;
-            } else {
-                bail!("Unknown method {}", method);
-            }
+            let window_type = parse_window_type(&window)?;
+            let mut params = StretchParams::new(input.rate, stretch);
             params.overlap = overlap;
             params.fft_size = fft_size;
-            let mut shifter = PitchShifter::new(&params);
+            params.window_type = window_type;
+            let mut shifter = TimeStretcher::new(&params)?;
 
             // Process all input
             let mut output_data = shifter.process(&input.data);
             output_data.append(&mut shifter.finish());
             println!("Output generated: {} samples", output_data.len());
 
-            save_wav(&output_data, input.rate, &output)?;
+            save_wav(&output_data, input.rate, &output_path)
+                .with_context(|| format!("saving {} failed", output_path))?;
 
             let input_freq = compute_dominant_frequency(&input.data, input.rate)?;
             println!("Input dominant frequency: {:.2} Hz", input_freq);
@@ -257,8 +298,9 @@ fn main() -> Result<()> {
             println!("Output dominant frequency: {:.2} Hz", output_freq);
 
             if plot {
-                let plot_filename = output.replace(".wav", "_plot.svg");
-                save_plot_data_svg(&input.data, &output_data, input.rate, &plot_filename)?;
+                let plot_filename = output_path.replace(".wav", "_plot.svg");
+                save_plot_data_svg(&input.data, &output_data, input.rate, &plot_filename)
+                    .with_context(|| format!("saving plot {} failed", plot_filename))?;
             }
         }
     }

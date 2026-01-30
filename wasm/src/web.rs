@@ -1,3 +1,6 @@
+use std::error::Error;
+use std::fmt::Display;
+
 use wasm_bindgen::prelude::*;
 
 // Copy-pasted from https://wasm-bindgen.github.io/wasm-bindgen/examples/console-log.html
@@ -44,6 +47,37 @@ macro_rules! error_and_panic {
 pub(crate) use console_log;
 #[allow(unused)]
 pub(crate) use error_and_panic;
+
+/// WrapAnyhowError is a wrapper for anyhow Error which supports Into<JsError> (goddamn orphan rules).
+#[derive(Debug)]
+pub struct WrapAnyhowError(pub anyhow::Error);
+
+impl Display for WrapAnyhowError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl Error for WrapAnyhowError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.0.source()
+    }
+
+    fn description(&self) -> &str {
+        "description is deprecated"
+    }
+
+    fn cause(&self) -> Option<&dyn Error> {
+        // Cause is deprecated
+        None
+    }
+}
+
+impl Into<JsValue> for WrapAnyhowError {
+    fn into(self) -> JsValue {
+        JsValue::from_str(&format!("{:?}", self.0))
+    }
+}
 
 #[wasm_bindgen]
 pub fn get_settings() -> String {

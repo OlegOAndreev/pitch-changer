@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "test": "npm run test:ts && npm run test:wasm",
     "test:ts": "true",
-    "test:wasm": "cd wasm && cargo test",
+    "test:wasm": "cd wasm && cargo test --release",
     "clippy": "cd wasm && cargo clippy"
   },
   "dependencies": {
