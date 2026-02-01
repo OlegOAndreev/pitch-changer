@@ -47,6 +47,7 @@ export async function showSaveDialog(): Promise<[string | null, FileSystemFileHa
                         description: 'Audio Files',
                         accept: {
                             'audio/mpeg': ['.mp3'],
+                            'audio/ogg': ['.ogg'],
                             'audio/wav': ['.wav']
                         }
                     }

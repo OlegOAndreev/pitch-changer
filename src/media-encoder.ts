@@ -4,6 +4,7 @@ import {
     BufferTarget,
     canEncodeAudio,
     Mp3OutputFormat,
+    OggOutputFormat,
     Output,
     OutputFormat,
     QUALITY_HIGH,
@@ -23,6 +24,9 @@ export async function encodeToBlob(fileType: string, data: Float32Array, sampleR
     if (fileType === 'mp3') {
         encodedData = await encodeToData(data, new Mp3OutputFormat(), 'mp3', sampleRate);
         mimeType = 'audio/mpeg';
+    } else if (fileType === 'ogg') {
+        encodedData = await encodeToData(data, new OggOutputFormat(), 'vorbis', sampleRate);
+        mimeType = 'audio/ogg';
     } else if (fileType === 'wav') {
         encodedData = await encodeToData(data, new WavOutputFormat(), 'pcm-f32', sampleRate);
         mimeType = 'audio/wav';
