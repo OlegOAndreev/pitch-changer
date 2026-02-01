@@ -5,7 +5,7 @@ mod util;
 mod web;
 mod window;
 
-pub use time_stretcher::{StretchParams, TimeStretcher};
+pub use time_stretcher::{TimeStretchParams, TimeStretcher};
 pub use util::generate_sine_wave;
 pub use window::WindowType;
 

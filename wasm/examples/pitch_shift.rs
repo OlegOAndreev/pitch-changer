@@ -7,7 +7,7 @@ use hound::{WavSpec, WavWriter};
 use plotters::prelude::*;
 use realfft::RealFftPlanner;
 
-use wasm_main_module::{StretchParams, TimeStretcher, WindowType, generate_sine_wave};
+use wasm_main_module::{TimeStretchParams, TimeStretcher, WindowType, generate_sine_wave};
 
 fn parse_window_type(s: &str) -> Result<WindowType> {
     match s.to_lowercase().as_str() {
@@ -347,7 +347,7 @@ fn main() -> Result<()> {
             println!("Time stretching {}: {} Hz, stretch: {}", input_path, input.sample_rate, stretch);
 
             let window_type = parse_window_type(&window)?;
-            let mut params = StretchParams::new(input.sample_rate, stretch);
+            let mut params = TimeStretchParams::new(input.sample_rate, stretch);
             params.overlap = overlap;
             params.fft_size = fft_size;
             params.window_type = window_type;

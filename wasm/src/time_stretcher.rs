@@ -10,7 +10,7 @@ use anyhow::{bail, Result};
 /// Parameters for audio time stretching/.
 #[derive(Debug, Clone, Copy)]
 #[wasm_bindgen]
-pub struct StretchParams {
+pub struct TimeStretchParams {
     /// Time stretch factor (e.g., 2.0 = twice as long, 0.5 = half length)
     pub time_stretch: f32,
     /// Sample rate in Hz
@@ -24,7 +24,7 @@ pub struct StretchParams {
 }
 
 #[wasm_bindgen]
-impl StretchParams {
+impl TimeStretchParams {
     #[wasm_bindgen(constructor)]
     pub fn new(rate: u32, time_stretch: f32) -> Self {
         Self {
@@ -39,7 +39,7 @@ impl StretchParams {
 
 #[wasm_bindgen]
 pub struct TimeStretcher {
-    params: StretchParams,
+    params: TimeStretchParams,
     ana_hop_size: usize,
     syn_hop_size: usize,
     stft: Stft,
@@ -59,7 +59,7 @@ pub struct TimeStretcher {
 #[wasm_bindgen]
 impl TimeStretcher {
     #[wasm_bindgen(constructor)]
-    pub fn new(params: &StretchParams) -> std::result::Result<Self, WrapAnyhowError> {
+    pub fn new(params: &TimeStretchParams) -> std::result::Result<Self, WrapAnyhowError> {
         Self::validate_params(params).map_err(|e| WrapAnyhowError(e))?;
 
         let ana_hop_size = params.fft_size / params.overlap as usize;
@@ -72,7 +72,7 @@ impl TimeStretcher {
         Ok(Self { params: *params, ana_hop_size, syn_hop_size, stft, phase_gradient_vocoder, src_buf, dst_accum_buf })
     }
 
-    fn validate_params(params: &StretchParams) -> Result<()> {
+    fn validate_params(params: &TimeStretchParams) -> Result<()> {
         if params.time_stretch > params.overlap as f32 / 3.0 {
             bail!("Time stretching factor cannot be bigger than overlap/3");
         }
@@ -212,7 +212,7 @@ mod tests {
             let sample_rate = rng.random_range(10000..=100000);
             let time_stretch = rng.random_range(0.1..1.2);
             let fft_size = 1 << rng.random_range(9..=12); // 2^9=512, 2^12=4096
-            let mut params = StretchParams::new(sample_rate, time_stretch);
+            let mut params = TimeStretchParams::new(sample_rate, time_stretch);
             params.fft_size = fft_size;
             params.overlap = 1 << rng.random_range(2..=5); // 2^2=4, 2^5=32
 
@@ -268,7 +268,7 @@ mod tests {
                             for time_stretch in [0.5, 0.75, 1.0, 1.25, 1.5, 2.0] {
                                 let input = generate_sine_wave(input_freq, sample_rate, MAGNITUDE, DURATION);
 
-                                let mut params = StretchParams::new(sample_rate as u32, time_stretch);
+                                let mut params = TimeStretchParams::new(sample_rate as u32, time_stretch);
                                 params.fft_size = fft_size;
                                 params.overlap = overlap;
                                 let mut stretcher = TimeStretcher::new(&params).unwrap();
