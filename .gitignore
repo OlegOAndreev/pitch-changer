@@ -13,3 +13,5 @@ wasm*/target
 wasm*/test_output
 *.svg
 *.wav
+*.mp3
+*.mp4

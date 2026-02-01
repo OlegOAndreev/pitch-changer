@@ -1,10 +1,13 @@
-use anyhow::{bail, Context, Result};
+use std::fs::File;
+use std::time::Instant;
+
+use anyhow::{Context, Result, bail};
 use argh::FromArgs;
-use hound::{WavReader, WavSpec, WavWriter};
+use hound::{WavSpec, WavWriter};
 use plotters::prelude::*;
 use realfft::RealFftPlanner;
 
-use wasm_main_module::{generate_sine_wave, StretchParams, TimeStretcher, WindowType};
+use wasm_main_module::{StretchParams, TimeStretcher, WindowType, generate_sine_wave};
 
 fn parse_window_type(s: &str) -> Result<WindowType> {
     match s.to_lowercase().as_str() {
@@ -15,33 +18,96 @@ fn parse_window_type(s: &str) -> Result<WindowType> {
     }
 }
 
-struct WavContents {
+struct AudioContents {
     data: Vec<f32>,
-    rate: u32,
+    sample_rate: u32,
 }
 
-fn load_wav(filename: &str) -> Result<WavContents> {
-    let mut reader = WavReader::open(filename)?;
-    let num_channels = reader.spec().channels;
-    if num_channels != 1 {
-        println!("Reading only first channel from {}", filename);
-    }
-    let mut data = vec![];
-    match reader.spec().sample_format {
-        hound::SampleFormat::Float => {
-            for s in reader.samples::<f32>().step_by(num_channels as usize) {
-                data.push(s?);
-            }
+fn load_file(filename: &str) -> Result<AudioContents> {
+    use symphonia::core::audio::Signal as _;
+
+    let file = File::open(filename)?;
+    let mss = symphonia::core::io::MediaSourceStream::new(
+        Box::new(file),
+        symphonia::core::io::MediaSourceStreamOptions::default(),
+    );
+    let probed = symphonia::default::get_probe()
+        .format(
+            &symphonia::core::probe::Hint::new(),
+            mss,
+            &symphonia::core::formats::FormatOptions::default(),
+            &symphonia::core::meta::MetadataOptions::default(),
+        )
+        .context("unsupported format")?;
+    let mut format = probed.format;
+    let track = format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
+        .context("no supported audio tracks")?;
+    println!("Decoding {} as {:?},", filename, track.codec_params.codec);
+
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&track.codec_params, &symphonia::core::codecs::DecoderOptions::default())
+        .context("unsupported codec")?;
+
+    let mut data = Vec::new();
+    let mut sample_rate = 0;
+
+    while let Ok(packet) = format.next_packet() {
+        let decoded = decoder.decode(&packet).context("failed decoding")?;
+        if sample_rate == 0 {
+            sample_rate = decoded.spec().rate;
+        } else if sample_rate != decoded.spec().rate {
+            bail!("File contains multiple sample rates in one track: {} vs {}", sample_rate, decoded.spec().rate);
         }
-        hound::SampleFormat::Int => {
-            if reader.spec().bits_per_sample == 16 {
-                for s in reader.samples::<i16>().step_by(num_channels as usize) {
-                    data.push(s? as f32 / 65536.0);
+
+        let channels = decoded.spec().channels.count();
+        let frames = decoded.frames();
+
+        match decoded {
+            symphonia::core::audio::AudioBufferRef::F32(buf) => {
+                if channels == 1 {
+                    data.extend_from_slice(buf.chan(0));
+                } else {
+                    for i in 0..frames {
+                        let mut sum = 0.0;
+                        for ch in 0..channels {
+                            sum += buf.chan(ch)[i];
+                        }
+                        data.push(sum / channels as f32);
+                    }
                 }
             }
+            symphonia::core::audio::AudioBufferRef::S16(buf) => {
+                if channels == 1 {
+                    let ch = buf.chan(0);
+                    for i in 0..frames {
+                        data.push(ch[i] as f32 / 32768.0);
+                    }
+                } else {
+                    for i in 0..frames {
+                        let mut sum = 0.0;
+                        for ch in 0..channels {
+                            sum += buf.chan(ch)[i] as f32 / 32768.0;
+                        }
+                        data.push(sum / channels as f32);
+                    }
+                }
+            }
+            _ => {
+                bail!("Only f32 an s16 audio is supported");
+            }
         }
     }
-    Ok(WavContents { data: data, rate: reader.spec().sample_rate })
+
+    if data.is_empty() {
+        bail!("No audio data found in file");
+    }
+
+    println!("Loaded {}: {} samples at {} Hz", filename, data.len(), sample_rate);
+
+    Ok(AudioContents { data, sample_rate })
 }
 
 fn save_wav(data: &[f32], sample_rate: u32, filename: &str) -> Result<()> {
@@ -274,32 +340,39 @@ fn main() -> Result<()> {
             fft_size,
             window,
         }) => {
-            let input = load_wav(&input_path).with_context(|| format!("loading {} failed", input_path))?;
-            println!("Time stretching {}: {} Hz, stretch: {}", input_path, input.rate, stretch);
+            let mut start_time = Instant::now();
+            let input = load_file(&input_path).with_context(|| format!("loading {} failed", input_path))?;
+            println!("Loading {} took {}ms", input_path, Instant::now().duration_since(start_time).as_millis());
+
+            println!("Time stretching {}: {} Hz, stretch: {}", input_path, input.sample_rate, stretch);
 
             let window_type = parse_window_type(&window)?;
-            let mut params = StretchParams::new(input.rate, stretch);
+            let mut params = StretchParams::new(input.sample_rate, stretch);
             params.overlap = overlap;
             params.fft_size = fft_size;
             params.window_type = window_type;
             let mut shifter = TimeStretcher::new(&params)?;
 
-            // Process all input
+            start_time = Instant::now();
             let mut output_data = shifter.process(&input.data);
             output_data.append(&mut shifter.finish());
-            println!("Output generated: {} samples", output_data.len());
+            println!(
+                "Output generated: {} samples in {}ms",
+                output_data.len(),
+                Instant::now().duration_since(start_time).as_millis()
+            );
 
-            save_wav(&output_data, input.rate, &output_path)
+            save_wav(&output_data, input.sample_rate, &output_path)
                 .with_context(|| format!("saving {} failed", output_path))?;
 
-            let input_freq = compute_dominant_frequency(&input.data, input.rate)?;
+            let input_freq = compute_dominant_frequency(&input.data, input.sample_rate)?;
             println!("Input dominant frequency: {:.2} Hz", input_freq);
-            let output_freq = compute_dominant_frequency(&output_data, input.rate)?;
+            let output_freq = compute_dominant_frequency(&output_data, input.sample_rate)?;
             println!("Output dominant frequency: {:.2} Hz", output_freq);
 
             if plot {
                 let plot_filename = output_path.replace(".wav", "_plot.svg");
-                save_plot_data_svg(&input.data, &output_data, input.rate, &plot_filename)
+                save_plot_data_svg(&input.data, &output_data, input.sample_rate, &plot_filename)
                     .with_context(|| format!("saving plot {} failed", plot_filename))?;
             }
         }

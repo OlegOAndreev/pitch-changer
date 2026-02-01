@@ -20,6 +20,7 @@ argh = "0.1"
 hound = "3.5.0"
 plotters = { version = "0.3", default-features = false, features = ["line_series", "svg_backend"] }
 rand = "0.9"
+symphonia = { version = "0.5", features = ["aac", "isomp4", "mp3"] }
 
 [profile.release]
 debug = true
