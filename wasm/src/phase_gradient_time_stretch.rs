@@ -7,8 +7,6 @@ use realfft::num_complex::Complex;
 struct HeapElem {
     pub bin: usize,
     pub magnitude: f32,
-    // True if the element is from the previous STFT frame, false if from the current frame.
-    pub from_prev: bool,
 }
 
 impl Eq for HeapElem {}
@@ -41,6 +39,11 @@ pub struct PhaseGradientTimeStretch {
     magnitudes: Vec<f32>,
     ana_phases: Vec<f32>,
     syn_phases: Vec<f32>,
+    // Unlike the original paper, we split the max-heap into two heaps, where the first heap is simply a sorted vector
+    // of previous magnitudes. Heap operations take ~50% of all time in PitchShifter and we try to optimize them as much
+    // as we can. By segregating the HeapElem from prev stft frame and current stft frame, we reduce the BinaryHeap
+    // size and can use sort, which is faster than a bunch of push/pop operations.
+    prev_max_heap: Vec<HeapElem>,
     max_heap: BinaryHeap<HeapElem>,
     // If true, syn_phases is assigned.
     phase_assigned: Vec<bool>,
@@ -58,6 +61,7 @@ impl PhaseGradientTimeStretch {
         let magnitudes = vec![0.0; num_bins];
         let ana_phases = vec![0.0; num_bins];
         let syn_phases = vec![0.0; num_bins];
+        let prev_max_heap = Vec::with_capacity(num_bins);
         let max_heap = BinaryHeap::with_capacity(num_bins);
         let phase_assigned = vec![false; num_bins];
 
@@ -70,6 +74,7 @@ impl PhaseGradientTimeStretch {
             magnitudes,
             ana_phases,
             syn_phases,
+            prev_max_heap,
             max_heap,
             phase_assigned,
         }
@@ -103,6 +108,7 @@ impl PhaseGradientTimeStretch {
         }
         let min_magn = max_magn * MIN_MAGNITUDE_TOLERANCE;
 
+        self.prev_max_heap.clear();
         self.max_heap.clear();
         self.syn_phases.fill(0.0);
         self.phase_assigned.fill(false);
@@ -116,8 +122,7 @@ impl PhaseGradientTimeStretch {
                 self.ana_phases[k] = ana_freq[k].arg();
                 self.phase_assigned[k] = false;
                 num_unassigned += 1;
-                self.max_heap
-                    .push(HeapElem { bin: k, magnitude: self.prev_magnitudes[k], from_prev: true });
+                self.prev_max_heap.push(HeapElem { bin: k, magnitude: self.prev_magnitudes[k] });
             } else {
                 // The original paper assigns random values to frequencies below the min magnitude, but we simply zero
                 // them out.
@@ -126,15 +131,12 @@ impl PhaseGradientTimeStretch {
                 self.phase_assigned[k] = true;
             }
         }
+        self.prev_max_heap.sort_unstable();
 
         // Phase assignment algorithm
         while num_unassigned > 0 {
-            // Minor optimization: 
-            let top_elem = self.max_heap.pop().unwrap_or_else(|| {
-                panic!("INTERNAL ERROR: no more elements remaining in the heap, {} still unassigned", num_unassigned)
-            });
-            let k = top_elem.bin;
-            if top_elem.from_prev {
+            let (k, from_prev) = self.find_next_heap_elem();
+            if from_prev {
                 // Element is from previous frame -- compute the phase based on previous frame only if the phase was not
                 // already propagated from neighbor (see next branch of this if).
                 if self.phase_assigned[k] {
@@ -142,7 +144,7 @@ impl PhaseGradientTimeStretch {
                 }
                 self.phase_assigned[k] = true;
                 num_unassigned -= 1;
-                self.max_heap.push(HeapElem { bin: k, magnitude: self.magnitudes[k], from_prev: false });
+                self.max_heap.push(HeapElem { bin: k, magnitude: self.magnitudes[k] });
 
                 // From the paper
                 //   φ_s(m_h, n) ← φ_s(m_h, n − 1) + a_s / 2 * ((∆_t φ_a) (m_h, n − 1) + (∆_t φ_a) (m_h, n))
@@ -168,8 +170,7 @@ impl PhaseGradientTimeStretch {
                 if k > 0 && !self.phase_assigned[k - 1] {
                     self.phase_assigned[k - 1] = true;
                     num_unassigned -= 1;
-                    self.max_heap
-                        .push(HeapElem { bin: k - 1, magnitude: self.magnitudes[k - 1], from_prev: false });
+                    self.max_heap.push(HeapElem { bin: k - 1, magnitude: self.magnitudes[k - 1] });
 
                     // From the paper
                     //   φ_s(m_h + 1, n) ← φ_s(m_h, n) + b_s / 2 ((∆_f φ_a) (m_h, n) + (∆_f φ_a) (m_h + 1, n))
@@ -186,8 +187,7 @@ impl PhaseGradientTimeStretch {
                 if k < freq_size - 1 && !self.phase_assigned[k + 1] {
                     self.phase_assigned[k + 1] = true;
                     num_unassigned -= 1;
-                    self.max_heap
-                        .push(HeapElem { bin: k + 1, magnitude: self.magnitudes[k + 1], from_prev: false });
+                    self.max_heap.push(HeapElem { bin: k + 1, magnitude: self.magnitudes[k + 1] });
 
                     self.syn_phases[k + 1] = self.syn_phases[k] + self.ana_phases[k + 1] - self.ana_phases[k];
                 }
@@ -207,6 +207,20 @@ impl PhaseGradientTimeStretch {
         self.prev_ana_phases.copy_from_slice(&self.ana_phases);
     }
 
+    // Find the next HeapElem with max magnited from prev_max_heap and max_heap, return true if it was from
+    // prev_max_heap and the bin index.
+    fn find_next_heap_elem(&mut self) -> (usize, bool) {
+        let prev_top_magnitude = self.prev_max_heap.last().map_or(-1.0, |e| e.magnitude);
+        let top_magnitude = self.max_heap.peek().map_or(-1.0, |e| e.magnitude);
+        if prev_top_magnitude > top_magnitude {
+            let top = self.prev_max_heap.pop().expect("INTERNAL ERROR: no more elements remaining in the heaps");
+            return (top.bin, true);
+        } else {
+            let top = self.max_heap.pop().expect("INTERNAL ERROR: no more elements remaining in the heaps");
+            return (top.bin, false);
+        }
+    }
+
     pub fn reset(&mut self) {
         self.prev_magnitudes.fill(0.0);
         self.prev_ana_phases.fill(0.0);
@@ -222,11 +236,11 @@ mod tests {
     fn test_heap_elem_ordering() {
         let mut heap = BinaryHeap::new();
 
-        heap.push(HeapElem { bin: 0, magnitude: 1.5, from_prev: false });
-        heap.push(HeapElem { bin: 1, magnitude: 3.2, from_prev: false });
-        heap.push(HeapElem { bin: 2, magnitude: 0.8, from_prev: false });
-        heap.push(HeapElem { bin: 3, magnitude: 2.7, from_prev: false });
-        heap.push(HeapElem { bin: 2, magnitude: 2.7, from_prev: true });
+        heap.push(HeapElem { bin: 0, magnitude: 1.5 });
+        heap.push(HeapElem { bin: 1, magnitude: 3.2 });
+        heap.push(HeapElem { bin: 2, magnitude: 0.8 });
+        heap.push(HeapElem { bin: 3, magnitude: 2.7 });
+        heap.push(HeapElem { bin: 2, magnitude: 2.7 });
 
         assert_eq!(heap.pop().unwrap().magnitude, 3.2);
         assert_eq!(heap.pop().unwrap().magnitude, 2.7);
