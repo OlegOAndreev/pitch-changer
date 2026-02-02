@@ -55,7 +55,7 @@ pub struct TimeStretcher {
 impl TimeStretcher {
     #[wasm_bindgen(constructor)]
     pub fn new(params: &TimeStretchParams) -> std::result::Result<Self, WrapAnyhowError> {
-        Self::validate_params(params).map_err(|e| WrapAnyhowError(e))?;
+        Self::validate_params(params).map_err(WrapAnyhowError)?;
 
         let ana_hop_size = params.fft_size / params.overlap as usize;
         let syn_hop_size = (ana_hop_size as f32 * params.time_stretch) as usize;
