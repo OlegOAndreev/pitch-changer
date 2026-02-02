@@ -378,9 +378,9 @@ fn main() -> Result<()> {
             save_wav(&output_data, input.sample_rate, &output_path)
                 .with_context(|| format!("saving {} failed", output_path))?;
 
-            let input_freq = compute_dominant_frequency(&input.data, input.sample_rate)?;
+            let input_freq = compute_dominant_frequency(&input.data, input.sample_rate as f32);
             println!("Input dominant frequency: {:.2} Hz", input_freq);
-            let output_freq = compute_dominant_frequency(&output_data, input.sample_rate)?;
+            let output_freq = compute_dominant_frequency(&output_data, input.sample_rate as f32);
             println!("Output dominant frequency: {:.2} Hz", output_freq);
 
             if plot {
