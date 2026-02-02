@@ -222,7 +222,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn test_time_stretch_single_sine_wave() -> Result<()> {
         const DURATION: f32 = 0.5;
@@ -286,6 +285,56 @@ mod tests {
                                 );
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_time_stretch_identity() -> Result<()> {
+        const FREQ: f32 = 440.0;
+        const MAGNITUDE: f32 = 2.2;
+        const DURATION: f32 = 0.5;
+
+        for sample_rate in [44100.0, 96000.0] {
+            for fft_size in [1024, 4096] {
+                for overlap in [8, 16] {
+                    for window_type in [WindowType::Hann, WindowType::SqrtBlackman, WindowType::SqrtHann] {
+                        let input = generate_sine_wave(FREQ, sample_rate, MAGNITUDE, DURATION);
+
+                        let mut params = TimeStretchParams::new(sample_rate as u32, 1.0);
+                        params.fft_size = fft_size;
+                        params.overlap = overlap;
+                        params.window_type = window_type;
+                        let mut stretcher = TimeStretcher::new(&params).unwrap();
+                        let output = process_all(&mut stretcher, &input);
+
+                        // Skip transient at start and end, compare the middle
+                        let offset = fft_size * 2;
+                        let middle_len = (input.len() - offset * 2).min(output.len() - offset * 2);
+                        let input_slice = &input[offset..offset + middle_len];
+                        let output_slice = &output[offset..offset + middle_len];
+
+                        let mut max_diff = 0.0f32;
+                        for (i, o) in input_slice.iter().zip(output_slice) {
+                            let diff = (i - o).abs();
+                            if diff > max_diff {
+                                max_diff = diff;
+                            }
+                        }
+
+                        assert!(
+                            max_diff < 1e-3,
+                            "Max difference {} exceeds tolerance 1e-3 for sample_rate {}, fft_size {}, overlap {}, window {:?}",
+                            max_diff,
+                            sample_rate,
+                            fft_size,
+                            overlap,
+                            window_type
+                        );
                     }
                 }
             }
