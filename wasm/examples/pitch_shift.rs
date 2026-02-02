@@ -135,8 +135,8 @@ fn save_plot_data_svg(input: &[f32], output: &[f32], sample_rate: u32, filename:
     let interval1_end = interval1_start + INTERVAL_LENGTH;
     let interval2_start = min_duration * 0.5;
     let interval2_end = interval2_start + INTERVAL_LENGTH;
-    let interval3_start = output_length - INTERVAL_LENGTH * 2.0;
-    let interval3_end = output_length - INTERVAL_LENGTH;
+    let interval3_start = output_length - INTERVAL_LENGTH;
+    let interval3_end = output_length;
 
     let from_sample1 = (sample_rate as f32 * interval1_start) as usize;
     let to_sample1 = (sample_rate as f32 * interval1_end) as usize;

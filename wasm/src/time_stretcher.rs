@@ -6,7 +6,6 @@ use crate::WindowType;
 use crate::phase_gradient_time_stretch::PhaseGradientTimeStretch;
 use crate::stft::Stft;
 use crate::web::WrapAnyhowError;
-use crate::window::get_window_squared_sum;
 
 /// Parameters for audio time stretching/.
 #[derive(Debug, Clone, Copy)]
@@ -39,6 +38,8 @@ pub struct TimeStretcher {
     syn_hop_size: usize,
     stft: Stft,
     phase_gradient_vocoder: PhaseGradientTimeStretch,
+    // See finish()
+    tail_window: Vec<f32>,
 
     // Buffer management: source data is accumulated in src_buf until there is enough data to run STFT. After each STFT
     // results are accumulated into dst_accum_buf. After that the src_buf is shifted by ana_hop_size and dst_accum_buf
@@ -55,16 +56,29 @@ pub struct TimeStretcher {
 impl TimeStretcher {
     #[wasm_bindgen(constructor)]
     pub fn new(params: &TimeStretchParams) -> std::result::Result<Self, WrapAnyhowError> {
+        use crate::window::generate_tail_window;
+
         Self::validate_params(params).map_err(WrapAnyhowError)?;
 
         let ana_hop_size = params.fft_size / params.overlap as usize;
         let syn_hop_size = (ana_hop_size as f32 * params.time_stretch) as usize;
         let stft = Stft::new(params.fft_size, params.window_type);
         let phase_gradient_vocoder = PhaseGradientTimeStretch::new(params.fft_size);
+        let tail_len = params.fft_size / ana_hop_size * syn_hop_size;
+        let tail_window = generate_tail_window(params.window_type, tail_len);
         let src_buf = Vec::with_capacity(params.fft_size);
         let dst_accum_buf = vec![0.0f32; params.fft_size];
 
-        Ok(Self { params: *params, ana_hop_size, syn_hop_size, stft, phase_gradient_vocoder, src_buf, dst_accum_buf })
+        Ok(Self {
+            params: *params,
+            ana_hop_size,
+            syn_hop_size,
+            stft,
+            phase_gradient_vocoder,
+            tail_window,
+            src_buf,
+            dst_accum_buf,
+        })
     }
 
     fn validate_params(params: &TimeStretchParams) -> Result<()> {
@@ -123,23 +137,31 @@ impl TimeStretcher {
     #[wasm_bindgen]
     pub fn finish(&mut self) -> Vec<f32> {
         // We want to process all data remaining in src_buf, which is done by running stft fft_size/ana_hop_size times
-        // and padding with zeros after each iteration. After that the dst accum buffer contains a bunch of residual
-        // data, which we simply append to the output. This may become noticeable if the fft size is large (e.g. for fft
-        // size 8192 and sample rate 44100 we append 180ms of audio).
-        let result_capacity =
-            (self.params.fft_size / self.ana_hop_size) * self.syn_hop_size + self.params.fft_size - self.syn_hop_size;
+        // and padding with zeros after each iteration. We want to fade out this tail to zero by applying half-window
+        // stored in tail_window.
+        //
+        // This is especially important for large stretches where syn_hop_size > ana_hop_size leads to rapid amplitude
+        // changes and noise.
+        //
+        // Another way to solve this problem is simply appending the whole dst_accum_buf into result on final iteration,
+        // but this makes testing more annoying =)
+        let result_capacity = (self.params.fft_size / self.ana_hop_size) * self.syn_hop_size;
         let mut result = Vec::with_capacity(result_capacity);
 
         let iters = self.params.fft_size / self.ana_hop_size;
         for i in 0..iters {
             self.src_buf.resize(self.params.fft_size, 0.0);
             self.do_stft();
-            if i == iters - 1 {
-                // After last iteration append the whole accumulator buffer.
-                result.extend_from_slice(&self.dst_accum_buf);
-            } else {
-                self.append_dst_and_shift(&mut result);
+
+            let tail_window_offset = i * self.syn_hop_size;
+            // After the last iteration do windowing first.
+            for (a, w) in self.dst_accum_buf[..self.syn_hop_size]
+                .iter_mut()
+                .zip(&self.tail_window[tail_window_offset..])
+            {
+                *a *= *w;
             }
+            self.append_dst_and_shift(&mut result);
         }
         debug_assert_eq!(result.len(), result_capacity);
 
@@ -149,6 +171,8 @@ impl TimeStretcher {
 
     /// Do one iteration of stft
     fn do_stft(&mut self) {
+        use crate::window::get_window_squared_sum;
+
         let output = self.stft.process(&self.src_buf, |ana_freq, syn_freq| {
             // syn_freq.copy_from_slice(ana_freq);
             self.phase_gradient_vocoder
@@ -328,7 +352,7 @@ mod tests {
 
                         assert!(
                             max_diff < 1e-3,
-                            "Max difference {} exceeds tolerance 1e-3 for sample_rate {}, fft_size {}, overlap {}, window {:?}",
+                            "Max difference {} for sample_rate {}, fft_size {}, overlap {}, window {:?}",
                             max_diff,
                             sample_rate,
                             fft_size,

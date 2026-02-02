@@ -3,8 +3,6 @@ use std::f32::consts::PI;
 
 use realfft::num_complex::Complex;
 
-use crate::util::normalize_phase;
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct HeapElem {
     pub bin: usize,
@@ -84,6 +82,8 @@ impl PhaseGradientTimeStretch {
         syn_freq: &mut [Complex<f32>],
         syn_hop_size: usize,
     ) {
+        use crate::util::normalize_phase;
+
         // Ignore the frequencies with magnitude < (max magnitude * MIN_MAGNITUDE_TOLERANCE).
         const MIN_MAGNITUDE_TOLERANCE: f32 = 1e-5;
 

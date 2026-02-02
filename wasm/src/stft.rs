@@ -1,9 +1,9 @@
 //! STFT (Short-Time Fourier Transform) state and operations.
 
-use realfft::{RealFftPlanner, num_complex::Complex};
+use realfft::num_complex::Complex;
 use std::sync::Arc;
 
-use crate::window::{WindowType, generate_window};
+use crate::window::WindowType;
 
 /// STFT state for performing forward and inverse FFT operations.
 ///
@@ -18,7 +18,7 @@ use crate::window::{WindowType, generate_window};
 /// > Griffin-Lim [http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.306.7858&rep=rep1&type=pdf] optimal estimate
 /// > (optimal in a least-squares sense) for a time-domain signal from a modified STFT. SciPy implements a = 1 for the
 /// > signal reconstruction in the istft routine.
-/// 
+///
 /// When you do synthesis with different hop size compared to analysis, you break constant overlap-add property, but
 /// in general things smooth out nicely if your synthesis hop size is not too large. I do not know why =)
 pub struct Stft {
@@ -35,6 +35,9 @@ pub struct Stft {
 
 impl Stft {
     pub fn new(fft_size: usize, window_type: WindowType) -> Self {
+        use crate::window::generate_window;
+        use realfft::RealFftPlanner;
+
         let mut planner = RealFftPlanner::<f32>::new();
         let forward_plan = planner.plan_fft_forward(fft_size);
         let inverse_plan = planner.plan_fft_inverse(fft_size);
