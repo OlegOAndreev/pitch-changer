@@ -113,6 +113,28 @@ h1 {
     overflow-wrap: break-word;
 }
 
+#processing-indicator {
+    min-height: 20px;
+    font-size: 13px;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #3498db;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
 #mode-row {
     display: flex;
     flex-direction: row;
