@@ -23,7 +23,10 @@ export class Player {
         this.playingBufferSource = this.audioContext.createBufferSource();
         this.playingBufferSource.buffer = audioBuffer;
         this.playingBufferSource.connect(this.audioContext.destination);
-        this.playingBufferSource.onended = (_e: Event) => onStop();
+        this.playingBufferSource.onended = (_e: Event) => {
+            this.isPlaying = false;
+            onStop();
+        }
         this.playingBufferSource.start();
         this.onStop = onStop;
         this.isPlaying = true;

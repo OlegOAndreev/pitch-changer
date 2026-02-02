@@ -1,10 +1,11 @@
 import { Recorder } from './recorder';
 
-import { default as initRustModule } from '../wasm/build/wasm_main_module';
+import initRustModule from '../wasm/build/wasm_main_module';
 import { encodeToBlob } from './media-encoder';
 import { Player } from './player';
 import { saveFile, showSaveDialog } from './save-dialog';
 import { getById } from './utils';
+import { shiftPitch, timeStretch } from './process-audio';
 
 await initRustModule();
 
@@ -66,6 +67,7 @@ function getPlayer(): Player {
 
 let sourceData: Float32Array;
 let sourceSampleRate: number;
+let processedData: Float32Array;
 
 
 const contentContainer = getById<HTMLDivElement>('content-container');
@@ -130,6 +132,27 @@ function saveSettings() {
     }, 500);
 }
 
+function processSourceAudio() {
+    if (!sourceData) {
+        console.error('processAudio called with null source data');
+        return;
+    }
+    try {
+        switch (settings.processingMode) {
+            case 'pitch':
+                processedData = shiftPitch(sourceData, sourceSampleRate, settings.pitchValue);
+                break;
+            case 'time':
+                processedData = timeStretch(sourceData, sourceSampleRate, settings.pitchValue);
+                break;
+        }
+        console.log(`Processed audio: got ${processedData.length} samples`);
+    } catch (error) {
+        console.error('Error processing audio:', error);
+        alert(`Error processing audio: ${(error as Error).message}`);
+    }
+}
+
 function onStopPlayback() {
     console.log('Stopped playing audio');
     playBtnEmoji.textContent = '▶';
@@ -159,6 +182,10 @@ recordBtn.addEventListener('click', async () => {
         sourceData = await recorder.stop();
         sourceSampleRate = getAudioContext().sampleRate;
 
+        const sourceSeconds = Math.round(sourceData.length / sourceSampleRate);
+        messageLabel.textContent = `Recorded ${sourceSeconds}s`;
+        processSourceAudio();
+
         messageLabel.textContent = '';
         recordBtnEmoji.textContent = '⏺';
         recordBtn.title = 'Record';
@@ -166,6 +193,7 @@ recordBtn.addEventListener('click', async () => {
         playBtn.disabled = false;
         loadBtn.disabled = false;
         saveBtn.disabled = false;
+
     }
 });
 
@@ -177,7 +205,7 @@ playBtn.addEventListener('click', async () => {
             return;
         }
 
-        await getPlayer().play(sourceData, sourceSampleRate, onStopPlayback);
+        await getPlayer().play(processedData, sourceSampleRate, onStopPlayback);
 
         playBtnEmoji.textContent = '⏹';
         playBtn.title = 'Pause';
@@ -204,6 +232,7 @@ fileInput.addEventListener('change', async () => {
         sourceSampleRate = audioBuffer.sampleRate;
         console.log(`Loaded ${file.name} in ${performance.now() - startTime}ms: ${audioBuffer.numberOfChannels}`
             + ` channels, ${audioBuffer.length} samples at ${audioBuffer.sampleRate}Hz`);
+        messageLabel.textContent = `Decoded ${file.name}`;
     } catch (error) {
         console.error('Error loading audio file:', error);
         alert(`Error loading audio file: ${(error as Error).message}`);
@@ -212,7 +241,8 @@ fileInput.addEventListener('change', async () => {
         return;
     }
 
-    messageLabel.textContent = '';
+    processSourceAudio();
+
     playBtn.disabled = false;
     loadBtn.disabled = false;
     saveBtn.disabled = false;
