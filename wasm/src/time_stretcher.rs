@@ -1,11 +1,12 @@
 use wasm_bindgen::prelude::*;
 
+use anyhow::{Result, bail};
+
+use crate::WindowType;
 use crate::phase_gradient_time_stretch::PhaseGradientTimeStretch;
 use crate::stft::Stft;
 use crate::web::WrapAnyhowError;
 use crate::window::get_window_squared_sum;
-use crate::WindowType;
-use anyhow::{bail, Result};
 
 /// Parameters for audio time stretching/.
 #[derive(Debug, Clone, Copy)]
@@ -27,13 +28,7 @@ pub struct TimeStretchParams {
 impl TimeStretchParams {
     #[wasm_bindgen(constructor)]
     pub fn new(rate: u32, time_stretch: f32) -> Self {
-        Self {
-            time_stretch,
-            rate,
-            fft_size: 2048,
-            overlap: 8,
-            window_type: WindowType::Hann,
-        }
+        Self { time_stretch, rate, fft_size: 2048, overlap: 8, window_type: WindowType::Hann }
     }
 }
 
@@ -73,6 +68,9 @@ impl TimeStretcher {
     }
 
     fn validate_params(params: &TimeStretchParams) -> Result<()> {
+        if params.time_stretch < 0.25 || params.time_stretch > 4.0 {
+            bail!("Time stretching factor cannot be lower than 0.25 or higher than 4");
+        }
         if params.time_stretch > params.overlap as f32 / 3.0 {
             bail!("Time stretching factor cannot be bigger than overlap/3");
         }
@@ -210,7 +208,7 @@ mod tests {
 
         for _ in 0..ITERATIONS {
             let sample_rate = rng.random_range(10000..=100000);
-            let time_stretch = rng.random_range(0.1..1.2);
+            let time_stretch = rng.random_range(0.25..1.2);
             let fft_size = 1 << rng.random_range(9..=12); // 2^9=512, 2^12=4096
             let mut params = TimeStretchParams::new(sample_rate, time_stretch);
             params.fft_size = fft_size;
