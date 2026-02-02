@@ -73,9 +73,9 @@ impl Error for WrapAnyhowError {
     }
 }
 
-impl Into<JsValue> for WrapAnyhowError {
-    fn into(self) -> JsValue {
-        JsValue::from_str(&format!("{:?}", self.0))
+impl From<WrapAnyhowError> for JsValue {
+    fn from(val: WrapAnyhowError) -> Self {
+        JsValue::from_str(&format!("{:?}", val.0))
     }
 }
 

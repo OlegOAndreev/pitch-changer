@@ -7,7 +7,10 @@ use hound::{WavSpec, WavWriter};
 use plotters::prelude::*;
 use realfft::RealFftPlanner;
 
-use wasm_main_module::{TimeStretchParams, TimeStretcher, WindowType, generate_sine_wave};
+use wasm_main_module::{
+    PitchShiftParams, PitchShifter, TimeStretchParams, TimeStretcher, WindowType, compute_dominant_frequency,
+    generate_sine_wave,
+};
 
 fn parse_window_type(s: &str) -> Result<WindowType> {
     match s.to_lowercase().as_str() {
@@ -227,30 +230,6 @@ fn save_plot_data_svg(input: &[f32], output: &[f32], sample_rate: u32, filename:
     Ok(())
 }
 
-fn compute_dominant_frequency(signal: &[f32], sample_rate: u32) -> Result<f32> {
-    let n = signal.len();
-    let fft_size = n.next_power_of_two();
-    let mut planner = RealFftPlanner::<f32>::new();
-    let r2c = planner.plan_fft_forward(fft_size);
-
-    let mut input = vec![0.0; fft_size];
-    input[..n].copy_from_slice(signal);
-    let mut freq = r2c.make_output_vec();
-    r2c.process(&mut input, &mut freq)?;
-
-    let mut max_magn = 0.0;
-    let mut max_bin = 0;
-    for i in 0..freq.len() {
-        let mag = freq[i].norm();
-        if mag > max_magn {
-            max_magn = mag;
-            max_bin = i;
-        }
-    }
-
-    Ok(max_bin as f32 * sample_rate as f32 / fft_size as f32)
-}
-
 #[derive(FromArgs)]
 /// Pitch shift CLI tool
 struct Cli {
@@ -263,6 +242,7 @@ struct Cli {
 enum Commands {
     Generate(Generate),
     TimeStretch(TimeStretch),
+    PitchShift(PitchShift),
 }
 
 /// Generate a sine wave and save it as WAV
@@ -294,7 +274,7 @@ struct TimeStretch {
     #[argh(option, default = "\"sine_wave.wav\".to_string()")]
     input: String,
 
-    /// time stretch factor (e.g., 2.0 = one octave up, 0.5 = one octave down)
+    /// time stretch factor (e.g., 2.0 = twice as long, 0.5 = half length)
     #[argh(option, default = "1.0")]
     stretch: f32,
 
@@ -312,6 +292,39 @@ struct TimeStretch {
 
     /// output WAV file for stretched audio
     #[argh(option, default = "\"stretched.wav\".to_string()")]
+    output: String,
+
+    /// save plot comparison SVG
+    #[argh(switch)]
+    plot: bool,
+}
+
+/// Apply pitch shift to input
+#[derive(FromArgs)]
+#[argh(subcommand, name = "pitch-shift")]
+struct PitchShift {
+    /// input WAV file
+    #[argh(option, default = "\"sine_wave.wav\".to_string()")]
+    input: String,
+
+    /// pitch shift factor (e.g., 2.0 = one octave up, 0.5 = one octave down)
+    #[argh(option, default = "1.0")]
+    shift: f32,
+
+    /// overlap ratio
+    #[argh(option, default = "8")]
+    overlap: u32,
+
+    /// FFT size
+    #[argh(option, default = "4096")]
+    fft_size: usize,
+
+    /// window type: "hann", "sqrt-hann", or "sqrt-blackman"
+    #[argh(option, default = "\"hann\".to_string()")]
+    window: String,
+
+    /// output WAV file for pitch shifterd audio
+    #[argh(option, default = "\"shifted.wav\".to_string()")]
     output: String,
 
     /// save plot comparison SVG
@@ -368,6 +381,52 @@ fn main() -> Result<()> {
             let input_freq = compute_dominant_frequency(&input.data, input.sample_rate)?;
             println!("Input dominant frequency: {:.2} Hz", input_freq);
             let output_freq = compute_dominant_frequency(&output_data, input.sample_rate)?;
+            println!("Output dominant frequency: {:.2} Hz", output_freq);
+
+            if plot {
+                let plot_filename = output_path.replace(".wav", "_plot.svg");
+                save_plot_data_svg(&input.data, &output_data, input.sample_rate, &plot_filename)
+                    .with_context(|| format!("saving plot {} failed", plot_filename))?;
+            }
+        }
+
+        Commands::PitchShift(PitchShift {
+            input: input_path,
+            shift,
+            output: output_path,
+            plot,
+            overlap,
+            fft_size,
+            window,
+        }) => {
+            let mut start_time = Instant::now();
+            let input = load_file(&input_path).with_context(|| format!("loading {} failed", input_path))?;
+            println!("Loading {} took {}ms", input_path, Instant::now().duration_since(start_time).as_millis());
+
+            println!("Pitch shifting {}: {} Hz, stretch: {}", input_path, input.sample_rate, shift);
+
+            let window_type = parse_window_type(&window)?;
+            let mut params = PitchShiftParams::new(input.sample_rate, shift);
+            params.overlap = overlap;
+            params.fft_size = fft_size;
+            params.window_type = window_type;
+            let mut shifter = PitchShifter::new(&params)?;
+
+            start_time = Instant::now();
+            let mut output_data = shifter.process(&input.data);
+            output_data.append(&mut shifter.finish());
+            println!(
+                "Output generated: {} samples in {}ms",
+                output_data.len(),
+                Instant::now().duration_since(start_time).as_millis()
+            );
+
+            save_wav(&output_data, input.sample_rate, &output_path)
+                .with_context(|| format!("saving {} failed", output_path))?;
+
+            let input_freq = compute_dominant_frequency(&input.data, input.sample_rate as f32);
+            println!("Input dominant frequency: {:.2} Hz", input_freq);
+            let output_freq = compute_dominant_frequency(&output_data, input.sample_rate as f32);
             println!("Output dominant frequency: {:.2} Hz", output_freq);
 
             if plot {

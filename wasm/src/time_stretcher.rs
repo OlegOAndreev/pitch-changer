@@ -188,10 +188,10 @@ impl TimeStretcher {
 #[cfg(test)]
 mod tests {
     use crate::generate_sine_wave;
+    use crate::util::{compute_dominant_frequency, compute_magnitude};
 
     use super::*;
     use rand::Rng;
-    use realfft::RealFftPlanner;
 
     fn process_all(stretcher: &mut TimeStretcher, input: &[f32]) -> Vec<f32> {
         let mut result = stretcher.process(input);
@@ -222,36 +222,6 @@ mod tests {
         }
     }
 
-    fn compute_dominant_frequency(signal: &[f32], sample_rate: f32) -> f32 {
-        let n = signal.len();
-
-        let fft_size = n.next_power_of_two();
-        let mut planner = RealFftPlanner::<f32>::new();
-        let r2c = planner.plan_fft_forward(fft_size);
-
-        let mut input = vec![0.0; fft_size];
-        input[..n].copy_from_slice(signal);
-        let mut freq = r2c.make_output_vec();
-        r2c.process(&mut input, &mut freq).unwrap();
-
-        let mut max_magn = 0.0;
-        let mut max_bin = 0;
-        for i in 0..freq.len() {
-            let mag = freq[i].norm();
-            if mag > max_magn {
-                max_magn = mag;
-                max_bin = i;
-            }
-        }
-        max_bin as f32 * sample_rate / fft_size as f32
-    }
-
-    fn compute_magnitude(signal: &[f32]) -> f32 {
-        let mut input = Vec::from(signal);
-        input.sort_by(|a, b| a.total_cmp(b));
-        // Remove 5 bottom and top values and compute the difference between remaining min and max.
-        (input[input.len() - 6] - input[5]) * 0.5
-    }
 
     #[test]
     fn test_time_stretch_single_sine_wave() -> Result<()> {
