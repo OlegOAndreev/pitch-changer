@@ -24,3 +24,4 @@
 * When changing Rust files, run `npm run build` and `npm run test`, do not run any other commands
 * Run `npm run build` to check the final result in dist/
 * Do not attempt opening browser for UI testing, always request the user to test the UI
+* Do not attempt API calls, always request the user to test the API
