@@ -239,8 +239,8 @@ saveBtn.addEventListener('click', async () => {
         }
 
         const fileType = filename.split('.').pop()?.toLowerCase();
-        if (!fileType || (fileType !== 'mp3' && fileType !== 'wav')) {
-            alert('Unsupported file format. Please use .mp3 or .wav');
+        if (!fileType || (fileType !== 'mp3' && fileType != 'ogg' && fileType !== 'wav')) {
+            alert('Unsupported file format. Please use .mp3, .ogg or .wav');
             saveBtn.disabled = false;
             return;
         }
