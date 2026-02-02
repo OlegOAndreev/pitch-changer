@@ -214,10 +214,10 @@ impl PhaseGradientTimeStretch {
         let top_magnitude = self.max_heap.peek().map_or(-1.0, |e| e.magnitude);
         if prev_top_magnitude > top_magnitude {
             let top = self.prev_max_heap.pop().expect("INTERNAL ERROR: no more elements remaining in the heaps");
-            return (top.bin, true);
+            (top.bin, true)
         } else {
             let top = self.max_heap.pop().expect("INTERNAL ERROR: no more elements remaining in the heaps");
-            return (top.bin, false);
+            (top.bin, false)
         }
     }
 
