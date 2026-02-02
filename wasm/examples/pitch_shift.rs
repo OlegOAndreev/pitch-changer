@@ -5,7 +5,6 @@ use anyhow::{Context, Result, bail};
 use argh::FromArgs;
 use hound::{WavSpec, WavWriter};
 use plotters::prelude::*;
-use realfft::RealFftPlanner;
 
 use wasm_main_module::{
     PitchShiftParams, PitchShifter, TimeStretchParams, TimeStretcher, WindowType, compute_dominant_frequency,

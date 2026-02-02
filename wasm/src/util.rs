@@ -22,8 +22,8 @@ pub fn compute_dominant_frequency(signal: &[f32], sample_rate: f32) -> f32 {
 
     let mut max_magn = 0.0;
     let mut max_bin = 0;
-    for i in 0..freq.len() {
-        let mag = freq[i].norm();
+    for (i, f) in freq.iter().enumerate() {
+        let mag = f.norm();
         if mag > max_magn {
             max_magn = mag;
             max_bin = i;
