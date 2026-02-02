@@ -99,7 +99,7 @@ impl PhaseGradientTimeStretch {
         for k in 0..freq_size {
             let magn = ana_freq[k].norm();
             self.magnitudes[k] = magn;
-            max_magn = max_magn.max(self.magnitudes[k]).max(self.prev_magnitudes[k]);
+            max_magn = max_magn.max(magn).max(self.prev_magnitudes[k]);
         }
         let min_magn = max_magn * MIN_MAGNITUDE_TOLERANCE;
 
@@ -119,15 +119,17 @@ impl PhaseGradientTimeStretch {
                 self.max_heap
                     .push(HeapElem { bin: k, magnitude: self.prev_magnitudes[k], from_prev: true });
             } else {
-                // The original paper assigns random values to frequencies below the min magnitude, but we simply leave
-                // the phase to be 0.0
+                // The original paper assigns random values to frequencies below the min magnitude, but we simply zero
+                // them out.
                 self.ana_phases[k] = 0.0;
+                self.syn_phases[k] = 0.0;
                 self.phase_assigned[k] = true;
             }
         }
 
         // Phase assignment algorithm
         while num_unassigned > 0 {
+            // Minor optimization: 
             let top_elem = self.max_heap.pop().unwrap_or_else(|| {
                 panic!("INTERNAL ERROR: no more elements remaining in the heap, {} still unassigned", num_unassigned)
             });
