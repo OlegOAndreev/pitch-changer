@@ -37,6 +37,9 @@ pub fn compute_dominant_frequency(signal: &[f32], sample_rate: f32) -> f32 {
 pub fn compute_magnitude(signal: &[f32]) -> f32 {
     let mut input = Vec::from(signal);
     input.sort_by(|a, b| a.total_cmp(b));
+    if input.len() < 12 {
+        return 0.0;
+    }
     // Remove 5 bottom and top values and compute the difference between remaining min and max.
     (input[input.len() - 6] - input[5]) * 0.5
 }

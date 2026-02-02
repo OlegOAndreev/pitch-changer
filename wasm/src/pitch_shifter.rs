@@ -195,16 +195,11 @@ mod tests {
         const MAGNITUDE: f32 = 3.2;
         const INPUT_FREQ: f32 = 400.0;
 
-        for sample_rate in [44100.0] {
-            // for sample_rate in [44100.0, 96000.0] {
-            for fft_size in [4096] {
-                // for fft_size in [1024, 4096] {
-                for overlap in [8] {
-                    // for overlap in [8, 16] {
-                    for window_type in [WindowType::Hann] {
-                        // for window_type in [WindowType::Hann, WindowType::SqrtBlackman, WindowType::SqrtHann] {
-                        for pitch_shift in [0.5] {
-                            // for pitch_shift in [0.5, 0.75, 1.25, 1.5, 2.0] {
+        for sample_rate in [44100.0, 96000.0] {
+            for fft_size in [1024, 4096] {
+                for overlap in [8, 16] {
+                    for window_type in [WindowType::Hann, WindowType::SqrtBlackman, WindowType::SqrtHann] {
+                        for pitch_shift in [0.5, 0.75, 1.25, 1.5, 2.0] {
                             let input = generate_sine_wave(INPUT_FREQ, sample_rate, MAGNITUDE, DURATION);
 
                             let mut params = PitchShiftParams::new(sample_rate as u32, pitch_shift);

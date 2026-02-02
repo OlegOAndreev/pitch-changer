@@ -98,7 +98,7 @@ fn load_file(filename: &str) -> Result<AudioContents> {
                 }
             }
             _ => {
-                bail!("Only f32 an s16 audio is supported");
+                bail!("Only f32 or s16 audio is supported");
             }
         }
     }
