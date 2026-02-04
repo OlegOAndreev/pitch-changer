@@ -67,7 +67,7 @@ describe('debounce', () => {
         expect(executed).toBe(true);
     });
 
-    test('rejects previous promise when new call happens', async () => {
+    test('awaits previous promise when new call happens', async () => {
         const mockFn = vi.fn();
         const debounced = debounce(mockFn, 100);
 
