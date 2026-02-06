@@ -13,17 +13,33 @@ export class Float32RingBuffer {
     private readIndex: Int32Array;
     private writeIndex: Int32Array;
 
-    constructor(capacity: number) {
-        // Enforce power-of-two capacity for efficient bitwise modulo operations
-        if (capacity <= 0 || (capacity & (capacity - 1)) !== 0) {
-            throw new Error(`Float32RingBuffer capacity must be a positive power of two, got ${capacity}`);
-        }
-        // Create SharedArrayBuffer with two int32 for read/write indices.
+    // Create a Float32RingBuffer based on existing SharedArrayBuffer. The buffer must have an appropriate capacity,
+    // see bufferForCapacity() and byteLengthForCapacity().
+    constructor(buffer: SharedArrayBuffer) {
+        const capacity = (buffer.byteLength - 8) / 4;
+        Float32RingBuffer.validateCapacity(capacity);
         this.capacity = capacity;
-        this.buffer = new SharedArrayBuffer(8 + capacity * 4);
+        this.buffer = buffer;
         this.readIndex = new Int32Array(this.buffer, 0, 1);
         this.writeIndex = new Int32Array(this.buffer, 4, 1);
         this.data = new Float32Array(this.buffer, 8, capacity);
+    }
+
+    // Create SharedArrayBuffer which is appropriate for passing to the constructor.
+    static bufferForCapacity(capacity: number): SharedArrayBuffer {
+        return new SharedArrayBuffer(Float32RingBuffer.byteLengthForCapacity(capacity));
+    }
+
+    // Compute byteLength of SharedArrayBuffer, which then can be passed to the constructor.
+    static byteLengthForCapacity(capacity: number): number {
+        Float32RingBuffer.validateCapacity(capacity);
+        return 8 + capacity * 4;
+    }
+
+    private static validateCapacity(capacity: number) {
+        if (capacity <= 0 || capacity !== capacity >>> 0 || (capacity & (capacity - 1)) !== 0) {
+            throw new Error(`Invalid SharedArrayBuffer size for Float32RingBuffer`);
+        }
     }
 
     // Append data from src and return the number of elements pushed.

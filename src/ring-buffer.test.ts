@@ -5,19 +5,19 @@ import { Float32RingBuffer } from './ring-buffer';
 // Note: Testing actual blocking behavior requires multiple threads, which is beyond the scope of unit tests.
 describe('Float32RingBuffer', () => {
     test('constructor', () => {
-        const buffer = new Float32RingBuffer(1024);
+        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(1024));
         expect(buffer.available()).toBe(0);
     });
 
     test('push returns number of elements pushed', () => {
-        const buffer = new Float32RingBuffer(8);
+        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
         const src = new Float32Array([1, 2, 3]);
         expect(buffer.push(src)).toBe(3);
         expect(buffer.available()).toBe(3);
     });
 
     test('push respects capacity', () => {
-        const buffer = new Float32RingBuffer(4);
+        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(4));
         const src1 = new Float32Array([1, 2, 3, 4]);
         expect(buffer.push(src1)).toBe(4);
         expect(buffer.available()).toBe(4);
@@ -28,7 +28,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('pop returns number of elements popped', () => {
-        const buffer = new Float32RingBuffer(8);
+        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
         const src = new Float32Array([1, 2, 3]);
         buffer.push(src);
         const dst = new Float32Array(2);
@@ -39,7 +39,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('pop respects available data', () => {
-        const buffer = new Float32RingBuffer(8);
+        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
         const src = new Float32Array([1, 2]);
         buffer.push(src);
         const dst = new Float32Array(5);
@@ -50,7 +50,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('push and pop wrap around', () => {
-        const buffer = new Float32RingBuffer(4);
+        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(4));
         buffer.push(new Float32Array([1, 2, 3, 4]));
         const dst1 = new Float32Array(2);
         buffer.pop(dst1);
@@ -64,7 +64,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('push and pop many times', () => {
-        const buffer = new Float32RingBuffer(8);
+        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
         for (let i = 0; i < 100; i++) {
             const src = new Float32Array([1, 2, 3, 4, 5, 6, 7]);
             buffer.push(src);
@@ -77,7 +77,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('handles index overflow correctly', () => {
-        const buffer = new Float32RingBuffer(8);
+        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
 
         // Access private fields for testing
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -104,8 +104,8 @@ describe('Float32RingBuffer', () => {
         expect(Atomics.load(readIndex, 0)).toBeLessThan(0);
     });
 
-    test('waitAvailableAtLeastAsync resolves immediately', async () => {
-        const buffer = new Float32RingBuffer(8);
+    test('waitPushAsync resolves immediately', async () => {
+        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
         buffer.push(new Float32Array([1, 2, 3]));
         let resolved = false;
         await buffer.waitPushAsync(2).then(() => resolved = true);
@@ -120,8 +120,8 @@ describe('Float32RingBuffer', () => {
         expect(resolved).toBe(true);
     });
 
-    test('waitAvailableAtMostAsync resolves immediately', async () => {
-        const buffer = new Float32RingBuffer(8);
+    test('waitPopAsync resolves immediately', async () => {
+        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
         buffer.push(new Float32Array([1, 2, 3]));
         let resolved = false;
         await buffer.waitPopAsync(5).then(() => resolved = true);
@@ -136,8 +136,8 @@ describe('Float32RingBuffer', () => {
         expect(resolved).toBe(true);
     });
 
-    test('waitAvailableAtLeastAsync waits for push', async () => {
-        const buffer = new Float32RingBuffer(8);
+    test('waitPushAsync waits for push', async () => {
+        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
         buffer.push(new Float32Array([1, 2, 3]));
         let resolved = false;
         const promise = buffer.waitPushAsync(5).then(() => resolved = true);
@@ -152,8 +152,8 @@ describe('Float32RingBuffer', () => {
         expect(resolved).toBe(true);
     });
 
-    test('waitAvailableAtMostAsync waits for pop', async () => {
-        const buffer = new Float32RingBuffer(8);
+    test('waitPopAsync waits for pop', async () => {
+        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
         buffer.push(new Float32Array([1, 2, 3, 4, 5]));
         let resolved = false;
         const promise = buffer.waitPopAsync(3).then(() => resolved = true);
