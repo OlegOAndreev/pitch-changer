@@ -108,15 +108,15 @@ describe('Float32RingBuffer', () => {
         const buffer = new Float32RingBuffer(8);
         buffer.push(new Float32Array([1, 2, 3]));
         let resolved = false;
-        await buffer.waitAvailableAtLeastAsync(2).then(() => resolved = true);
+        await buffer.waitPushAsync(2).then(() => resolved = true);
         expect(resolved).toBe(true);
         
         resolved = false;
-        await buffer.waitAvailableAtLeastAsync(3).then(() => resolved = true);
+        await buffer.waitPushAsync(3).then(() => resolved = true);
         expect(resolved).toBe(true);
         
         resolved = false;
-        await buffer.waitAvailableAtLeastAsync(0).then(() => resolved = true);
+        await buffer.waitPushAsync(0).then(() => resolved = true);
         expect(resolved).toBe(true);
     });
 
@@ -124,15 +124,15 @@ describe('Float32RingBuffer', () => {
         const buffer = new Float32RingBuffer(8);
         buffer.push(new Float32Array([1, 2, 3]));
         let resolved = false;
-        await buffer.waitAvailableAtMostAsync(5).then(() => resolved = true);
+        await buffer.waitPopAsync(5).then(() => resolved = true);
         expect(resolved).toBe(true);
         
         resolved = false;
-        await buffer.waitAvailableAtMostAsync(3).then(() => resolved = true);
+        await buffer.waitPopAsync(3).then(() => resolved = true);
         expect(resolved).toBe(true);
         
         resolved = false;
-        await buffer.waitAvailableAtMostAsync(10).then(() => resolved = true);
+        await buffer.waitPopAsync(10).then(() => resolved = true);
         expect(resolved).toBe(true);
     });
 
@@ -140,7 +140,7 @@ describe('Float32RingBuffer', () => {
         const buffer = new Float32RingBuffer(8);
         buffer.push(new Float32Array([1, 2, 3]));
         let resolved = false;
-        const promise = buffer.waitAvailableAtLeastAsync(5).then(() => resolved = true);
+        const promise = buffer.waitPushAsync(5).then(() => resolved = true);
         expect(resolved).toBe(false);
         
         buffer.push(new Float32Array([4]));
@@ -156,7 +156,7 @@ describe('Float32RingBuffer', () => {
         const buffer = new Float32RingBuffer(8);
         buffer.push(new Float32Array([1, 2, 3, 4, 5]));
         let resolved = false;
-        const promise = buffer.waitAvailableAtMostAsync(3).then(() => resolved = true);
+        const promise = buffer.waitPopAsync(3).then(() => resolved = true);
         expect(resolved).toBe(false);
         
         buffer.pop(new Float32Array([4]));

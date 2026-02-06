@@ -1,8 +1,11 @@
-// A simple implementation of SPSC ring buffer based on SharedArrayBuffer. Unlike the standard ringbuffer
-// implementations, this implementation allows waking the writers when the readers read parts of buffer: this is
-// important for implementing "refill on low watermark" pattern when a web worker generates the new data when buffer
-// becomes near empty (but not completely empty to prevent underruns) and the audio worklet consumes the data.
-
+// A simple implementation of Float32 SPSC ring buffer based on SharedArrayBuffer. Unlike the standard ringbuffer
+// implementations, this implementation it allows waking both the readers when the new data is available and the writers
+// when data is partially consumed. It also contains async versions of waiting methods, which can be called from the
+// main thread.
+//
+// These wait methods are important for implementing "refill on low watermark" pattern in audio worklets when a separate
+// web worker generates the new data when buffer becomes e.g. half-empty (but not completely empty to prevent
+// underruns).
 export class Float32RingBuffer {
     private capacity: number;
     private buffer: SharedArrayBuffer;
@@ -80,47 +83,52 @@ export class Float32RingBuffer {
         return (write - read) >>> 0;
     }
 
-    // Wait until there is at least n elements available in the buffer.
-    waitAvailableAtLeast(n: number) {
+    // Wait until there are at least n free elements in the buffer (blocks the writer).
+    waitPush(n: number) {
         while (true) {
             const read = Atomics.load(this.readIndex, 0);
             const write = Atomics.load(this.writeIndex, 0);
-            const avail = (write - read) >>> 0;
-            if (avail >= n) {
-                return;
-            }
-            Atomics.wait(this.writeIndex, 0, write);
-        }
-    }
-
-    // Async version of waitAvailableAtLeast, requires a modern browser with support for Atomics.waitAsync
-    async waitAvailableAtLeastAsync(n: number): Promise<void> {
-        while (true) {
-            const read = Atomics.load(this.readIndex, 0);
-            const write = Atomics.load(this.writeIndex, 0);
-            const avail = (write - read) >>> 0;
-            if (avail >= n) {
-                return;
-            }
-            await Atomics.waitAsync(this.writeIndex, 0, write);
-        }
-    }
-
-    // Wait until there are no more than n elements available in the buffer.
-    waitAvailableAtMost(n: number) {
-        while (true) {
-            const read = Atomics.load(this.readIndex, 0);
-            const write = Atomics.load(this.writeIndex, 0);
-            const available = (write - read) >>> 0;
-            if (available <= n) {
+            const used = (write - read) >>> 0;
+            const free = this.capacity - used;
+            if (free >= n) {
                 return;
             }
             Atomics.wait(this.readIndex, 0, read);
         }
     }
 
-    // Async version of waitAvailableAtMost, requires a modern browser with support for Atomics.waitAsync
-    async waitAvailableAtMostAsync(n: number): Promise<void> {
+    // Async version of waitPush, requires a modern browser with support for Atomics.waitAsync
+    async waitPushAsync(n: number): Promise<void> {
+        while (true) {
+            const read = Atomics.load(this.readIndex, 0);
+            const write = Atomics.load(this.writeIndex, 0);
+            const used = (write - read) >>> 0;
+            const free = this.capacity - used;
+            if (free >= n) {
+                return;
+            }
+            const result = Atomics.waitAsync(this.readIndex, 0, read);
+            if (result.async) {
+                await result.value;
+            }
+        }
+    }
+
+    // Wait until there are at least n elements available in the buffer (blocks the reader).
+    waitPop(n: number) {
+        while (true) {
+            const read = Atomics.load(this.readIndex, 0);
+            const write = Atomics.load(this.writeIndex, 0);
+            const available = (write - read) >>> 0;
+            if (available >= n) {
+                return;
+            }
+            Atomics.wait(this.writeIndex, 0, read);
+        }
+    }
+
+    // Async version of waitPop, requires a modern browser with support for Atomics.waitAsync
+    async waitPopAsync(n: number): Promise<void> {
         while (true) {
             const read = Atomics.load(this.readIndex, 0);
             const write = Atomics.load(this.writeIndex, 0);
@@ -128,7 +136,10 @@ export class Float32RingBuffer {
             if (available <= n) {
                 return;
             }
-            await Atomics.waitAsync(this.readIndex, 0, read);
+            const result = Atomics.waitAsync(this.readIndex, 0, read);
+            if (result.async) {
+                await result.value;
+            }
         }
     }
 }
