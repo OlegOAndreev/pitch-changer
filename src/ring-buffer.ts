@@ -38,7 +38,7 @@ export class Float32RingBuffer {
 
     private static validateCapacity(capacity: number) {
         if (capacity <= 0 || capacity !== capacity >>> 0 || (capacity & (capacity - 1)) !== 0) {
-            throw new Error(`Invalid SharedArrayBuffer size for Float32RingBuffer`);
+            throw new Error(`Invalid capacity for Float32RingBuffer: ${capacity}`);
         }
     }
 
@@ -101,6 +101,9 @@ export class Float32RingBuffer {
 
     // Wait until there are at least n free elements in the buffer (blocks the writer).
     waitPush(n: number) {
+        if (n > this.capacity) {
+            throw new Error(`waitPush(${n}) exceeds capacity ${this.capacity}`);
+        }
         while (true) {
             const read = Atomics.load(this.readIndex, 0);
             const write = Atomics.load(this.writeIndex, 0);
@@ -115,6 +118,9 @@ export class Float32RingBuffer {
 
     // Async version of waitPush, requires a modern browser with support for Atomics.waitAsync
     async waitPushAsync(n: number): Promise<void> {
+        if (n > this.capacity) {
+            throw new Error(`waitPushAsync(${n}) exceeds capacity ${this.capacity}`);
+        }
         while (true) {
             const read = Atomics.load(this.readIndex, 0);
             const write = Atomics.load(this.writeIndex, 0);
@@ -132,6 +138,9 @@ export class Float32RingBuffer {
 
     // Wait until there are at least n elements available in the buffer (blocks the reader).
     waitPop(n: number) {
+        if (n > this.capacity) {
+            throw new Error(`waitPop(${n}) exceeds capacity ${this.capacity}`);
+        }
         while (true) {
             const read = Atomics.load(this.readIndex, 0);
             const write = Atomics.load(this.writeIndex, 0);
@@ -139,20 +148,23 @@ export class Float32RingBuffer {
             if (available >= n) {
                 return;
             }
-            Atomics.wait(this.writeIndex, 0, read);
+            Atomics.wait(this.writeIndex, 0, write);
         }
     }
 
     // Async version of waitPop, requires a modern browser with support for Atomics.waitAsync
     async waitPopAsync(n: number): Promise<void> {
+        if (n > this.capacity) {
+            throw new Error(`waitPopAsync(${n}) exceeds capacity ${this.capacity}`);
+        }
         while (true) {
             const read = Atomics.load(this.readIndex, 0);
             const write = Atomics.load(this.writeIndex, 0);
             const available = (write - read) >>> 0;
-            if (available <= n) {
+            if (available >= n) {
                 return;
             }
-            const result = Atomics.waitAsync(this.readIndex, 0, read);
+            const result = Atomics.waitAsync(this.writeIndex, 0, write);
             if (result.async) {
                 await result.value;
             }

@@ -110,11 +110,11 @@ describe('Float32RingBuffer', () => {
         let resolved = false;
         await buffer.waitPushAsync(2).then(() => resolved = true);
         expect(resolved).toBe(true);
-        
+
         resolved = false;
         await buffer.waitPushAsync(3).then(() => resolved = true);
         expect(resolved).toBe(true);
-        
+
         resolved = false;
         await buffer.waitPushAsync(0).then(() => resolved = true);
         expect(resolved).toBe(true);
@@ -122,18 +122,38 @@ describe('Float32RingBuffer', () => {
 
     test('waitPopAsync resolves immediately', async () => {
         const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
-        buffer.push(new Float32Array([1, 2, 3]));
+        buffer.push(new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]));
         let resolved = false;
         await buffer.waitPopAsync(5).then(() => resolved = true);
         expect(resolved).toBe(true);
-        
+
         resolved = false;
         await buffer.waitPopAsync(3).then(() => resolved = true);
         expect(resolved).toBe(true);
-        
+
         resolved = false;
-        await buffer.waitPopAsync(10).then(() => resolved = true);
+        await buffer.waitPopAsync(8).then(() => resolved = true);
         expect(resolved).toBe(true);
+    });
+
+    test('waitPush throws if n exceeds capacity', () => {
+        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        expect(() => buffer.waitPush(9)).toThrow('exceeds capacity');
+    });
+
+    test('waitPushAsync throws if n exceeds capacity', async () => {
+        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        await expect(buffer.waitPushAsync(9)).rejects.toThrow('exceeds capacity');
+    });
+
+    test('waitPop throws if n exceeds capacity', () => {
+        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        expect(() => buffer.waitPop(9)).toThrow('exceeds capacity');
+    });
+
+    test('waitPopAsync throws if n exceeds capacity', async () => {
+        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        await expect(buffer.waitPopAsync(9)).rejects.toThrow('exceeds capacity');
     });
 
     test('waitPushAsync waits for push', async () => {
@@ -142,7 +162,7 @@ describe('Float32RingBuffer', () => {
         let resolved = false;
         const promise = buffer.waitPushAsync(5).then(() => resolved = true);
         expect(resolved).toBe(false);
-        
+
         buffer.push(new Float32Array([4]));
         expect(resolved).toBe(false);
 
@@ -158,7 +178,7 @@ describe('Float32RingBuffer', () => {
         let resolved = false;
         const promise = buffer.waitPopAsync(3).then(() => resolved = true);
         expect(resolved).toBe(false);
-        
+
         buffer.pop(new Float32Array([4]));
         expect(resolved).toBe(false);
 
@@ -166,5 +186,57 @@ describe('Float32RingBuffer', () => {
 
         await promise;
         expect(resolved).toBe(true);
+    });
+
+    test('waitPushAsync/waitPopAsync concurrency', async () => {
+        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(16));
+
+        const ITERATIONS = 1000000;
+        const CHUNK_SIZE = 10;
+        async function producer(): Promise<void> {
+            const chunk = new Float32Array(CHUNK_SIZE);
+            for (let i = 0; i < ITERATIONS; i += CHUNK_SIZE) {
+                for (let j = 0; j < CHUNK_SIZE; j++) {
+                    chunk[j] = i + j;
+                }
+                let pushed = 0;
+                while (pushed < CHUNK_SIZE) {
+                    const slice = chunk.subarray(pushed);
+                    const n = buffer.push(slice);
+                    if (n === 0) {
+                        await buffer.waitPushAsync(slice.length / 2);
+                    } else {
+                        pushed += n;
+                    }
+                }
+            }
+        }
+
+        async function consumer(): Promise<void> {
+            const chunk = new Float32Array(CHUNK_SIZE);
+            for (let i = 0; i < ITERATIONS; i += CHUNK_SIZE) {
+                let popped = 0;
+                while (popped < CHUNK_SIZE) {
+                    const slice = chunk.subarray(popped);
+                    const n = buffer.pop(slice);
+                    if (n === 0) {
+                        await buffer.waitPopAsync(slice.length / 2);
+                    } else {
+                        popped += n;
+                    }
+                }
+
+                for (let j = 0; j < CHUNK_SIZE; j++) {
+                    if (chunk[j] !== i + j) {
+                        throw new Error(`Mismatch at index ${i + j}: expected ${i + j}, got ${chunk[j]}`);
+                    }
+                }
+            }
+        }
+
+        const producerPromise = producer();
+        const consumerPromise = consumer();
+        await producerPromise;
+        await consumerPromise;
     });
 });

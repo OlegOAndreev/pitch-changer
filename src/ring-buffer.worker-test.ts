@@ -20,74 +20,66 @@ interface DoneMessage {
     waitCount: number;
 }
 
-if (isMainThread) {
-    // Main thread
-    (async () => {
-        // Test with a small buffer to force synchronization
-        const CAPACITY = 256;
-        const TOTAL_ELEMENTS = 10000000;
+async function main(): Promise<void> {
+    // Test with a small buffer to force synchronization
+    const CAPACITY = 256;
+    const TOTAL_ELEMENTS = 10000000;
 
-        console.log(`Testing Float32RingBuffer with ${TOTAL_ELEMENTS} elements, capacity ${CAPACITY}`);
-        const buffer = Float32RingBuffer.bufferForCapacity(CAPACITY);
-        const producerWorker = new Worker(new URL(import.meta.url), {
-            workerData: {
-                type: 'producer',
-                buffer: buffer,
-                totalElements: TOTAL_ELEMENTS
-            } as StartMessage
-        });
-        const consumerWorker = new Worker(new URL(import.meta.url), {
-            workerData: {
-                type: 'consumer',
-                buffer: buffer,
-                totalElements: TOTAL_ELEMENTS
-            } as StartMessage
-        });
+    console.log(`Testing Float32RingBuffer with ${TOTAL_ELEMENTS} elements, capacity ${CAPACITY}`);
+    const buffer = Float32RingBuffer.bufferForCapacity(CAPACITY);
+    const producerWorker = new Worker(new URL(import.meta.url), {
+        workerData: {
+            type: 'producer',
+            buffer: buffer,
+            totalElements: TOTAL_ELEMENTS
+        } as StartMessage
+    });
+    const consumerWorker = new Worker(new URL(import.meta.url), {
+        workerData: {
+            type: 'consumer',
+            buffer: buffer,
+            totalElements: TOTAL_ELEMENTS
+        } as StartMessage
+    });
 
-        let producerDone = false;
-        let consumerDone = false;
-        let producerWaitCount = 0;
-        let consumerWaitCount = 0;
-        let consumerErrors = 0;
-        function onFinish() {
-            if (producerDone && consumerDone) {
-                console.log(`Total elements: ${TOTAL_ELEMENTS}`);
-                console.log(`Producer wait count: ${producerWaitCount}`);
-                console.log(`Consumer wait count: ${consumerWaitCount}`);
-                console.log(`Errors: ${consumerErrors}`);
-                console.log(`Result: ${consumerErrors === 0 ? 'PASS' : 'FAIL'}`);
-                process.exit(consumerErrors === 0 ? 0 : 1);
-            }
+    let producerDone = false;
+    let consumerDone = false;
+    let producerWaitCount = 0;
+    let consumerWaitCount = 0;
+    let consumerErrors = 0;
+    function onFinish() {
+        if (producerDone && consumerDone) {
+            console.log(`Producer wait count: ${producerWaitCount}, consumer wait count ${consumerWaitCount}`);
+            console.log(`Errors: ${consumerErrors}, result: ${consumerErrors === 0 ? 'PASS' : 'FAIL'}`);
+            process.exit(consumerErrors === 0 ? 0 : 1);
         }
+    }
 
-        producerWorker.on('message', (msg: DoneMessage) => {
-            producerWaitCount = msg.waitCount;
-            producerDone = true;
-            onFinish();
-        });
+    producerWorker.on('message', (msg: DoneMessage) => {
+        producerWaitCount = msg.waitCount;
+        producerDone = true;
+        onFinish();
+    });
 
-        consumerWorker.on('message', (msg: DoneMessage) => {
-            consumerWaitCount = msg.waitCount;
-            consumerErrors = msg.errors!;
-            consumerDone = true;
-            onFinish();
-        });
+    consumerWorker.on('message', (msg: DoneMessage) => {
+        consumerWaitCount = msg.waitCount;
+        consumerErrors = msg.errors!;
+        consumerDone = true;
+        onFinish();
+    });
 
-        producerWorker.on('error', (err: Error) => {
-            console.error('Producer worker error:', err);
-            process.exit(1);
-        });
-
-        consumerWorker.on('error', (err: Error) => {
-            console.error('Consumer worker error:', err);
-            process.exit(1);
-        });
-    })().catch(err => {
-        console.error('Test failed:', err);
+    producerWorker.on('error', (err: Error) => {
+        console.error('Producer worker error:', err);
         process.exit(1);
     });
-} else {
-    // Worker thread
+
+    consumerWorker.on('error', (err: Error) => {
+        console.error('Consumer worker error:', err);
+        process.exit(1);
+    });
+}
+
+function worker() {
     const data: StartMessage = workerData;
 
     const ringBuffer = new Float32RingBuffer(data.buffer);
@@ -111,7 +103,7 @@ if (isMainThread) {
                 const n = ringBuffer.push(slice);
                 if (n === 0) {
                     waitCount++;
-                    ringBuffer.waitPush(slice.length / 2 + 1);
+                    ringBuffer.waitPush(slice.length / 2);
                 } else {
                     pushed += n;
                 }
@@ -160,4 +152,15 @@ if (isMainThread) {
             waitCount,
         } as DoneMessage);
     }
+}
+
+if (isMainThread) {
+    // Main thread
+    main().catch(err => {
+        console.error('Test failed:', err);
+        process.exit(1);
+    });
+} else {
+    // Worker thread
+    worker();
 }
