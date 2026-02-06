@@ -13,8 +13,8 @@ export function getById<T extends HTMLElement>(elementId: string): T {
 //
 // Modified to support both sync and async functions.
 export function debounce<T extends unknown[]>(
-    callback: (...args: T) => void | Promise<void>,
     delay: number,
+    callback: (...args: T) => void | Promise<void>,
 ): (...args: T) => Promise<void> {
     // If curTimer is not undefined, the function is scheduled to be called.
     let curTimer: ReturnType<typeof setTimeout> | undefined;
@@ -57,22 +57,22 @@ export function debounce<T extends unknown[]>(
 }
 
 // Wraps an async event handler to disable a button while the handler is executing.
-export function withButtonDisabled<T extends Event>(
+export function withButtonsDisabled<T extends Event>(
+    buttons: HTMLButtonElement[],
     handler: (event: T) => Promise<void> | void,
-    button?: HTMLButtonElement,
 ): (event: T) => Promise<void> {
     return async (event: T) => {
-        if (!button) {
-            button = (event.target as HTMLButtonElement);
-        }
-        const wasDisabled = button.disabled;
-        button.disabled = true;
+        // Only re-enable buttons if they weren't already disabled before
+        const wasDisabled = [];
+        for (let i = 0; i < buttons.length; i++) {
+            wasDisabled.push(buttons[i].disabled);
+            buttons[i].disabled = true;
+        };
         try {
             await handler(event);
         } finally {
-            // Only re-enable if it wasn't already disabled before
-            if (!wasDisabled) {
-                button.disabled = false;
+            for (let i = 0; i < buttons.length; i++) {
+                buttons[i].disabled = wasDisabled[i];
             }
         }
     };

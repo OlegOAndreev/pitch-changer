@@ -12,7 +12,7 @@ describe('debounce', () => {
 
     test('delays execution of sync function', () => {
         const mockFn = vi.fn();
-        const debounced = debounce(mockFn, 100);
+        const debounced = debounce(100, mockFn);
 
         debounced();
         expect(mockFn).not.toHaveBeenCalled();
@@ -26,7 +26,7 @@ describe('debounce', () => {
 
     test('delays execution of async function', async () => {
         const mockFn = vi.fn().mockResolvedValue(12345);
-        const debounced = debounce(mockFn, 100);
+        const debounced = debounce(100, mockFn);
 
         const promise = debounced();
         expect(mockFn).not.toHaveBeenCalled();
@@ -38,7 +38,7 @@ describe('debounce', () => {
 
     test('only executes the last call when called multiple times', () => {
         const mockFn = vi.fn();
-        const debounced = debounce(mockFn, 100);
+        const debounced = debounce(100, mockFn);
 
         debounced('first');
         vi.advanceTimersByTime(50);
@@ -55,9 +55,9 @@ describe('debounce', () => {
 
     test('returns a promise that resolves after execution', async () => {
         let executed = false;
-        const debounced = debounce(() => {
+        const debounced = debounce(100, () => {
             executed = true;
-        }, 100);
+        });
 
         const promise = debounced();
         expect(executed).toBe(false);
@@ -69,7 +69,7 @@ describe('debounce', () => {
 
     test('awaits previous promise when new call happens', async () => {
         const mockFn = vi.fn();
-        const debounced = debounce(mockFn, 100);
+        const debounced = debounce(100, mockFn);
 
         const promises = [];
         for (let i = 0; i < 1000; i++) {
@@ -85,9 +85,9 @@ describe('debounce', () => {
 
     test('propagates errors from sync callback', async () => {
         const error = new Error('Test error');
-        const debounced = debounce(() => {
+        const debounced = debounce(100, () => {
             throw error;
-        }, 100);
+        });
 
         const promise1 = debounced();
         const promise2 = debounced();
@@ -99,9 +99,9 @@ describe('debounce', () => {
 
     test('propagates errors from async callback', async () => {
         const error = new Error('Async error');
-        const debounced = debounce(async () => {
+        const debounced = debounce(100, async () => {
             throw error;
-        }, 100);
+        });
 
         const promise1 = debounced();
         const promise2 = debounced();
@@ -113,7 +113,7 @@ describe('debounce', () => {
 
     test('handles multiple arguments', () => {
         const mockFn = vi.fn();
-        const debounced = debounce(mockFn, 100);
+        const debounced = debounce(100, mockFn);
 
         debounced(1, 'two', { three: 3 });
         vi.advanceTimersByTime(100);
