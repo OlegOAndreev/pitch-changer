@@ -8,6 +8,8 @@
     <link rel="stylesheet" href="/src/assets/main.css" />
     <link rel="icon" href="data:;base64,=" />
 
+    <!-- This file should not be bundled -->
+    <script src="coi-serviceworker.min.js" data-external></script>
     <script type="module" src="/src/main.ts"></script>
 </head>
 
@@ -51,7 +53,7 @@
             <div id="source-label"></div>
             <div id="processing-indicator" class="processing-indicator" style="display: none;">
                 <span class="spinner"></span>
-                <span>Processing...</span>
+                <span id="processing-label"></span>
             </div>
         </div>
     </div>
