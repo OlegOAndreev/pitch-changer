@@ -120,4 +120,36 @@ describe('debounce', () => {
 
         expect(mockFn).toHaveBeenCalledWith(1, 'two', { three: 3 });
     });
+
+    test('new call during async execution does not hang', async () => {
+        // Simulate an async callback that takes time to complete. A new debounced call arrives while the first callback
+        // is still running. Both promises must settle (not hang forever).
+        let resolveFirst!: () => void;
+        const firstCallPromise = new Promise<void>((resolve) => {
+            resolveFirst = resolve;
+        });
+        let callCount = 0;
+        const debounced = debounce(100, async () => {
+            callCount++;
+            if (callCount === 1) {
+                await firstCallPromise;
+            }
+        });
+
+        // First call
+        const p1 = debounced();
+        vi.advanceTimersByTime(100);
+
+        // While the first async callback is running, make a second call
+        const p2 = debounced();
+        vi.advanceTimersByTime(100);
+
+        // Resolve the first async callback
+        resolveFirst();
+
+        // Both promises should resolve without hanging
+        await expect(p1).resolves.toBeUndefined();
+        await expect(p2).resolves.toBeUndefined();
+        expect(callCount).toBe(2);
+    });
 });

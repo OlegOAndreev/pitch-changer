@@ -33,22 +33,24 @@ export function debounce<T extends unknown[]>(
         }
 
         curTimer = setTimeout(async () => {
+            // Copy the resolves/rejects so that they do not get changesd 
+            const resolves = curResolves;
+            const rejects = curRejects;
+            curResolves = [];
+            curRejects = [];
+            curTimer = undefined;
             try {
                 const result = callback(...args);
                 if (result instanceof Promise) {
                     await result;
                 }
-                for (const resolve of curResolves) {
+                for (const resolve of resolves) {
                     resolve();
                 }
             } catch (error) {
-                for (const reject of curRejects) {
+                for (const reject of rejects) {
                     reject(error);
                 }
-            } finally {
-                curTimer = undefined;
-                curResolves = [];
-                curRejects = [];
             }
         }, delay);
 
