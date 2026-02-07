@@ -1,9 +1,9 @@
 use wasm_bindgen::prelude::*;
 
 use anyhow::{Result, bail};
-use rubato::Resampler;
 
 use crate::WindowType;
+use crate::resampler::StreamingResampler;
 use crate::time_stretcher::{TimeStretchParams, TimeStretcher};
 use crate::web::WrapAnyhowError;
 
@@ -23,7 +23,7 @@ pub struct PitchShiftParams {
     /// Pitch shift factor (e.g., 2.0 = one octave up, 0.5 = one octave down)
     pub pitch_shift: f32,
     /// Sample rate in Hz
-    pub rate: u32,
+    pub sample_rate: u32,
     /// FFT window size in samples
     pub fft_size: usize,
     /// Overlap factor (number of windows overlapping one point, must be power of two)
@@ -35,22 +35,28 @@ pub struct PitchShiftParams {
 #[wasm_bindgen]
 impl PitchShiftParams {
     #[wasm_bindgen(constructor)]
-    pub fn new(rate: u32, pitch_shift: f32) -> Self {
-        let stretch_params = TimeStretchParams::new(rate, 1.0);
+    pub fn new(sample_rate: u32, pitch_shift: f32) -> Self {
+        let stretch_params = TimeStretchParams::new(sample_rate, 1.0);
         Self {
             pitch_shift,
-            rate,
+            sample_rate,
             fft_size: stretch_params.fft_size,
             overlap: stretch_params.overlap,
             window_type: stretch_params.window_type,
         }
+    }
+
+    #[wasm_bindgen]
+    pub fn to_string(&self) -> String {
+        format!("{:?}", self)
     }
 }
 
 #[wasm_bindgen]
 pub struct PitchShifter {
     time_stretcher: TimeStretcher,
-    resampler: rubato::Fft<f32>,
+    resampler: StreamingResampler,
+    // resampler: rubato::Fft<f32>,
 }
 
 // PitchShifter stretches the time by pitch_shift factor and then resamples the rate back so that the output has the
@@ -61,25 +67,14 @@ impl PitchShifter {
     pub fn new(params: &PitchShiftParams) -> std::result::Result<Self, WrapAnyhowError> {
         Self::validate_params(params).map_err(WrapAnyhowError)?;
 
-        let mut time_stretch_params = TimeStretchParams::new(params.rate, params.pitch_shift);
+        let mut time_stretch_params = TimeStretchParams::new(params.sample_rate, params.pitch_shift);
         time_stretch_params.fft_size = params.fft_size;
         time_stretch_params.overlap = params.overlap;
         time_stretch_params.window_type = params.window_type;
 
         let time_stretcher = TimeStretcher::new(&time_stretch_params)?;
 
-        // FFT resampling is much faster than sinc resampling with better quality.
-        let resampler = rubato::Fft::<f32>::new(
-            params.rate as usize,
-            // The params rate is likely smth like 44100 or 48000, so we do not bother too much with this rounding of
-            // fractional sample rate.
-            (params.rate as f32 / params.pitch_shift) as usize,
-            512,
-            1,
-            1,
-            rubato::FixedSync::Input,
-        )
-        .map_err(|e| WrapAnyhowError(anyhow::anyhow!("Failed to create resampler: {:?}", e)))?;
+        let resampler = StreamingResampler::new(params.sample_rate, 1.0 / params.pitch_shift)?;
 
         Ok(Self { time_stretcher, resampler })
     }
@@ -99,7 +94,7 @@ impl PitchShifter {
     #[wasm_bindgen]
     pub fn process(&mut self, src: &[f32]) -> Vec<f32> {
         let time_stretched = self.time_stretcher.process(src);
-        self.resample(&time_stretched)
+        self.resampler.resample(&time_stretched)
     }
 
     /// Finish processing any remaining audio data in the internal buffers. This method must be called after all input
@@ -109,7 +104,8 @@ impl PitchShifter {
     #[wasm_bindgen]
     pub fn finish(&mut self) -> Vec<f32> {
         let time_stretched = self.time_stretcher.finish();
-        let result = self.resample(&time_stretched);
+        let mut result = self.resampler.resample(&time_stretched);
+        self.resampler.finish(&mut result);
         self.reset();
         result
     }
@@ -119,30 +115,6 @@ impl PitchShifter {
     pub fn reset(&mut self) {
         self.time_stretcher.reset();
         self.resampler.reset();
-    }
-
-    fn resample(&mut self, input: &[f32]) -> Vec<f32> {
-        use audioadapter_buffers::direct::InterleavedSlice;
-
-        if input.is_empty() {
-            return Vec::new();
-        }
-
-        let input_slice = InterleavedSlice::new(input, 1, input.len()).expect("InterleavedSlice::new error");
-        let output_len = self.resampler.process_all_needed_output_len(input.len());
-        let mut output_vec = vec![0.0f32; output_len];
-        let mut output_slice =
-            InterleavedSlice::new_mut(&mut output_vec, 1, output_len).expect("InterleavedSlice::new_mut error");
-
-        // Resample the entire input
-        let (input_consumed, output_written) = self
-            .resampler
-            .process_all_into_buffer(&input_slice, &mut output_slice, input.len(), None)
-            .expect("process_all_into_buffer error");
-        assert_eq!(input_consumed, input.len());
-
-        output_vec.truncate(output_written);
-        output_vec
     }
 }
 
@@ -155,6 +127,17 @@ mod tests {
 
     fn process_all(shifter: &mut PitchShifter, input: &[f32]) -> Vec<f32> {
         let mut result = shifter.process(input);
+        result.append(&mut shifter.finish());
+        result
+    }
+
+    fn process_all_small_chunks(shifter: &mut PitchShifter, input: &[f32]) -> Vec<f32> {
+        const CHUNK_SIZE: usize = 100;
+
+        let mut result = vec![];
+        for chunk in input.chunks(CHUNK_SIZE) {
+            result.append(&mut shifter.process(chunk));
+        }
         result.append(&mut shifter.finish());
         result
     }
@@ -292,7 +275,7 @@ mod tests {
                         params.overlap = overlap;
                         params.window_type = window_type;
                         let mut shifter = PitchShifter::new(&params).unwrap();
-                        let output = process_all(&mut shifter, &input);
+                        let output = process_all_small_chunks(&mut shifter, &input);
 
                         // Skip transient at start and end, compare the middle
                         let offset = fft_size * 2;

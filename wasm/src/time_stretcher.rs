@@ -14,7 +14,7 @@ pub struct TimeStretchParams {
     /// Time stretch factor (e.g., 2.0 = twice as long, 0.5 = half length)
     pub time_stretch: f32,
     /// Sample rate in Hz
-    pub rate: u32,
+    pub sample_rate: u32,
     /// FFT window size in samples
     pub fft_size: usize,
     /// Overlap factor (number of windows overlapping one point, must be power of two)
@@ -26,8 +26,13 @@ pub struct TimeStretchParams {
 #[wasm_bindgen]
 impl TimeStretchParams {
     #[wasm_bindgen(constructor)]
-    pub fn new(rate: u32, time_stretch: f32) -> Self {
-        Self { time_stretch, rate, fft_size: 2048, overlap: 8, window_type: WindowType::Hann }
+    pub fn new(sample_rate: u32, time_stretch: f32) -> Self {
+        Self { time_stretch, sample_rate, fft_size: 4096, overlap: 8, window_type: WindowType::Hann }
+    }
+
+    #[wasm_bindgen]
+    pub fn to_string(&self) -> String {
+        format!("{:?}", self)
     }
 }
 
