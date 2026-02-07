@@ -84,6 +84,7 @@ class WorkerImpl implements WorkerApi {
                 const params = new PitchShiftParams(sampleRate, this.params.pitchValue);
                 try {
                     this.processor = new PitchShifter(params);
+                    console.log(`Created PitchShifter with ${params.to_string()}`);
                 } finally {
                     params.free();
                 }
@@ -91,6 +92,7 @@ class WorkerImpl implements WorkerApi {
                 const params = new TimeStretchParams(sampleRate, this.params.pitchValue);
                 try {
                     this.processor = new TimeStretcher(params);
+                    console.log(`Created TimeStretcher with ${params.to_string()}`);
                 } finally {
                     params.free();
                 }
