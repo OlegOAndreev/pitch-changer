@@ -18,6 +18,7 @@
   "dependencies": {
     "@mediabunny/mp3-encoder": "^1.27.3",
     "coi-serviceworker": "^0.1.7",
+    "comlink": "^4.4.2",
     "mediabunny": "^1.27.3"
   },
   "devDependencies": {
