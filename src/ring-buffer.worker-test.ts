@@ -1,6 +1,7 @@
 // Worker test for Float32RingBuffer using Node.js worker_threads. This test creates two workers (producer and consumer)
 // that communicate via a Float32RingBuffer. This is a standalone test that doesn't use vitest or other test frameworks
-// (run this test using npm run test:ring-buffer-worker)
+// (run this test using npm run test:ring-buffer-worker). I do not currently know a better way to test the Atomic.wait
+// (unlike Atomic.waitAsync).
 
 /// <reference types="node" />
 
@@ -110,25 +111,27 @@ function worker() {
             }
         }
 
+        ringBuffer.close();
+
         parentPort!.postMessage({
             type: 'done',
             waitCount,
         } as DoneMessage);
     } else if (data.type === 'consumer') {
+        let consumed = 0;
         let errors = 0;
         let waitCount = 0;
 
         const chunk = new Float32Array(CHUNK_SIZE);
-        for (let i = 0; i < data.totalElements; i += CHUNK_SIZE) {
-            const remaining = data.totalElements - i;
-            const currentChunkSize = Math.min(CHUNK_SIZE, remaining);
-            const currentChunk = chunk.subarray(0, currentChunkSize);
-
+        while (true) {
             let popped = 0;
-            while (popped < currentChunkSize) {
-                const slice = currentChunk.subarray(popped);
+            while (popped < CHUNK_SIZE) {
+                const slice = chunk.subarray(popped);
                 const n = ringBuffer.pop(slice);
                 if (n === 0) {
+                    if (ringBuffer.isClosed) {
+                        break;
+                    }
                     waitCount++;
                     ringBuffer.waitPop(slice.length / 2);
                 } else {
@@ -136,14 +139,25 @@ function worker() {
                 }
             }
 
-            for (let j = 0; j < currentChunkSize; j++) {
-                if (currentChunk[j] !== i + j) {
+            for (let j = 0; j < popped; j++) {
+                const expected = consumed + j;
+                if (chunk[j] !== expected) {
                     errors++;
                     if (errors < 10) {
-                        console.error(`Mismatch at index ${i + j}: expected ${i + j}, got ${currentChunk[j]}`);
+                        console.error(`Mismatch at index ${expected}: expected ${expected}, got ${chunk[j]}`);
                     }
                 }
             }
+            consumed += popped;
+
+            if (ringBuffer.isClosed) {
+                break;
+            }
+        }
+
+        if (consumed !== data.totalElements) {
+            errors++;
+            console.error(`Mismatched number of elements processed: expected ${data.totalElements}, got ${consumed}`);
         }
 
         parentPort!.postMessage({
@@ -155,12 +169,14 @@ function worker() {
 }
 
 if (isMainThread) {
-    // Main thread
     main().catch(err => {
         console.error('Test failed:', err);
         process.exit(1);
     });
 } else {
-    // Worker thread
-    worker();
+    try {
+        worker();
+    } catch (err) {
+        console.error('Worker error:', err);
+    }
 }
