@@ -1,10 +1,8 @@
 import recorderProcessorUrl from './recorder-processor.ts?url';
-import { Float32RingBuffer } from './ring-buffer';
+import { drainRingBuffer, Float32RingBuffer } from './ring-buffer';
 
 // Ring buffer capacity. 2^18 = 262144 samples ~= 5.5s at 48kHz.
 const RING_BUFFER_CAPACITY = 1 << 18;
-// Incoming data is stored in chunks.
-const MIN_CHUNK_SIZE = 4096;
 
 // Exported only for recorder-processor.ts
 export const recorderProcessorName = 'recorder-processor';
@@ -72,26 +70,8 @@ export class Recorder {
         console.log('Recording started');
 
         // Drain loop: collect data from the ring buffer until closed.
-        const recordedChunks: Float32Array[] = [];
-        while (!ringBuffer.isClosed) {
-            await ringBuffer.waitPopAsync(MIN_CHUNK_SIZE);
-            // Drain everything currently available
-            const available = ringBuffer.available;
-            if (available > 0) {
-                const chunk = new Float32Array(available);
-                ringBuffer.pop(chunk);
-                recordedChunks.push(chunk);
-            }
-        }
-        const remaining = ringBuffer.available;
-        if (remaining > 0) {
-            const chunk = new Float32Array(remaining);
-            ringBuffer.pop(chunk);
-            recordedChunks.push(chunk);
-        }
+        const result = await drainRingBuffer(this.ringBuffer);
         this.ringBuffer = null;
-
-        const result = this.chunksToResult(recordedChunks);
         console.log(`Recorded ${result.length} audio samples`);
         return result;
     }
@@ -111,21 +91,5 @@ export class Recorder {
         this.mediaStream = null;
         this.audioWorkletNode!.disconnect();
         this.audioWorkletNode = null;
-    }
-
-    // Accumulate chunks into a single Float32Array backed by SharedArrayBuffer.
-    private chunksToResult(recordedChunks: Float32Array<ArrayBufferLike>[]): Float32Array {
-        const totalLength = recordedChunks.reduce((sum, chunk) => sum + chunk.length, 0);
-        if (totalLength === 0) {
-            console.log('No audio data recorded');
-        }
-        const sab = new SharedArrayBuffer(totalLength * 4);
-        const result = new Float32Array(sab);
-        let offset = 0;
-        for (const chunk of recordedChunks) {
-            result.set(chunk, offset);
-            offset += chunk.length;
-        }
-        return result;
     }
 }

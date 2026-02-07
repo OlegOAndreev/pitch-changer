@@ -24,7 +24,7 @@ export function debounce<T extends unknown[]>(
     let curRejects: ((reason?: any) => void)[] = [];
 
     return (...args: T): Promise<void> => {
-        const { promise, resolve, reject } = Promise.withResolvers();
+        const { promise, resolve, reject } = Promise.withResolvers<void>();
         curResolves.push(resolve);
         curRejects.push(reject);
         if (curTimer) {
@@ -32,7 +32,7 @@ export function debounce<T extends unknown[]>(
         }
 
         curTimer = setTimeout(async () => {
-            // Copy the resolves/rejects so that they do not get changesd 
+            // Copy the resolves/rejects so that they do not get changesd
             const resolves = curResolves;
             const rejects = curRejects;
             curResolves = [];
@@ -53,7 +53,7 @@ export function debounce<T extends unknown[]>(
             }
         }, delay);
 
-        return promise;
+        return promise as Promise<void>;
     }
 }
 
