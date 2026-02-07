@@ -9,6 +9,10 @@ export default {
     format: 'es',
   },
 
+  build: {
+    chunkSizeWarningLimit: 1500,
+  },
+
   plugins: [
     viteStaticCopy({
       targets: [
