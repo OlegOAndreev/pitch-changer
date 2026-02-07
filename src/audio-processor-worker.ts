@@ -1,3 +1,5 @@
+// This is a worker for AudioProcessor
+
 import * as Comlink from 'comlink';
 
 import initWasmModule, { PitchShifter, PitchShiftParams, TimeStretcher, TimeStretchParams } from '../wasm/build/wasm_main_module';

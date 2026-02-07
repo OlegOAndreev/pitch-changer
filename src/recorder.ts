@@ -12,6 +12,7 @@ export interface RecorderProcessorOptions {
 
 let moduleInitialized = false;
 
+// Recorder is a simple interface for recording mono PCM samples using web audio.
 export class Recorder {
     readonly audioContext: AudioContext;
     private audioWorkletNode: AudioWorkletNode | null = null;
@@ -76,6 +77,7 @@ export class Recorder {
         return result;
     }
 
+    // Stops the current recording.
     stop(): void {
         if (!this.isRecording) {
             console.log('Recorder is already stopped');

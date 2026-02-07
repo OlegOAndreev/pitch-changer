@@ -228,9 +228,9 @@ export class Float32RingBuffer {
     }
 }
 
-// Write the contents of ring buffer into a Float32Array, backed by SharedBufferArray, until the ring buffer is closed.
 const MIN_CHUNK_SIZE = 4096;
 
+// Write the contents of ring buffer into a Float32Array, backed by SharedBufferArray, until the ring buffer is closed.
 export async function drainRingBuffer(buffer: Float32RingBuffer): Promise<Float32Array> {
     const recordedChunks: Float32Array[] = [];
     while (!buffer.isClosed) {

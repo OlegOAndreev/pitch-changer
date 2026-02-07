@@ -16,19 +16,20 @@ if (!(await canEncodeAudio('mp3'))) {
     registerMp3Encoder();
 }
 
-export async function encodeToBlob(fileType: string, data: Float32Array, sampleRate: number): Promise<Blob> {
+// Encode PCM mono data into a blob.
+export async function encodeAudioToBlob(fileType: string, data: Float32Array, sampleRate: number): Promise<Blob> {
     let encodedData: ArrayBuffer;
     let mimeType: string;
 
     const startTime = performance.now();
     if (fileType === 'mp3') {
-        encodedData = await encodeToData(data, new Mp3OutputFormat(), 'mp3', sampleRate);
+        encodedData = await encodeAudioToBuffer(data, new Mp3OutputFormat(), 'mp3', sampleRate);
         mimeType = 'audio/mpeg';
     } else if (fileType === 'ogg') {
-        encodedData = await encodeToData(data, new OggOutputFormat(), 'vorbis', sampleRate);
+        encodedData = await encodeAudioToBuffer(data, new OggOutputFormat(), 'vorbis', sampleRate);
         mimeType = 'audio/ogg';
     } else if (fileType === 'wav') {
-        encodedData = await encodeToData(data, new WavOutputFormat(), 'pcm-f32', sampleRate);
+        encodedData = await encodeAudioToBuffer(data, new WavOutputFormat(), 'pcm-f32', sampleRate);
         mimeType = 'audio/wav';
     } else {
         throw new Error('Unsupported file format');
@@ -38,8 +39,8 @@ export async function encodeToBlob(fileType: string, data: Float32Array, sampleR
     return new Blob([encodedData], { type: mimeType });
 }
 
-async function encodeToData(
-    audioData: Float32Array,
+async function encodeAudioToBuffer(
+    data: Float32Array,
     outputFormat: OutputFormat,
     codec: AudioCodec,
     sampleRate: number
@@ -50,11 +51,11 @@ async function encodeToData(
     });
 
     const audioBuffer = new AudioBuffer({
-        length: audioData.length,
+        length: data.length,
         numberOfChannels: 1,
         sampleRate: sampleRate
     });
-    audioBuffer.getChannelData(0).set(audioData);
+    audioBuffer.getChannelData(0).set(data);
 
     const audioSource = new AudioBufferSource({
         codec: codec,

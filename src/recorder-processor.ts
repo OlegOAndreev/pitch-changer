@@ -1,5 +1,4 @@
-// RecorderProcessor is a AudioWorklet processor for recording audio. This file should only be loaded as an AudioWorklet
-// module.
+// This is a AudioWorklet processor for Recorder.
 
 import { recorderProcessorName, type RecorderProcessorOptions } from './recorder';
 import { Float32RingBuffer } from './ring-buffer';

@@ -2,9 +2,6 @@ import * as Comlink from 'comlink';
 
 import type { Float32RingBuffer } from './ring-buffer';
 
-// AudioProcessor runs processing audio in the web worker. The output is written asynchronously into Float32RingBuffer.
-// Closing the output ring buffer cancels the processing.
-
 // The following are exported only for audio-modifier-worker.ts
 export interface WorkerParams {
     processingMode: 'pitch' | 'time';
@@ -18,6 +15,8 @@ export interface WorkerApi {
     process(source: Float32Array, sampleRate: number, outputSab: SharedArrayBuffer): Promise<void>;
 }
 
+// AudioProcessor runs processing audio in the web worker. The output is written asynchronously into Float32RingBuffer.
+// Closing the output ring buffer cancels the processing.
 export class AudioProcessor {
     private worker: Worker;
     private proxy: Comlink.Remote<WorkerApi>;
@@ -29,11 +28,13 @@ export class AudioProcessor {
         this.proxy = Comlink.wrap(this.worker);
     }
 
+    // init must be called before any other parameters.
     async init() {
         const result = await this.proxy.init();
         console.log(`Worker initialized with status ${result}`);
     }
 
+    // Update processing params. This method may be called even if process() is still running.
     setParams(processingMode: 'pitch' | 'time', pitchValue: number) {
         this.proxy.setParams({
             processingMode: processingMode,
@@ -41,6 +42,8 @@ export class AudioProcessor {
         });
     }
 
+    // Run processing source audio data and store the result into output. The processing stops when either all source
+    // data is processed, or output is closed.
     async process(source: Float32Array, sampleRate: number, output: Float32RingBuffer): Promise<void> {
         await this.proxy.process(source, sampleRate, output.buffer);
     }
