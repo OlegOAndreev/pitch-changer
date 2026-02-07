@@ -105,20 +105,22 @@ h1 {
     align-items: center;
     justify-content: center;
     width: 100%;
+    margin-top: 20px;
+    gap: 12px;
 }
 
-#message-label {
-    min-height: 20px;
+#source-label,
+#processing-label {
     font-size: 13px;
     overflow-wrap: break-word;
+    line-height: 1;
 }
 
 #processing-indicator {
-    min-height: 20px;
+    display: flex;
     font-size: 13px;
     align-items: center;
     gap: 8px;
-    margin-top: 4px;
 }
 
 .spinner {
@@ -131,8 +133,13 @@ h1 {
 }
 
 @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
 }
 
 #mode-row {
