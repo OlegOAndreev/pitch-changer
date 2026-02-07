@@ -1,18 +1,25 @@
 import recorderProcessorUrl from './recorder-processor.ts?url';
+import { Float32RingBuffer } from './ring-buffer';
+
+// Ring buffer capacity. 2^18 = 262144 samples ~= 5.5s at 48kHz.
+const RING_BUFFER_CAPACITY = 1 << 18;
+// Incoming data is stored in chunks.
+const MIN_CHUNK_SIZE = 4096;
 
 // Exported only for recorder-processor.ts
 export const recorderProcessorName = 'recorder-processor';
+export interface RecorderProcessorOptions {
+    ringBufferSab: SharedArrayBuffer
+}
 
 let moduleInitialized = false;
 
 export class Recorder {
     readonly audioContext: AudioContext;
-    isRecording = false;
-    recordingFinished: Promise<void> | null = null;
-    recordedChunks: Float32Array[] = [];
-    audioWorkletNode: AudioWorkletNode | null = null;
-    mediaStream: MediaStream | null = null;
-    mediaStreamSourceNode: MediaStreamAudioSourceNode | null = null;
+    private audioWorkletNode: AudioWorkletNode | null = null;
+    private mediaStream: MediaStream | null = null;
+    private mediaStreamSourceNode: MediaStreamAudioSourceNode | null = null;
+    private ringBuffer: Float32RingBuffer | null = null;
 
     constructor(audioContext: AudioContext) {
         this.audioContext = audioContext;
@@ -28,31 +35,32 @@ export class Recorder {
         return new Recorder(audioContext);
     }
 
-    async start() {
-        if (this.isRecording) {
-            console.log('Recorder is already started');
-            return;
-        }
-        this.recordedChunks = [];
+    get isRecording(): boolean {
+        return this.ringBuffer != null;
+    }
 
-        // At least Chrome requires this
+    // Start recording, wait until stop() is called and return the full recording when stop() is called. This method can
+    // be called from the main thread.
+    async record(): Promise<Float32Array> {
+        if (this.isRecording) {
+            throw new Error('Recorder is already recording');
+        }
+
+        // At least Chrome requires this check
         if (this.audioContext.state === 'suspended') {
             await this.audioContext.resume();
         }
 
-        let resolveRecordingFinished: (() => void);
-        this.recordingFinished = new Promise((resolve) => {
-            resolveRecordingFinished = resolve;
+        const ringBufferSab = Float32RingBuffer.bufferForCapacity(RING_BUFFER_CAPACITY);
+        const ringBuffer = new Float32RingBuffer(ringBufferSab);
+        this.ringBuffer = ringBuffer;
+
+        const options: RecorderProcessorOptions = {
+            ringBufferSab: ringBufferSab
+        };
+        this.audioWorkletNode = new AudioWorkletNode(this.audioContext, recorderProcessorName, {
+            processorOptions: options
         });
-        this.audioWorkletNode = new AudioWorkletNode(this.audioContext, recorderProcessorName);
-        this.audioWorkletNode.port.onmessage = (e: MessageEvent<Float32Array | null>) => {
-            // Interpret null as 'flushed data', see RecorderProcessor.
-            if (e.data === null) {
-                resolveRecordingFinished();
-            } else {
-                this.recordedChunks.push(e.data);
-            }
-        }
 
         console.log('Requesting microphone access...');
         this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -60,20 +68,40 @@ export class Recorder {
 
         this.mediaStreamSourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
         this.mediaStreamSourceNode.connect(this.audioWorkletNode);
-        this.isRecording = true;
-        console.log('MediaStreamSource connected, recording started');
+
+        console.log('Recording started');
+
+        // Drain loop: collect data from the ring buffer until closed.
+        const recordedChunks: Float32Array[] = [];
+        while (!ringBuffer.isClosed) {
+            await ringBuffer.waitPopAsync(MIN_CHUNK_SIZE);
+            // Drain everything currently available
+            const available = ringBuffer.available;
+            if (available > 0) {
+                const chunk = new Float32Array(available);
+                ringBuffer.pop(chunk);
+                recordedChunks.push(chunk);
+            }
+        }
+        const remaining = ringBuffer.available;
+        if (remaining > 0) {
+            const chunk = new Float32Array(remaining);
+            ringBuffer.pop(chunk);
+            recordedChunks.push(chunk);
+        }
+        this.ringBuffer = null;
+
+        const result = this.chunksToResult(recordedChunks);
+        console.log(`Recorded ${result.length} audio samples`);
+        return result;
     }
 
-    async stop(): Promise<Float32Array> {
+    stop(): void {
         if (!this.isRecording) {
             console.log('Recorder is already stopped');
-            return new Float32Array(0);
+            return;
         }
-
-        this.isRecording = false;
-
-        this.audioWorkletNode!.port.postMessage('flush');
-        await this.recordingFinished;
+        this.ringBuffer!.close();
 
         // If we do not disconnect the MediaStreamAudioSourceNode, even if we stop the media stream tracks, it continues
         // sending data to connected nodes.
@@ -83,23 +111,21 @@ export class Recorder {
         this.mediaStream = null;
         this.audioWorkletNode!.disconnect();
         this.audioWorkletNode = null;
+    }
 
-        if (this.recordedChunks.length === 0) {
+    // Accumulate chunks into a single Float32Array backed by SharedArrayBuffer.
+    private chunksToResult(recordedChunks: Float32Array<ArrayBufferLike>[]): Float32Array {
+        const totalLength = recordedChunks.reduce((sum, chunk) => sum + chunk.length, 0);
+        if (totalLength === 0) {
             console.log('No audio data recorded');
-            return new Float32Array(0);
         }
-
-        console.log(`Got recorded chunks ${this.recordedChunks.length}`);
-        const totalLength = this.recordedChunks.reduce((sum, chunk) => sum + chunk.length, 0);
-        const result = new Float32Array(totalLength);
+        const sab = new SharedArrayBuffer(totalLength * 4);
+        const result = new Float32Array(sab);
         let offset = 0;
-        for (const chunk of this.recordedChunks) {
+        for (const chunk of recordedChunks) {
             result.set(chunk, offset);
             offset += chunk.length;
         }
-        this.recordedChunks = [];
-
-        console.log(`Recorded ${result.length} audio samples`);
         return result;
     }
 }
