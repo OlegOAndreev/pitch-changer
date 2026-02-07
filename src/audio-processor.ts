@@ -1,31 +1,47 @@
 import * as Comlink from 'comlink';
 
-// Exported only for process-audio-worker
-export type AudioProcessorWorker = {
-    shiftPitch(audioData: Float32Array, sampleRate: number, pitchRatio: number): Float32Array;
-    timeStretch(audioData: Float32Array, sampleRate: number, stretchRatio: number): Float32Array;
+import type { Float32RingBuffer } from './ring-buffer';
+
+// AudioProcessor runs processing audio in the web worker. The output is written asynchronously into Float32RingBuffer.
+// Closing the output ring buffer cancels the processing.
+
+// The following are exported only for audio-modifier-worker.ts
+export interface WorkerParams {
+    processingMode: 'pitch' | 'time';
+    pitchValue: number;
 };
 
-// Class for creating audio processor worker and managing async/await promises.
+export interface WorkerApi {
+    init(): Promise<boolean>;
+    setParams(params: WorkerParams): void;
+    // outputSab must be a buffer for Float32RingBuffer
+    process(source: Float32Array, sampleRate: number, outputSab: SharedArrayBuffer): Promise<void>;
+}
+
 export class AudioProcessor {
     private worker: Worker;
-    private proxy: Comlink.Remote<AudioProcessorWorker>;
+    private proxy: Comlink.Remote<WorkerApi>;
 
     constructor() {
         this.worker = new Worker(new URL('./audio-processor-worker.ts', import.meta.url), {
-            type: 'module'
+            type: 'module',
         });
-        this.proxy = Comlink.wrap<AudioProcessorWorker>(this.worker);
-        console.log('Audio worker initialized with Comlink');
+        this.proxy = Comlink.wrap(this.worker);
     }
 
-    async shiftPitch(audioData: Float32Array, sampleRate: number, pitchRatio: number): Promise<Float32Array> {
-        // TODO: Check what happens with buffer.
-        return await this.proxy.shiftPitch(audioData, sampleRate, pitchRatio);
+    async init() {
+        const result = await this.proxy.init();
+        console.log(`Worker initialized with status ${result}`);
     }
 
-    async timeStretch(audioData: Float32Array, sampleRate: number, stretchRatio: number): Promise<Float32Array> {
-        // TODO: Check what happens with buffer.
-        return await this.proxy.timeStretch(audioData, sampleRate, stretchRatio);
+    setParams(processingMode: 'pitch' | 'time', pitchValue: number) {
+        this.proxy.setParams({
+            processingMode: processingMode,
+            pitchValue: pitchValue,
+        });
+    }
+
+    async process(source: Float32Array, sampleRate: number, output: Float32RingBuffer): Promise<void> {
+        await this.proxy.process(source, sampleRate, output.buffer);
     }
 }
