@@ -363,11 +363,16 @@ fn main() -> Result<()> {
             params.overlap = overlap;
             params.fft_size = fft_size;
             params.window_type = window_type;
-            let mut shifter = TimeStretcher::new(&params)?;
+            let mut stretcher = TimeStretcher::new(&params)?;
 
             start_time = Instant::now();
-            let mut output_data = shifter.process(&input.data);
-            output_data.append(&mut shifter.finish());
+            // let mut output_data = shifter.process(&input.data);
+            let mut output_data = vec![];
+            // Use fft_size - 1 for chunks to test edge cases.
+            for chunk in input.data.chunks(fft_size - 1) {
+                output_data.append(&mut stretcher.process(chunk));
+            }
+            output_data.append(&mut stretcher.finish());
             println!(
                 "Output generated: {} samples in {}ms",
                 output_data.len(),
@@ -412,7 +417,12 @@ fn main() -> Result<()> {
             let mut shifter = PitchShifter::new(&params)?;
 
             start_time = Instant::now();
-            let mut output_data = shifter.process(&input.data);
+            // let mut output_data = shifter.process(&input.data);
+            let mut output_data = vec![];
+            // Use fft_size - 1 for chunks to test edge cases.
+            for chunk in input.data.chunks(fft_size - 1) {
+                output_data.append(&mut shifter.process(chunk));
+            }
             output_data.append(&mut shifter.finish());
             println!(
                 "Output generated: {} samples in {}ms",

@@ -223,6 +223,17 @@ mod tests {
         result
     }
 
+    fn process_all_small_chunks(stretcher: &mut TimeStretcher, input: &[f32]) -> Vec<f32> {
+        const CHUNK_SIZE: usize = 100;
+
+        let mut result = vec![];
+        for chunk in input.chunks(CHUNK_SIZE) {
+            result.append(&mut stretcher.process(chunk));
+        }
+        result.append(&mut stretcher.finish());
+        result
+    }
+
     #[test]
     fn test_randomized_pitch_stretcher_no_crash() {
         use rand;
@@ -334,7 +345,7 @@ mod tests {
                         params.overlap = overlap;
                         params.window_type = window_type;
                         let mut stretcher = TimeStretcher::new(&params).unwrap();
-                        let output = process_all(&mut stretcher, &input);
+                        let output = process_all_small_chunks(&mut stretcher, &input);
 
                         // Skip transient at start and end, compare the middle
                         let offset = fft_size * 2;
