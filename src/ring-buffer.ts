@@ -228,13 +228,12 @@ export class Float32RingBuffer {
     }
 }
 
-const MIN_CHUNK_SIZE = 4096;
-
 // Write the contents of ring buffer into a Float32Array, backed by SharedBufferArray, until the ring buffer is closed.
 export async function drainRingBuffer(buffer: Float32RingBuffer): Promise<Float32Array> {
+    const chunkSize = buffer.capacity / 4;
     const recordedChunks: Float32Array[] = [];
     while (!buffer.isClosed) {
-        await buffer.waitPopAsync(MIN_CHUNK_SIZE);
+        await buffer.waitPopAsync(chunkSize);
         // Drain everything currently available
         const available = buffer.available;
         if (available > 0) {

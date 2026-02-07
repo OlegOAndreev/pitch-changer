@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { Float32RingBuffer } from './ring-buffer';
+import { Float32RingBuffer, drainRingBuffer } from './ring-buffer';
 
 // Note: Testing actual blocking behavior requires multiple threads, which is beyond the scope of unit tests.
 describe('Float32RingBuffer', () => {
@@ -307,6 +307,27 @@ describe('Float32RingBuffer', () => {
         const dst = new Float32Array(3);
         expect(buffer.pop(dst)).toBe(3);
         expect(dst).toEqual(new Float32Array([1, 2, 3]));
+        expect(buffer.available).toBe(0);
+    });
+
+    test('drainRingBuffer collects all data', async () => {
+        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(16));
+        
+        const data1 = new Float32Array([1, 2, 3, 4]);
+        const data2 = new Float32Array([5, 6, 7, 8]);
+        buffer.push(data1);
+        buffer.push(data2);
+        
+        const drainPromise = drainRingBuffer(buffer);
+        
+        const data3 = new Float32Array([9, 10, 11, 12]);
+        buffer.push(data3);
+        buffer.close();
+        
+        const result = await drainPromise;
+        
+        expect(result.length).toBe(12);
+        expect(Array.from(result)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
         expect(buffer.available).toBe(0);
     });
 });
