@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { debounce } from './utils';
+import { debounce, secondsToString } from './utils';
 
 describe('debounce', () => {
     beforeEach(() => {
@@ -124,15 +124,12 @@ describe('debounce', () => {
     test('new call during async execution does not hang', async () => {
         // Simulate an async callback that takes time to complete. A new debounced call arrives while the first callback
         // is still running. Both promises must settle (not hang forever).
-        let resolveFirst!: () => void;
-        const firstCallPromise = new Promise<void>((resolve) => {
-            resolveFirst = resolve;
-        });
+        const { promise, resolve } = Promise.withResolvers<void>();
         let callCount = 0;
         const debounced = debounce(100, async () => {
             callCount++;
             if (callCount === 1) {
-                await firstCallPromise;
+                await promise;
             }
         });
 
@@ -145,11 +142,34 @@ describe('debounce', () => {
         vi.advanceTimersByTime(100);
 
         // Resolve the first async callback
-        resolveFirst();
+        resolve();
 
         // Both promises should resolve without hanging
         await expect(p1).resolves.toBeUndefined();
         await expect(p2).resolves.toBeUndefined();
         expect(callCount).toBe(2);
+    });
+});
+
+describe('secondsToString', () => {
+    test('converts seconds to string with rounding', () => {
+        expect(secondsToString(1.4)).toBe('1s');
+        expect(secondsToString(65.6)).toBe('1m6s');
+    });
+
+    test('handles zero seconds', () => {
+        expect(secondsToString(0)).toBe('0s');
+        expect(secondsToString(0.4)).toBe('0s');
+        expect(secondsToString(0.5)).toBe('1s');
+    });
+
+    test('handles minutes only', () => {
+        expect(secondsToString(60)).toBe('1m0s');
+        expect(secondsToString(120)).toBe('2m0s');
+        expect(secondsToString(59.9)).toBe('1m0s');
+    });
+
+    test('handles large seconds', () => {
+        expect(secondsToString(3661)).toBe('61m1s'); // 1 hour 1 minute 1 second
     });
 });

@@ -24,10 +24,9 @@ export function debounce<T extends unknown[]>(
     let curRejects: ((reason?: any) => void)[] = [];
 
     return (...args: T): Promise<void> => {
-        const promise = new Promise<void>((resolve, reject) => {
-            curResolves.push(resolve);
-            curRejects.push(reject);
-        });
+        const { promise, resolve, reject } = Promise.withResolvers();
+        curResolves.push(resolve);
+        curRejects.push(reject);
         if (curTimer) {
             clearTimeout(curTimer);
         }
@@ -78,4 +77,16 @@ export function withButtonsDisabled<T extends Event>(
             }
         }
     };
+}
+
+// Convert number of seconds into a string representation.
+export function secondsToString(sec: number): string {
+    const rounded = Math.max(0, Math.round(sec));
+    const minutes = Math.floor(rounded / 60);
+    const seconds = rounded % 60;
+    if (minutes > 0) {
+        return `${minutes}m${seconds}s`;
+    } else {
+        return `${seconds}s`;
+    }
 }
