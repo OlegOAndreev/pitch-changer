@@ -16,6 +16,7 @@ saveOkBtn.addEventListener('click', () => {
         return;
     }
     saveDialogResolve(filename);
+    saveDialogResolve = null;
 });
 
 saveCancelBtn.addEventListener('click', () => {
@@ -25,6 +26,7 @@ saveCancelBtn.addEventListener('click', () => {
         return;
     }
     saveDialogResolve(null);
+    saveDialogResolve = null;
 });
 
 saveInput.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -64,9 +66,9 @@ export async function showSaveDialog(): Promise<[string | null, FileSystemFileHa
         saveDialogOverlay.style.display = 'flex';
         saveInput.focus();
         saveInput.select();
-        return new Promise((resolve) => {
-            saveDialogResolve = (filename) => resolve([filename, null]);
-        });
+        const { promise, resolve } = Promise.withResolvers<[string | null, FileSystemFileHandle | null]>();
+        saveDialogResolve = (filename) => resolve([filename, null]);
+        return promise;
     }
 }
 
