@@ -11,11 +11,14 @@
 * Build results are located in public/
 * Rust files are located in wasm/
 
-## Project rules
+## HTML/CSS rules
 * Do not embed HTML or CSS in typescript files
 * Do absolutely minimal changes to other CSS rules if you do any CSS modification
 * When adding new CSS rules, prefer adding id-based rules instead of class-based rules
 * Add class-based CSS rules only if you see duplication in rules
+
+## TypeScript rules
+* We use SharedArrayBuffer for synchronization with workers and audio worklets
 
 ## Build & testing commands
 * Only attempt running any commands for building and testing as outlined here
