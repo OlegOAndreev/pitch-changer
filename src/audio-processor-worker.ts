@@ -4,7 +4,7 @@ import * as Comlink from 'comlink';
 
 import initWasmModule, { Float32Vec, PitchShifter, PitchShiftParams, TimeStretcher, TimeStretchParams } from '../wasm/build/wasm_main_module';
 import type { WorkerApi, WorkerParams } from './audio-processor';
-import { Float32RingBuffer } from './sync';
+import { Float32RingBuffer, pushAllRingBuffer } from './sync';
 
 type Processor = PitchShifter | TimeStretcher;
 
@@ -48,14 +48,10 @@ class WorkerImpl implements WorkerApi {
                 processedVec.clear();
                 processor.process(sourceVec, processedVec);
 
-                await output.waitPushAsync(processedVec.len);
-                const n = output.push(processedVec.array);
+                // console.debug(`Processing chunks of size ${sourceVec.len} with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}`);
+                await pushAllRingBuffer(processedVec.array, output);
                 if (output.isClosed) {
                     return;
-                }
-                // console.debug(`Processing chunks of size ${sourceVec.len} with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}, stored ${n} samples`);
-                if (n !== processedVec.len && !output.isClosed) {
-                    throw new Error(`Internal error: unexpected push(${processedVec.len}) result: ${n}`);
                 }
             }
 
@@ -63,15 +59,8 @@ class WorkerImpl implements WorkerApi {
             const processor = this.getProcessor(sampleRate);
             processedVec.clear();
             processor.finish(processedVec);
-            await output.waitPushAsync(processedVec.len);
-            const n = output.push(processedVec.array);
-            // console.debug(`Processing final chunk with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}, stored ${n} samples`);
-            if (output.isClosed) {
-                return;
-            }
-            if (n !== processedVec.len && !output.isClosed) {
-                throw new Error(`Internal error: unexpected push(${processedVec.len}) result: ${n}`);
-            }
+            // console.debug(`Processing final chunk with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}`);
+            await pushAllRingBuffer(processedVec.array, output);
         } finally {
             sourceVec.free();
             processedVec.free();
@@ -112,7 +101,6 @@ class WorkerImpl implements WorkerApi {
         } finally {
             this.paramsDirty = false;
         }
-
     }
 }
 

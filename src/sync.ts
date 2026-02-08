@@ -336,3 +336,20 @@ export async function drainRingBuffer(buffer: Float32RingBuffer): Promise<Float3
     }
     return result;
 }
+
+// Write the contents of input into ring buffer until either all input is pushed or ring buffer is closed.
+export async function pushAllRingBuffer(input: Float32Array, buffer: Float32RingBuffer): Promise<void> {
+    let pushed = 0;
+    while (pushed < input.length) {
+        const toPush = Math.min(buffer.capacity, input.length - pushed);
+        await buffer.waitPushAsync(toPush);
+        const n = buffer.push(input.subarray(pushed, pushed + toPush));
+        if (buffer.isClosed) {
+            return;
+        }
+        if (n !== toPush && !buffer.isClosed) {
+            throw new Error(`Internal error: unexpected push(${toPush}) result: ${n}`);
+        }
+        pushed += toPush;
+    }
+}

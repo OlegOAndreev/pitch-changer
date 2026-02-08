@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { CountDownLatch, Float32RingBuffer, drainRingBuffer } from './sync';
+import { CountDownLatch, Float32RingBuffer, drainRingBuffer, pushAllRingBuffer } from './sync';
 
 describe('CountDownLatch', () => {
     test('withCount creates latch with correct count', () => {
@@ -378,5 +378,51 @@ describe('Float32RingBuffer', () => {
         expect(result.length).toBe(12);
         expect(Array.from(result)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
         expect(buffer.available).toBe(0);
+    });
+
+    test('pushAllRingBuffer handles data larger than capacity', async () => {
+        const buffer = Float32RingBuffer.withCapacity(8);
+        const input = new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
+
+        const pushPromise = pushAllRingBuffer(input, buffer);
+
+        // While pushAllRingBuffer is running, we need to pop data to free up space
+        const poppedData: number[] = [];
+        async function consumeBuffer() {
+            while (poppedData.length < input.length) {
+                await buffer.waitPopAsync(1);
+                const chunk = new Float32Array(4); // Pop in smaller chunks
+                const popped = buffer.pop(chunk);
+                for (let i = 0; i < popped; i++) {
+                    poppedData.push(chunk[i]);
+                }
+            }
+        }
+        const consumePromise = consumeBuffer();
+
+        await Promise.all([pushPromise, consumePromise]);
+
+        expect(poppedData.length).toBe(17);
+        expect(poppedData).toEqual(Array.from(input));
+        expect(buffer.available).toBe(0);
+    });
+
+    test('pushAllRingBuffer stops when buffer is closed', async () => {
+        const buffer = Float32RingBuffer.withCapacity(8);
+        const input = new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+
+        const pushPromise = pushAllRingBuffer(input, buffer);
+
+        const firstChunk = new Float32Array([1, 2, 3, 4]);
+        buffer.push(firstChunk);
+        
+        buffer.close();
+        await expect(pushPromise).resolves.toBeUndefined();
+
+        expect(buffer.available).toBe(4);
+        const output = new Float32Array(4);
+        const popped = buffer.pop(output);
+        expect(popped).toBe(4);
+        expect(Array.from(output)).toEqual([1, 2, 3, 4]);
     });
 });
