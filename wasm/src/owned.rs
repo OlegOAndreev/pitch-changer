@@ -6,7 +6,7 @@ use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub struct Float32Owned {
-	#[wasm_bindgen(skip)]
+    #[wasm_bindgen(skip)]
     pub data: Vec<f32>,
 }
 
@@ -14,9 +14,7 @@ pub struct Float32Owned {
 impl Float32Owned {
     #[wasm_bindgen(constructor)]
     pub fn new(len: usize) -> Float32Owned {
-        let mut data = Vec::new();
-        data.resize(len, 0.0);
-        Float32Owned { data }
+        Float32Owned { data: vec![0.0; len] }
     }
 
     #[wasm_bindgen(getter)]

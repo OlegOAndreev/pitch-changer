@@ -7,15 +7,6 @@ use crate::resampler::StreamingResampler;
 use crate::time_stretcher::{TimeStretchParams, TimeStretcher};
 use crate::web::WrapAnyhowError;
 
-/// Resampling configuration during audio pitch shifting.
-#[derive(Debug, Clone, Copy)]
-#[wasm_bindgen]
-pub enum ResampleParams {
-    Cubic,
-    Sinc,
-    Fft,
-}
-
 /// Parameters for audio pitch shifting
 #[derive(Debug, Clone, Copy)]
 #[wasm_bindgen]
@@ -47,7 +38,7 @@ impl PitchShiftParams {
     }
 
     #[wasm_bindgen]
-    pub fn to_string(&self) -> String {
+    pub fn to_debug_string(&self) -> String {
         format!("{:?}", self)
     }
 }
@@ -56,7 +47,6 @@ impl PitchShiftParams {
 pub struct PitchShifter {
     time_stretcher: TimeStretcher,
     resampler: StreamingResampler,
-    // resampler: rubato::Fft<f32>,
 }
 
 // PitchShifter stretches the time by pitch_shift factor and then resamples the rate back so that the output has the

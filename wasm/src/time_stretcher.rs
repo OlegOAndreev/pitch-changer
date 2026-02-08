@@ -31,7 +31,7 @@ impl TimeStretchParams {
     }
 
     #[wasm_bindgen]
-    pub fn to_string(&self) -> String {
+    pub fn to_debug_string(&self) -> String {
         format!("{:?}", self)
     }
 }

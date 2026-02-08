@@ -59,8 +59,13 @@ impl StreamingResampler {
 
         // If previous chunk is not empty, fill it and process the full chunk.
         if !self.previous_chunk.is_empty() {
+            assert!(
+                self.previous_chunk.len() < input_chunk_size,
+                "self.previous_chunk.len() = {}, input_chunk_size = {}",
+                self.previous_chunk.len(),
+                input_chunk_size
+            );
             let to_copy = input_chunk_size - self.previous_chunk.len();
-            assert!(to_copy > 0);
             if input.len() < to_copy {
                 self.previous_chunk.extend_from_slice(input);
                 return vec![];
@@ -83,7 +88,12 @@ impl StreamingResampler {
         // Store the remainder in the previous_chunk
         self.previous_chunk.clear();
         self.previous_chunk.extend_from_slice(&input[input_pos..]);
-        assert!(self.previous_chunk.len() < input_chunk_size);
+        assert!(
+            self.previous_chunk.len() < input_chunk_size,
+            "self.previous_chunk.len() = {}, input_chunk_size = {}",
+            self.previous_chunk.len(),
+            input_chunk_size
+        );
 
         output
     }
@@ -114,7 +124,7 @@ impl StreamingResampler {
     fn resample_chunk(&mut self, input: &[f32], output: &mut Vec<f32>) {
         let input_chunk_size = self.resampler.input_frames_next();
         let output_chunk_size = self.resampler.output_frames_next();
-        let input_slice = InterleavedSlice::new(&input, 1, input_chunk_size).expect("InterleavedSlice::new");
+        let input_slice = InterleavedSlice::new(input, 1, input_chunk_size).expect("InterleavedSlice::new");
         let output_pos = output.len();
         output.resize(output_pos + output_chunk_size, 0.0);
         let mut output_slice = InterleavedSlice::new_mut(&mut output[output_pos..], 1, output_chunk_size)
@@ -126,7 +136,13 @@ impl StreamingResampler {
         assert_eq!(input_consumed, input_chunk_size);
         output.truncate(output_pos + output_written);
 
-        if self.should_delay_output {
+        if self.should_delay_output && output_written > 0 {
+            assert!(
+                self.resampler.output_delay() <= output_written,
+                "self.resampler.output_delay() = {}, output_written = {}",
+                self.resampler.output_delay(),
+                output_written
+            );
             let truncated_len = output.len() - self.resampler.output_delay();
             output.truncate(truncated_len);
             self.should_delay_output = false;
