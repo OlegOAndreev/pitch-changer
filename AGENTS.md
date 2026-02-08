@@ -24,7 +24,8 @@
 * Only attempt running any commands for building and testing as outlined here
 * Install JavaScript/TypeScript libraries with `npm install`, do not run any other commands
 * When changing TypeScript or html/css files, run `npm run build:ts` and `npm run test:ts`, do not run any other commands
-* When changing Rust files, run `npm run build` and `npm run test`, do not run any other commands
+* When changing Rust files, run `npm run build` and `npm run test`
+* Do not attempt running any other commands, including `npx`, unless absolutely required (and then ask the user first)
 * Run `npm run build` to check the final result in dist/
 * Do not attempt opening browser for UI testing, always request the user to test the UI
 * Do not attempt API calls, always request the user to test the API
