@@ -15,12 +15,9 @@ let moduleInitialized = false;
 // Recorder is a simple interface for recording mono PCM samples using web audio.
 export class Recorder {
     readonly audioContext: AudioContext;
-    private audioWorkletNode: AudioWorkletNode | null = null;
-    private mediaStream: MediaStream | null = null;
-    private mediaStreamSourceNode: MediaStreamAudioSourceNode | null = null;
     private ringBuffer: Float32RingBuffer | null = null;
 
-    constructor(audioContext: AudioContext) {
+    private constructor(audioContext: AudioContext) {
         this.audioContext = audioContext;
     }
 
@@ -57,41 +54,39 @@ export class Recorder {
         const options: RecorderProcessorOptions = {
             ringBufferSab: ringBufferSab
         };
-        this.audioWorkletNode = new AudioWorkletNode(this.audioContext, recorderProcessorName, {
+        const audioWorkletNode = new AudioWorkletNode(this.audioContext, recorderProcessorName, {
             processorOptions: options
         });
 
         console.log('Requesting microphone access...');
-        this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         console.log('Microphone access granted');
 
-        this.mediaStreamSourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
-        this.mediaStreamSourceNode.connect(this.audioWorkletNode);
+        const mediaStreamSourceNode = this.audioContext.createMediaStreamSource(mediaStream);
+        mediaStreamSourceNode.connect(audioWorkletNode);
 
         console.log('Recording started');
-
-        // Drain loop: collect data from the ring buffer until closed.
-        const result = await drainRingBuffer(this.ringBuffer);
-        this.ringBuffer = null;
-        console.log(`Recorded ${result.length} audio samples`);
-        return result;
+        try {
+            // Drain loop: collect data from the ring buffer until closed.
+            const result = await drainRingBuffer(this.ringBuffer);
+            this.ringBuffer = null;
+            console.log(`Recorded ${result.length} audio samples`);
+            return result;
+        } finally {
+            // If we do not disconnect the MediaStreamAudioSourceNode, even if we stop the media stream tracks, it continues
+            // sending data to connected nodes.
+            mediaStreamSourceNode.disconnect();
+            mediaStream.getTracks().forEach(track => track.stop());
+            // audioWorkletNode.disconnect();
+        }
     }
 
-    // Stops the current recording.
+    // Stops the current recording, forcing the current record() call to complete.
     stop(): void {
         if (!this.isRecording) {
             console.log('Recorder is already stopped');
             return;
         }
         this.ringBuffer!.close();
-
-        // If we do not disconnect the MediaStreamAudioSourceNode, even if we stop the media stream tracks, it continues
-        // sending data to connected nodes.
-        this.mediaStreamSourceNode!.disconnect();
-        this.mediaStreamSourceNode = null;
-        this.mediaStream!.getTracks().forEach(track => track.stop());
-        this.mediaStream = null;
-        this.audioWorkletNode!.disconnect();
-        this.audioWorkletNode = null;
     }
 }

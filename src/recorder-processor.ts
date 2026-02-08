@@ -13,6 +13,9 @@ class RecorderProcessor extends AudioWorkletProcessor {
     }
 
     process(inputs: Float32Array[][], _outputs: Float32Array[][], _parameters: Record<string, Float32Array>): boolean {
+        if (this.ringBuffer.isClosed) {
+            return false;
+        }
         const input = inputs[0];
         if (input && input.length > 0) {
             const channelData = input[0];
