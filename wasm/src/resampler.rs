@@ -1,3 +1,5 @@
+use std::mem;
+
 use audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{Fft, FixedSync, Resampler};
 
@@ -8,10 +10,14 @@ const FFT_SIZE: u32 = 512;
 /// A resampler that uses rubato's FFT-based resampling with buffering for arbitrary input chunks.
 pub struct StreamingResampler {
     resampler: Fft<f32>,
-    /// Buffer for leftover input samples that are not a full chunk.
-    leftover_buffer: Vec<f32>,
+    // Buffer for leftover input samples that do not form a full chunk
+    previous_chunk: Vec<f32>,
+    // See Fft::output_delay()
+    should_delay_output: bool,
 }
 
+// Rubato streaming interface is really really horrible. Thanks to Deepseek and Resampler::process_all_into_buffer
+// giving inspiration on how to actually use it.
 impl StreamingResampler {
     /// Create a new resampler with the given sample rate ratio. The ratio is output sample rate / input sample rate.
     pub fn new(sample_rate: u32, sample_rate_ratio: f32) -> std::result::Result<Self, WrapAnyhowError> {
@@ -27,7 +33,9 @@ impl StreamingResampler {
         )
         .map_err(|e| WrapAnyhowError(anyhow::anyhow!("Failed to create resampler: {:?}", e)))?;
 
-        Ok(Self { resampler, leftover_buffer: Vec::new() })
+        let previous_chunk = Vec::with_capacity(resampler.input_frames_next());
+
+        Ok(Self { resampler, previous_chunk, should_delay_output: true })
     }
 
     /// Resample part of the input audio. The remainder will be buffered and used during next `resample()` or `finish()`
@@ -40,58 +48,42 @@ impl StreamingResampler {
             return vec![];
         }
 
-        // Combine leftover buffer with new input
-        let mut combined_input = Vec::with_capacity(self.leftover_buffer.len() + input.len());
-        combined_input.extend_from_slice(&self.leftover_buffer);
-        combined_input.extend_from_slice(input);
+        // input_frames_next() and output_frames_next() return constant values.
+        let input_chunk_size = self.resampler.input_frames_next();
+        let output_chunk_size = self.resampler.output_frames_max();
 
-        // Clear leftover buffer for this call
-        self.leftover_buffer.clear();
+        let output_capacity = (self.previous_chunk.len() + input.len()) / input_chunk_size * output_chunk_size;
+        let mut output = Vec::with_capacity(output_capacity);
 
-        let chunk_size = self.resampler.input_frames_next();
-        let total_samples = combined_input.len();
+        let mut input_pos = 0;
 
-        // If we don't have enough for even one chunk, store everything in leftover buffer
-        if total_samples < chunk_size {
-            self.leftover_buffer = combined_input;
-            return Vec::new();
+        // If previous chunk is not empty, fill it and process the full chunk.
+        if !self.previous_chunk.is_empty() {
+            let to_copy = input_chunk_size - self.previous_chunk.len();
+            assert!(to_copy > 0);
+            if input.len() < to_copy {
+                self.previous_chunk.extend_from_slice(input);
+                return vec![];
+            }
+
+            self.previous_chunk.extend_from_slice(&input[..to_copy]);
+            // This is an annoying dance around Rust borrowck.
+            let mut previous_chunk = mem::take(&mut self.previous_chunk);
+            self.resample_chunk(&previous_chunk, &mut output);
+            mem::swap(&mut self.previous_chunk, &mut previous_chunk);
+            input_pos += to_copy;
         }
 
-        // Calculate how many complete chunks we can process
-        let complete_chunks = total_samples / chunk_size;
-        let leftover = total_samples % chunk_size;
-
-        // Process complete chunks using process_into_buffer
-        let mut output = Vec::new();
-        for chunk_idx in 0..complete_chunks {
-            let start = chunk_idx * chunk_size;
-            let end = start + chunk_size;
-            let chunk = &combined_input[start..end];
-
-            let input_slice = InterleavedSlice::new(chunk, 1, chunk.len()).expect("InterleavedSlice::new error");
-
-            // Output size for this chunk
-            let output_len = self.resampler.output_frames_next();
-            let mut output_chunk = vec![0.0f32; output_len];
-            let mut output_slice =
-                InterleavedSlice::new_mut(&mut output_chunk, 1, output_len).expect("InterleavedSlice::new_mut error");
-
-            // Process the chunk
-            let (input_consumed, output_written) = self
-                .resampler
-                .process_into_buffer(&input_slice, &mut output_slice, None)
-                .expect("process_into_buffer error");
-
-            assert_eq!(input_consumed, chunk_size);
-            output_chunk.truncate(output_written);
-            output.extend_from_slice(&output_chunk);
+        // Now run the main loop
+        while input_pos + input_chunk_size <= input.len() {
+            self.resample_chunk(&input[input_pos..], &mut output);
+            input_pos += input_chunk_size;
         }
 
-        // Store leftover samples for next call
-        if leftover > 0 {
-            let start = complete_chunks * chunk_size;
-            self.leftover_buffer.extend_from_slice(&combined_input[start..]);
-        }
+        // Store the remainder in the previous_chunk
+        self.previous_chunk.clear();
+        self.previous_chunk.extend_from_slice(&input[input_pos..]);
+        assert!(self.previous_chunk.len() < input_chunk_size);
 
         output
     }
@@ -99,45 +91,46 @@ impl StreamingResampler {
     /// Finish processing any remaining audio data in the internal buffers.
     ///
     /// Note: after calling `finish()`, the resampler is reset and ready to process new audio data.
-    pub fn finish(&mut self, output: &mut Vec<f32>)  {
-        use audioadapter_buffers::direct::InterleavedSlice;
-
-        if self.leftover_buffer.is_empty() {
+    pub fn finish(&mut self, output: &mut Vec<f32>) {
+        if self.previous_chunk.is_empty() {
             return;
         }
 
-        let chunk_size = self.resampler.input_frames_next();
-        let leftover_len = self.leftover_buffer.len();
+        let input_chunk_size = self.resampler.input_frames_next();
+        self.previous_chunk.resize(input_chunk_size, 0.0);
+        // This is an annoying dance around Rust borrowck.
+        let previous_chunk = mem::take(&mut self.previous_chunk);
+        self.resample_chunk(&previous_chunk, output);
 
-        // If we have leftover samples, pad with zeros to make a complete chunk
-        if leftover_len > 0 {
-            let mut padded_input = self.leftover_buffer.clone();
-            padded_input.resize(chunk_size, 0.0);
-
-            let input_slice =
-                InterleavedSlice::new(&padded_input, 1, padded_input.len()).expect("InterleavedSlice::new error");
-
-            let output_len = self.resampler.output_frames_next();
-            let offset = output.len();
-            output.resize(offset + output_len, 0.0);
-            let mut output_slice = InterleavedSlice::new_mut(&mut output[offset..], 1, output_len)
-                .expect("InterleavedSlice::new_mut error");
-
-            let (input_consumed, output_written) = self
-                .resampler
-                .process_into_buffer(&input_slice, &mut output_slice, None)
-                .expect("process_into_buffer error");
-
-            assert_eq!(input_consumed, chunk_size);
-            output.truncate(offset + output_written);
-        }
         self.reset();
     }
 
     /// Reset the resampler to its initial state, clearing any internal buffers.
     pub fn reset(&mut self) {
         self.resampler.reset();
-        self.leftover_buffer.clear();
+        self.previous_chunk.clear();
+    }
+
+    fn resample_chunk(&mut self, input: &[f32], output: &mut Vec<f32>) {
+        let input_chunk_size = self.resampler.input_frames_next();
+        let output_chunk_size = self.resampler.output_frames_next();
+        let input_slice = InterleavedSlice::new(&input, 1, input_chunk_size).expect("InterleavedSlice::new");
+        let output_pos = output.len();
+        output.resize(output_pos + output_chunk_size, 0.0);
+        let mut output_slice = InterleavedSlice::new_mut(&mut output[output_pos..], 1, output_chunk_size)
+            .expect("InterleavedSlice::new_mut");
+        let (input_consumed, output_written) = self
+            .resampler
+            .process_into_buffer(&input_slice, &mut output_slice, None)
+            .expect("process_into_buffer");
+        assert_eq!(input_consumed, input_chunk_size);
+        output.truncate(output_pos + output_written);
+
+        if self.should_delay_output {
+            let truncated_len = output.len() - self.resampler.output_delay();
+            output.truncate(truncated_len);
+            self.should_delay_output = false;
+        }
     }
 }
 

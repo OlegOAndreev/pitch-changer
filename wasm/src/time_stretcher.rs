@@ -46,15 +46,15 @@ pub struct TimeStretcher {
     // See finish()
     tail_window: Vec<f32>,
 
-    // Buffer management: source data is accumulated in src_buf until there is enough data to run STFT. After each STFT
-    // results are accumulated into dst_accum_buf. After that the src_buf is shifted by ana_hop_size and dst_accum_buf
-    // is shifted by syn_hop_size.
+    // Buffer management: source data is accumulated in input_buf until there is enough data to run STFT. After each
+    // STFT results are accumulated into output_accum_buf. After that the input_buf is shifted by ana_hop_size and
+    // output_accum_buf is shifted by syn_hop_size.
     //
-    // Note: src_buf is not padded with zeros, so the initial part (until fft_size samples are processed) will be
+    // Note: input_buf is not padded with zeros, so the initial part (until fft_size samples are processed) will be
     // smoothed by windows of STFT. There is no particular good way to work around this given that syn_hop_size !=
     // ana_hop_size. See also finish() for reverse problem: smoothing of the final part.
-    src_buf: Vec<f32>,
-    dst_accum_buf: Vec<f32>,
+    input_buf: Vec<f32>,
+    output_accum_buf: Vec<f32>,
 }
 
 #[wasm_bindgen]
@@ -71,8 +71,8 @@ impl TimeStretcher {
         let phase_gradient_vocoder = PhaseGradientTimeStretch::new(params.fft_size);
         let tail_len = params.fft_size / ana_hop_size * syn_hop_size;
         let tail_window = generate_tail_window(params.window_type, tail_len);
-        let src_buf = Vec::with_capacity(params.fft_size);
-        let dst_accum_buf = vec![0.0f32; params.fft_size];
+        let input_buf = Vec::with_capacity(params.fft_size);
+        let output_accum_buf = vec![0.0f32; params.fft_size];
 
         Ok(Self {
             params: *params,
@@ -81,8 +81,8 @@ impl TimeStretcher {
             stft,
             phase_gradient_vocoder,
             tail_window,
-            src_buf,
-            dst_accum_buf,
+            input_buf,
+            output_accum_buf,
         })
     }
 
@@ -116,23 +116,23 @@ impl TimeStretcher {
     /// Note: you need to call `finish()` to receive the last output chunks after you call `process()` for all input
     /// samples.
     #[wasm_bindgen]
-    pub fn process(&mut self, src: &[f32]) -> Vec<f32> {
-        let result_capacity = src.len() / self.ana_hop_size * self.syn_hop_size;
-        let mut result = Vec::with_capacity(result_capacity);
-        let mut src_pos = 0;
-        while src_pos < src.len() {
-            let needed = self.params.fft_size - self.src_buf.len();
-            let available = src.len() - src_pos;
+    pub fn process(&mut self, input: &[f32]) -> Vec<f32> {
+        let output_capacity = input.len() / self.ana_hop_size * self.syn_hop_size;
+        let mut output = Vec::with_capacity(output_capacity);
+        let mut input_pos = 0;
+        while input_pos < input.len() {
+            let needed = self.params.fft_size - self.input_buf.len();
+            let available = input.len() - input_pos;
             let n = available.min(needed);
-            self.src_buf.extend_from_slice(&src[src_pos..src_pos + n]);
-            src_pos += n;
+            self.input_buf.extend_from_slice(&input[input_pos..input_pos + n]);
+            input_pos += n;
 
-            if self.src_buf.len() == self.params.fft_size {
+            if self.input_buf.len() == self.params.fft_size {
                 self.do_stft();
-                self.append_dst_and_shift(&mut result);
+                self.append_output_and_shift(&mut output);
             }
         }
-        result
+        output
     }
 
     /// Finish processing any remaining audio data in the internal buffers. This method must be called after all input
@@ -141,32 +141,32 @@ impl TimeStretcher {
     /// Note: after calling `finish()`, the pitch shifter is reset and ready to process new audio data.
     #[wasm_bindgen]
     pub fn finish(&mut self) -> Vec<f32> {
-        // We want to process all data remaining in src_buf, which is done by running stft fft_size/ana_hop_size times
+        // We want to process all data remaining in input_buf, which is done by running stft fft_size/ana_hop_size times
         // and padding with zeros after each iteration. We want to fade out this tail to zero by applying half-window
         // stored in tail_window.
         //
         // This is especially important for large stretches where syn_hop_size > ana_hop_size leads to rapid amplitude
         // changes and noise.
         //
-        // Another way to solve this problem is simply appending the whole dst_accum_buf into result on final iteration,
-        // but this makes testing more annoying =)
+        // Another way to solve this problem is simply appending the whole output_accum_buf into result on final
+        // iteration, but this makes testing more annoying =)
         let result_capacity = (self.params.fft_size / self.ana_hop_size) * self.syn_hop_size;
         let mut result = Vec::with_capacity(result_capacity);
 
         let iters = self.params.fft_size / self.ana_hop_size;
         for i in 0..iters {
-            self.src_buf.resize(self.params.fft_size, 0.0);
+            self.input_buf.resize(self.params.fft_size, 0.0);
             self.do_stft();
 
             let tail_window_offset = i * self.syn_hop_size;
             // After the last iteration do windowing first.
-            for (a, w) in self.dst_accum_buf[..self.syn_hop_size]
+            for (a, w) in self.output_accum_buf[..self.syn_hop_size]
                 .iter_mut()
                 .zip(&self.tail_window[tail_window_offset..])
             {
                 *a *= *w;
             }
-            self.append_dst_and_shift(&mut result);
+            self.append_output_and_shift(&mut result);
         }
         debug_assert_eq!(result.len(), result_capacity);
 
@@ -178,7 +178,7 @@ impl TimeStretcher {
     fn do_stft(&mut self) {
         use crate::window::get_window_squared_sum;
 
-        let output = self.stft.process(&self.src_buf, |ana_freq, syn_freq| {
+        let output = self.stft.process(&self.input_buf, |ana_freq, syn_freq| {
             // syn_freq.copy_from_slice(ana_freq);
             self.phase_gradient_vocoder
                 .process(ana_freq, self.ana_hop_size, syn_freq, self.syn_hop_size);
@@ -192,25 +192,25 @@ impl TimeStretcher {
         let window_norm = get_window_squared_sum(self.params.window_type, self.params.fft_size, self.ana_hop_size);
         let norm = self.params.time_stretch / (self.params.fft_size as f32 * window_norm);
         // let norm = 0.5 / (self.params.fft_size as f32 * window_norm);
-        for (a, o) in self.dst_accum_buf.iter_mut().zip(output) {
+        for (a, o) in self.output_accum_buf.iter_mut().zip(output) {
             *a += *o * norm;
         }
     }
 
-    /// Append next part of dst accum buf to result and shift the buffers.
-    fn append_dst_and_shift(&mut self, result: &mut Vec<f32>) {
-        result.extend_from_slice(&self.dst_accum_buf[..self.syn_hop_size]);
-        self.dst_accum_buf.drain(0..self.syn_hop_size);
-        self.dst_accum_buf.resize(self.params.fft_size, 0.0);
-        self.src_buf.drain(0..self.ana_hop_size);
+    /// Append next part of output accum buf to result and shift the buffers.
+    fn append_output_and_shift(&mut self, output: &mut Vec<f32>) {
+        output.extend_from_slice(&self.output_accum_buf[..self.syn_hop_size]);
+        self.output_accum_buf.drain(0..self.syn_hop_size);
+        self.output_accum_buf.resize(self.params.fft_size, 0.0);
+        self.input_buf.drain(0..self.ana_hop_size);
     }
 
     /// Reset the pitch shifter to its initial state.
     #[wasm_bindgen]
     pub fn reset(&mut self) {
         self.phase_gradient_vocoder.reset();
-        self.src_buf.clear();
-        self.dst_accum_buf.fill(0.0);
+        self.input_buf.clear();
+        self.output_accum_buf.fill(0.0);
     }
 }
 
@@ -337,7 +337,7 @@ mod tests {
     fn test_time_stretch_identity() -> Result<()> {
         const FREQ: f32 = 440.0;
         const MAGNITUDE: f32 = 2.2;
-        const DURATION: f32 = 0.5;
+        const DURATION: f32 = 1.0;
 
         for sample_rate in [44100.0, 96000.0] {
             for fft_size in [1024, 4096] {

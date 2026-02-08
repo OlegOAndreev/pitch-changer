@@ -92,8 +92,8 @@ impl PitchShifter {
     /// Note: you need to call `finish()` to receive the last output chunks after you call `process()` for all input
     /// samples.
     #[wasm_bindgen]
-    pub fn process(&mut self, src: &[f32]) -> Vec<f32> {
-        let time_stretched = self.time_stretcher.process(src);
+    pub fn process(&mut self, input: &[f32]) -> Vec<f32> {
+        let time_stretched = self.time_stretcher.process(input);
         self.resampler.resample(&time_stretched)
     }
 

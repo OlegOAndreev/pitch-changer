@@ -27,10 +27,10 @@ pub struct Stft {
     inverse_plan: Arc<dyn realfft::ComplexToReal<f32>>,
     window: Vec<f32>,
     // Scratch buffers
-    src_buf: Vec<f32>,
-    src_freq_buf: Vec<Complex<f32>>,
-    dst_buf: Vec<f32>,
-    dst_freq_buf: Vec<Complex<f32>>,
+    input_buf: Vec<f32>,
+    input_freq_buf: Vec<Complex<f32>>,
+    output_buf: Vec<f32>,
+    output_freq_buf: Vec<Complex<f32>>,
 }
 
 impl Stft {
@@ -44,12 +44,12 @@ impl Stft {
 
         let window = generate_window(window_type, fft_size);
 
-        let src_buf = vec![0.0; fft_size];
-        let src_freq_buf = vec![Complex::new(0.0, 0.0); fft_size / 2 + 1];
-        let dst_buf = vec![0.0; fft_size];
-        let dst_freq_buf = vec![Complex::new(0.0, 0.0); fft_size / 2 + 1];
+        let input_buf = vec![0.0; fft_size];
+        let input_freq_buf = vec![Complex::new(0.0, 0.0); fft_size / 2 + 1];
+        let output_buf = vec![0.0; fft_size];
+        let output_freq_buf = vec![Complex::new(0.0, 0.0); fft_size / 2 + 1];
 
-        Self { fft_size, forward_plan, inverse_plan, window, src_buf, src_freq_buf, dst_buf, dst_freq_buf }
+        Self { fft_size, forward_plan, inverse_plan, window, input_buf, input_freq_buf, output_buf, output_freq_buf }
     }
 
     // Apply window, run forward pass, call freq_func on frequencies, run inverse pass, apply window again and return
@@ -59,23 +59,23 @@ impl Stft {
         F: FnMut(&[Complex<f32>], &mut [Complex<f32>]),
     {
         assert_eq!(input.len(), self.fft_size);
-        self.src_buf.copy_from_slice(input);
-        for (s, w) in self.src_buf.iter_mut().zip(&self.window) {
+        self.input_buf.copy_from_slice(input);
+        for (s, w) in self.input_buf.iter_mut().zip(&self.window) {
             *s *= w;
         }
         self.forward_plan
-            .process(&mut self.src_buf, &mut self.src_freq_buf)
+            .process(&mut self.input_buf, &mut self.input_freq_buf)
             .expect("failed forward STFT pass");
 
-        processor(&self.src_freq_buf, &mut self.dst_freq_buf);
+        processor(&self.input_freq_buf, &mut self.output_freq_buf);
 
         self.inverse_plan
-            .process(&mut self.dst_freq_buf, &mut self.dst_buf)
+            .process(&mut self.output_freq_buf, &mut self.output_buf)
             .expect("failed inverse STFT pass");
-        for (s, w) in self.dst_buf.iter_mut().zip(&self.window) {
+        for (s, w) in self.output_buf.iter_mut().zip(&self.window) {
             *s *= w;
         }
 
-        &self.dst_buf
+        &self.output_buf
     }
 }
