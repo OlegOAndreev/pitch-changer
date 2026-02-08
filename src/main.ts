@@ -1,13 +1,11 @@
-import { Recorder } from './recorder';
-
-import initRustModule from '../wasm/build/wasm_main_module';
-import { encodeToBlob } from './media-encoder';
+import { AudioProcessor } from './audio-processor';
+import { decodeAudioFromBlob } from './media-decoder';
+import { encodeAudioToBlob } from './media-encoder';
 import { Player } from './player';
+import { Recorder } from './recorder';
 import { saveFile, showSaveDialog } from './save-dialog';
-import { getById } from './utils';
-import { shiftPitch, timeStretch } from './process-audio';
-
-await initRustModule();
+import { drainRingBuffer, Float32RingBuffer } from './sync';
+import { debounce, getById, secondsToString, withButtonsDisabled } from './utils';
 
 const MAX_PITCH_VALUE = 2.0;
 const MIN_PITCH_VALUE = 0.5;
@@ -15,60 +13,108 @@ const PITCH_VALUE_STEP = 0.125;
 const DEFAULT_PITCH_VALUE = 1.25;
 const DEFAULT_PROCESSING_MODE = 'pitch';
 
-// Settings interface and implementation
+const SAVE_SETTINGS_DEBOUNCE = 500;
+
+const SETTINGS_KEY = 'pitch-changer-settings';
+
+window.onerror = (event: Event | string, source?: string, lineno?: number, colno?: number, error?: Error) => {
+    console.error('Error:', event, source, lineno, colno, error);
+    alert(event);
+};
+
+window.onunhandledrejection = (event: PromiseRejectionEvent) => {
+    console.error('Unhandled rejection:', event);
+    alert(event.reason);
+};
+
+if (!window.crossOriginIsolated) {
+    throw new Error('This app works only in cross-origin isolated environments, configure the web server');
+}
+
+// Settings stored locally
 interface AppSettings {
     processingMode: 'pitch' | 'time';
     pitchValue: number;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function onError(message: string, error: any) {
-    console.error(message, error);
-    if (error instanceof Error) {
-        alert(`${message}: ${error.message}`);
-    } else {
-        alert(message);
-    }
-}
+//
+// Global app state
+//
 
-// Lazily initialize audio context to prevent warning logs in Firefox.
-let globalAudioContext: AudioContext;
-function getAudioContext(): AudioContext {
-    if (!globalAudioContext) {
-        try {
-            globalAudioContext = new AudioContext();
-            console.log(`AudioContext created, sample rate ${globalAudioContext.sampleRate}Hz`);
-        } catch (error) {
-            onError('Error creating AudioContext', error);
+class AppState {
+    // Audio data
+    sourceAudioData: Float32Array | null = null;
+    // Sample rate should be always the same and taken from AudioContext.
+    sampleRate: number | null = null;
+    processor: AudioProcessor = new AudioProcessor();
+
+    // Audio player and recorder are lazy initialized because they affect the browser (and OS) UI
+    private audioContext: AudioContext | null = null;
+    private recorder: Promise<Recorder> | null = null;
+    private player: Promise<Player> | null = null;
+
+    // Settings
+    settings: AppSettings;
+
+    constructor() {
+        this.settings = this.loadSettings();
+    }
+
+    async initProcessor(): Promise<void> {
+        this.processor.init();
+        this.processor.setParams(this.settings.processingMode, this.settings.pitchValue);
+    }
+
+    private loadSettings(): AppSettings {
+        const settings: AppSettings = {
+            processingMode: DEFAULT_PROCESSING_MODE,
+            pitchValue: DEFAULT_PITCH_VALUE
+        };
+        Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}'));
+        if (settings.processingMode !== 'time') {
+            settings.processingMode = DEFAULT_PROCESSING_MODE;
         }
+        return settings;
     }
-    return globalAudioContext;
-}
 
-let globalRecorder: Promise<Recorder>;
-async function getRecorder(): Promise<Recorder> {
-    if (!globalRecorder) {
-        try {
-            globalRecorder = Recorder.create(getAudioContext());
-        } catch (error) {
-            onError('Error creating Recorder', error);
+    updateSettings() {
+        this.saveSettings();
+        this.processor.setParams(this.settings.processingMode, this.settings.pitchValue);
+    }
+
+    private saveSettings = debounce(SAVE_SETTINGS_DEBOUNCE, () => {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
+    });
+
+    getAudioContext(): AudioContext {
+        if (!this.audioContext) {
+            this.audioContext = new AudioContext({ latencyHint: 'interactive' });
+            console.log(`AudioContext created, sample rate ${this.audioContext.sampleRate}Hz`);
         }
+        return this.audioContext!;
     }
-    return globalRecorder;
+
+    async getRecorder(): Promise<Recorder> {
+        if (!this.recorder) {
+            this.recorder = Recorder.create(this.getAudioContext());
+        }
+        return this.recorder!;
+    }
+
+    async getPlayer(): Promise<Player> {
+        if (!this.player) {
+            this.player = Player.create(this.getAudioContext());
+        }
+        return this.player;
+    }
 }
 
-let globalPlayer: Player;
-function getPlayer(): Player {
-    if (!globalPlayer) {
-        globalPlayer = new Player(getAudioContext());
-    }
-    return globalPlayer;
-}
+const appState = new AppState();
+appState.initProcessor();
 
-let sourceData: Float32Array;
-let sourceSampleRate: number;
-let processedData: Float32Array;
-
+//
+// UI elements
+//
 
 const contentContainer = getById<HTMLDivElement>('content-container');
 const recordBtn = getById<HTMLButtonElement>('record-btn');
@@ -81,23 +127,35 @@ const pitchSlider = getById<HTMLInputElement>('pitch-slider');
 const pitchLabel = getById<HTMLElement>('pitch-label');
 const pitchModeRadio = getById<HTMLInputElement>('pitch-mode');
 const timeModeRadio = getById<HTMLInputElement>('time-mode');
-
-const messageLabel = getById<HTMLElement>('message-label');
-
+const sourceLabel = getById<HTMLElement>('source-label');
+const processingSpinner = getById<HTMLDivElement>('processing-spinner');
+const processingLabel = getById<HTMLDivElement>('processing-label');
 const fileInput = getById<HTMLInputElement>('file-input');
 
-const SETTINGS_KEY = 'pitch-changer-settings';
-const settings = loadSettings();
 
-function loadSettings(): AppSettings {
-    const settings: AppSettings = {
-        processingMode: DEFAULT_PROCESSING_MODE,
-        pitchValue: DEFAULT_PITCH_VALUE
-    };
-    Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}'));
-    if (settings.processingMode !== 'time') {
-        settings.processingMode = DEFAULT_PROCESSING_MODE;
-    }
+// Reset all buttons to default state
+async function onBeforeSourceAudioDataSet() {
+    recordBtn.disabled = true;
+    loadBtn.disabled = true;
+    playBtn.disabled = true;
+    playBtnEmoji.textContent = '▶';
+    playBtn.title = 'Play';
+    playBtn.classList.remove('playing');
+    saveBtn.disabled = true;
+    const player = await appState.getPlayer();
+    player.stop();
+}
+
+// Re-enable play and save buttons
+function onAfterSourceAudioDataSet() {
+    recordBtn.disabled = false;
+    loadBtn.disabled = false;
+    playBtn.disabled = false;
+    saveBtn.disabled = false;
+}
+
+// Initialize UI from stored settings
+function applySettingsToUI(settings: AppSettings): void {
     pitchModeRadio.checked = settings.processingMode === 'pitch';
     timeModeRadio.checked = settings.processingMode === 'time';
     if (settings.pitchValue > MAX_PITCH_VALUE || settings.pitchValue < MIN_PITCH_VALUE) {
@@ -117,193 +175,194 @@ function loadSettings(): AppSettings {
 
     // Show the content container after settings are applied
     contentContainer.style.visibility = 'visible';
-
-    return settings;
 }
 
-let saveSettingsTimer: number | null = null;
-function saveSettings() {
-    // Debounce saving settings.
-    if (saveSettingsTimer) {
-        clearTimeout(saveSettingsTimer);
-    }
-    saveSettingsTimer = setTimeout(() => {
-        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    }, 500);
-}
+applySettingsToUI(appState.settings);
 
-function processSourceAudio() {
-    if (!sourceData) {
-        console.error('processAudio called with null source data');
-        return;
-    }
-    try {
-        switch (settings.processingMode) {
-            case 'pitch':
-                processedData = shiftPitch(sourceData, sourceSampleRate, settings.pitchValue);
-                break;
-            case 'time':
-                processedData = timeStretch(sourceData, sourceSampleRate, settings.pitchValue);
-                break;
-        }
-        console.log(`Processed audio: got ${processedData.length} samples`);
-    } catch (error) {
-        console.error('Error processing audio:', error);
-        alert(`Error processing audio: ${(error as Error).message}`);
-    }
-}
+//
+// Event handlers
+//
 
-function onStopPlayback() {
-    console.log('Stopped playing audio');
-    playBtnEmoji.textContent = '▶';
-    playBtn.title = 'Play';
-    playBtn.classList.remove('playing');
-}
-
-recordBtn.addEventListener('click', async () => {
-    const recorder = await getRecorder();
+async function handleRecordClick(): Promise<void> {
+    const recorder = await appState.getRecorder();
     if (!recorder.isRecording) {
-        getPlayer().stop();
-        try {
-            await recorder.start();
-        } catch (error) {
-            console.error('Could not start recording:', error);
-            alert(`Could not start recording: ${(error as Error).message}`);
-        }
+        await onBeforeSourceAudioDataSet();
 
-        messageLabel.textContent = 'Recording...';
+        sourceLabel.textContent = 'Recording...';
+        recordBtn.disabled = false;
         recordBtnEmoji.textContent = '⏹';
         recordBtn.title = 'Stop';
         recordBtn.classList.add('recording');
-        playBtn.disabled = true;
-        loadBtn.disabled = true;
-        saveBtn.disabled = true;
-    } else {
-        sourceData = await recorder.stop();
-        sourceSampleRate = getAudioContext().sampleRate;
 
-        const sourceSeconds = Math.round(sourceData.length / sourceSampleRate);
-        messageLabel.textContent = `Recorded ${sourceSeconds}s`;
-        processSourceAudio();
+        appState.sourceAudioData = await recorder.record();
+        appState.sampleRate = appState.getAudioContext().sampleRate;
 
-        messageLabel.textContent = '';
+        const sourceSeconds = appState.sourceAudioData.length / appState.sampleRate;
+        sourceLabel.textContent = `Recorded ${secondsToString(sourceSeconds)}`;
         recordBtnEmoji.textContent = '⏺';
         recordBtn.title = 'Record';
         recordBtn.classList.remove('recording');
-        playBtn.disabled = false;
-        loadBtn.disabled = false;
-        saveBtn.disabled = false;
 
+        onAfterSourceAudioDataSet();
+    } else {
+        recorder.stop();
     }
-});
+}
 
-playBtn.addEventListener('click', async () => {
-    const player = getPlayer();
+async function runPlay(player: Player): Promise<void> {
+    // Use smaller ring buffer (around 0.6-0.7s). This means we react faster to changes in ratio or processing mode.
+    const BUFFER_SIZE = 32 * 1024;
+
+    console.log('Start playing audio');
+    const buffer = Float32RingBuffer.withCapacity(BUFFER_SIZE);
+
+    // Synchronization for playing is rather complicated:
+    // 1. Start the processor
+    // 2. Wait until the buffer is at least partially filled to prevent underruns
+    // 3. Only after that start playing audio
+    // 4. If all source data is processed, AudioProcessor closes the buffer
+    // 5. If a user clicks the stop button, Player closes the buffer
+    // 6. The Player promise completes once the AudioWorklet signals it has processed all data from the ring buffer
+    const processPromise = appState.processor.process(appState.sourceAudioData!, appState.sampleRate!, buffer);
+    await buffer.waitPopAsync(BUFFER_SIZE / 2);
+    const playerPromise = player.play(buffer);
+
+    // We do not need to wait for this promise, but let's do it for symmetry.
+    await processPromise;
+    await playerPromise;
+
+    console.log('Stopped playing audio');
+}
+
+async function handlePlayClick(): Promise<void> {
+    const player = await appState.getPlayer();
     if (!player.isPlaying) {
-        if (!sourceData) {
+        if (!appState.sourceAudioData) {
             console.error('Error: no audio data to play');
             return;
         }
 
-        await getPlayer().play(processedData, sourceSampleRate, onStopPlayback);
-
         playBtnEmoji.textContent = '⏹';
         playBtn.title = 'Pause';
         playBtn.classList.add('playing');
+
+        await runPlay(player);
+
+        playBtnEmoji.textContent = '▶';
+        playBtn.title = 'Play';
+        playBtn.classList.remove('playing');
     } else {
         player.stop();
     }
-});
+}
 
-fileInput.addEventListener('change', async () => {
-    const file = fileInput.files![0];
-    if (!file) {
-        loadBtn.disabled = false;
-        return;
-    }
 
+function handleLoadClick(): void {
+    // Oh https://developer.mozilla.org/en-US/docs/Web/API/Window/showOpenFilePicker, where are you
+    fileInput.click();
+}
+
+async function handleFileInputChange(file: File): Promise<void> {
+    await onBeforeSourceAudioDataSet();
+    const audioContext = await appState.getAudioContext();
     try {
         const startTime = performance.now();
-        messageLabel.textContent = `Decoding ${file.name}...`;
-        const arrayBuffer = await file.arrayBuffer();
-        // Use decoding with global AudioContext to resample data into target sample rate for playback.
-        const audioBuffer = await getAudioContext().decodeAudioData(arrayBuffer);
-        sourceData = audioBuffer.getChannelData(0);
-        sourceSampleRate = audioBuffer.sampleRate;
-        console.log(`Loaded ${file.name} in ${performance.now() - startTime}ms: ${audioBuffer.numberOfChannels}`
-            + ` channels, ${audioBuffer.length} samples at ${audioBuffer.sampleRate}Hz`);
-        messageLabel.textContent = `Decoded ${file.name}`;
+        processingSpinner.style.display = 'inline-block';
+        processingLabel.textContent = `Decoding ${file.name}...`;
+        const data = await decodeAudioFromBlob(file, audioContext);
+        appState.sourceAudioData = data;
+        appState.sampleRate = audioContext.sampleRate;
+
+        console.log(`Loaded ${file.name} in ${performance.now() - startTime}ms: ${appState.sourceAudioData.length} samples at ${appState.sampleRate}Hz`);
+        const sourceSeconds = appState.sourceAudioData.length / appState.sampleRate;
+        sourceLabel.textContent = `Loaded ${secondsToString(sourceSeconds)} of ${file.name}`;
+        onAfterSourceAudioDataSet();
     } catch (error) {
-        console.error('Error loading audio file:', error);
-        alert(`Error loading audio file: ${(error as Error).message}`);
-        messageLabel.textContent = '';
+        sourceLabel.textContent = `Error loading audio file: ${error}`;
+        // In case of error, play and save buttons should stay disabled.
+        recordBtn.disabled = false;
         loadBtn.disabled = false;
+    } finally {
+        processingSpinner.style.display = 'none';
+        processingLabel.textContent = '';
+    }
+}
+
+async function processAllAudio(): Promise<Float32Array> {
+    // This is a background task, use larger buffers.
+    const BUFFER_SIZE = 1024 * 1024;
+    const startTime = performance.now();
+
+    const output = Float32RingBuffer.withCapacity(BUFFER_SIZE);
+    const processPromise = appState.processor.process(appState.sourceAudioData!, appState.sampleRate!, output);
+    const drainPromise = drainRingBuffer(output);
+
+    await processPromise;
+    //  processor.process() closes the output and forces drainRingBuffer completion.
+    const result = await drainPromise;
+
+    const deltaTime = performance.now() - startTime;
+    console.log(`Process all audio, got ${result.length} samples in ${deltaTime}ms`);
+    return result;
+}
+
+async function handleSaveClick(): Promise<void> {
+    const [filename, fileHandle] = await showSaveDialog();
+    if (!filename) {
         return;
     }
 
-    processSourceAudio();
-
-    playBtn.disabled = false;
-    loadBtn.disabled = false;
-    saveBtn.disabled = false;
-    getPlayer().stop();
-});
-
-loadBtn.addEventListener('click', async () => {
-    loadBtn.disabled = true;
-    fileInput.click();
-});
-
-saveBtn.addEventListener('click', async () => {
-    if (!sourceData) {
-        console.log('No audio data to save');
+    const fileType = filename.split('.').pop()?.toLowerCase();
+    if (!fileType || (fileType !== 'mp3' && fileType != 'ogg' && fileType !== 'wav')) {
+        alert('Unsupported file format. Please use .mp3, .ogg or .wav');
         return;
     }
 
     try {
-        saveBtn.disabled = true;
-        const [filename, fileHandle] = await showSaveDialog();
-        if (!filename) {
-            saveBtn.disabled = false;
-            return;
-        }
-
-        const fileType = filename.split('.').pop()?.toLowerCase();
-        if (!fileType || (fileType !== 'mp3' && fileType != 'ogg' && fileType !== 'wav')) {
-            alert('Unsupported file format. Please use .mp3, .ogg or .wav');
-            saveBtn.disabled = false;
-            return;
-        }
-
-        console.log(`Encoding audio to ${fileType} with sample rate ${sourceSampleRate}Hz`);
-        messageLabel.textContent = `Encoding audio to ${fileType}...`;
-        const blob = await encodeToBlob(fileType, sourceData, sourceSampleRate);
-        messageLabel.textContent = `Saving ${filename}...`;
+        processingSpinner.style.display = 'inline-block';
+        processingLabel.textContent = 'Processing...';
+        const processedAudioData = await processAllAudio();
+        console.log(`Encoding audio to ${fileType} with sample rate ${appState.sampleRate}Hz`);
+        processingLabel.textContent = 'Encoding...';
+        const blob = await encodeAudioToBlob(fileType, processedAudioData, appState.sampleRate!);
         await saveFile(filename, fileHandle, blob);
-    } catch (error) {
-        console.error('Error saving audio file:', error);
-        alert(`Error saving audio file: ${(error as Error).message}`);
+    } finally {
+        processingSpinner.style.display = 'none';
+        processingLabel.textContent = `Saved ${filename}`;
     }
-    messageLabel.textContent = '';
-    saveBtn.disabled = false;
-});
+}
 
-pitchModeRadio.addEventListener('change', () => {
+function handlePitchModeChange(): void {
     if (pitchModeRadio.checked) {
-        settings.processingMode = 'pitch';
-        saveSettings();
+        appState.settings.processingMode = 'pitch';
+        appState.updateSettings();
     }
-});
+}
 
-timeModeRadio.addEventListener('change', () => {
+function handleTimeModeChange(): void {
     if (timeModeRadio.checked) {
-        settings.processingMode = 'time';
-        saveSettings();
+        appState.settings.processingMode = 'time';
+        appState.updateSettings();
     }
-});
+}
 
-pitchSlider.addEventListener('input', () => {
+function handlePitchSliderInput(): void {
     pitchLabel.textContent = pitchSlider.value + 'x';
-    settings.pitchValue = parseFloat(pitchSlider.value);
-    saveSettings();
-});
+    appState.settings.pitchValue = parseFloat(pitchSlider.value);
+    appState.updateSettings();
+}
+
+recordBtn.addEventListener('click', () => handleRecordClick());
+playBtn.addEventListener('click', () => handlePlayClick());
+loadBtn.addEventListener('click', () => handleLoadClick());
+saveBtn.addEventListener('click', withButtonsDisabled([playBtn, saveBtn], () => handleSaveClick()));
+pitchModeRadio.addEventListener('change', () => handlePitchModeChange());
+timeModeRadio.addEventListener('change', () => handleTimeModeChange());
+pitchSlider.addEventListener('input', () => handlePitchSliderInput());
+fileInput.addEventListener('change', withButtonsDisabled([loadBtn], async () => {
+    const file = fileInput.files![0];
+    if (!file) {
+        return;
+    }
+    await handleFileInputChange(file);
+}));

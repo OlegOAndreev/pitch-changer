@@ -1,5 +1,5 @@
 import recorderProcessorUrl from './recorder-processor.ts?url';
-import { drainRingBuffer, Float32RingBuffer } from './ring-buffer';
+import { drainRingBuffer, Float32RingBuffer } from './sync';
 
 // Ring buffer capacity. 2^18 = 262144 samples ~= 5.5s at 48kHz.
 const RING_BUFFER_CAPACITY = 1 << 18;
@@ -47,12 +47,11 @@ export class Recorder {
             await this.audioContext.resume();
         }
 
-        const ringBufferSab = Float32RingBuffer.bufferForCapacity(RING_BUFFER_CAPACITY);
-        const ringBuffer = new Float32RingBuffer(ringBufferSab);
+        const ringBuffer = Float32RingBuffer.withCapacity(RING_BUFFER_CAPACITY);
         this.ringBuffer = ringBuffer;
 
         const options: RecorderProcessorOptions = {
-            ringBufferSab: ringBufferSab
+            ringBufferSab: ringBuffer.buffer
         };
         const audioWorkletNode = new AudioWorkletNode(this.audioContext, recorderProcessorName, {
             processorOptions: options

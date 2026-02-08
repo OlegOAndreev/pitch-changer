@@ -1,7 +1,7 @@
 // Decode an audio file from blob to mono PCM array with sample rate, the result is backed by SharedArrayBuffer. We must
 // use a real AudioContext, not OfflineAudioContext, because we want to get data automatically resampled into playable
 // sample rate.
-export async function decodeAudioFromBlob(blob: Blob, audioContext: AudioContext): Promise<{ data: Float32Array; sampleRate: number }> {
+export async function decodeAudioFromBlob(blob: Blob, audioContext: AudioContext): Promise<Float32Array> {
     const audioData = await blob.arrayBuffer();
     const audioBuffer = await audioContext.decodeAudioData(audioData);
 
@@ -17,5 +17,5 @@ export async function decodeAudioFromBlob(blob: Blob, audioContext: AudioContext
         result[i] /= audioBuffer.numberOfChannels;
     }
 
-    return { data: result, sampleRate };
+    return result;
 }

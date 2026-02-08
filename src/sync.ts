@@ -1,3 +1,75 @@
+// A CountDownLatch implementation based on SharedArrayBuffer. It allows one or more threads to wait until a set of
+// operations being performed in other threads completes.
+export class CountDownLatch {
+    private buffer_: SharedArrayBuffer;
+    private count_: Int32Array;
+
+    // Create a CountDownLatch based on existing SharedArrayBuffer. The buffer must have an appropriate size, see
+    // byteLengthForCount().
+    constructor(buffer: SharedArrayBuffer) {
+        CountDownLatch.validateBuffer(buffer);
+        this.buffer_ = buffer;
+        this.count_ = new Int32Array(this.buffer_, 0, 1);
+    }
+
+    // Create a new CountDownLatch with the given initial count.
+    static withCount(initialCount: number): CountDownLatch {
+        const buffer = new SharedArrayBuffer(CountDownLatch.byteLengthForCount());
+        const array = new Int32Array(buffer);
+        array[0] = initialCount;
+        return new CountDownLatch(buffer);
+    }
+
+    // Compute byteLength of SharedArrayBuffer, which then can be passed to the constructor.
+    static byteLengthForCount(): number {
+        return 4;
+    }
+
+    private static validateBuffer(buffer: SharedArrayBuffer) {
+        if (buffer.byteLength != 4) {
+            throw new Error(`Invalid buffer size for CountDownLatch: ${buffer.byteLength}`);
+        }
+    }
+
+    // Get the underlying SharedArrayBuffer.
+    get buffer(): SharedArrayBuffer {
+        return this.buffer_;
+    }
+
+    // Get the current count value.
+    get count(): number {
+        return Atomics.load(this.count_, 0);
+    }
+
+    // Decrement the count by the specified amount. If the count reaches zero, all waiting threads are notified.
+    countDown(count: number = 1): void {
+        if (count <= 0) {
+            throw new Error(`Count value must be positive, is ${count}`);
+        }
+
+        const oldCount = Atomics.sub(this.count_, 0, count);
+        if (oldCount <= count) {
+            // Notify all waiting threads that the count has reached zero
+            Atomics.notify(this.count_, 0);
+        }
+    }
+
+    // Wait asynchronously until the count reaches zero. Returns immediately if the count is already zero.
+    async waitAsync(): Promise<void> {
+        while (true) {
+            const currentCount = Atomics.load(this.count_, 0);
+            if (currentCount <= 0) {
+                return;
+            }
+
+            const result = Atomics.waitAsync(this.count_, 0, currentCount);
+            if (result.async) {
+                await result.value;
+            }
+        }
+    }
+}
+
 // A simple implementation of Float32 SPSC ring buffer based on SharedArrayBuffer.
 //
 // Unlike the other ringbuffer implementations, this implementation:
@@ -23,7 +95,7 @@ export class Float32RingBuffer {
     private writeIndex: Int32Array;
 
     // Create a Float32RingBuffer based on existing SharedArrayBuffer. The buffer must have an appropriate capacity,
-    // see bufferForCapacity() and byteLengthForCapacity().
+    // see withCapacity() and byteLengthForCapacity().
     constructor(buffer: SharedArrayBuffer) {
         const capacity = (buffer.byteLength - 8) / 4;
         Float32RingBuffer.validateCapacity(capacity);
@@ -34,9 +106,10 @@ export class Float32RingBuffer {
         this.data = new Float32Array(this.buffer_, 8, capacity);
     }
 
-    // Create SharedArrayBuffer which is appropriate for passing to the constructor.
-    static bufferForCapacity(capacity: number): SharedArrayBuffer {
-        return new SharedArrayBuffer(Float32RingBuffer.byteLengthForCapacity(capacity));
+    // Create a Float32RingBuffer for given capacity.
+    static withCapacity(capacity: number): Float32RingBuffer {
+        const buffer = new SharedArrayBuffer(Float32RingBuffer.byteLengthForCapacity(capacity));
+        return new Float32RingBuffer(buffer);
     }
 
     // Compute byteLength of SharedArrayBuffer, which then can be passed to the constructor.
@@ -58,10 +131,12 @@ export class Float32RingBuffer {
         return (Atomics.load(this.readIndex, 0) & CLOSED_BIT) !== 0;
     }
 
+    // Get the underlying SharedArrayBuffer.
     get buffer(): SharedArrayBuffer {
         return this.buffer_;
     }
 
+    // Get the capacity.
     get capacity(): number {
         return this.capacity_;
     }
@@ -220,20 +295,6 @@ export class Float32RingBuffer {
                 return;
             }
             const result = Atomics.waitAsync(this.writeIndex, 0, writeValue);
-            if (result.async) {
-                await result.value;
-            }
-        }
-    }
-
-    async waitCloseAsync() {
-        while (true) {
-            // We wait on readIndex, but could wait on writeIndex
-            const value = Atomics.load(this.readIndex, 0);
-            if (this.isClosed) {
-                return;
-            }
-            const result = Atomics.waitAsync(this.readIndex, 0, value);
             if (result.async) {
                 await result.value;
             }

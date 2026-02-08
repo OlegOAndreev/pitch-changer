@@ -1,6 +1,6 @@
 import * as Comlink from 'comlink';
 
-import type { Float32RingBuffer } from './ring-buffer';
+import type { Float32RingBuffer } from './sync';
 
 // The following are exported only for audio-modifier-worker.ts
 export interface WorkerParams {

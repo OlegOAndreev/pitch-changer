@@ -1,13 +1,13 @@
 // Worker test for Float32RingBuffer using Node.js worker_threads. This test creates two workers (producer and consumer)
 // that communicate via a Float32RingBuffer. This is a standalone test that doesn't use vitest or other test frameworks
-// (run this test using npm run test:ring-buffer-worker). I do not currently know a better way to test the Atomic.wait
-// (unlike Atomic.waitAsync).
+// (run this test using npm run test:ring-buffer). I do not currently know a better way to test the Atomic.wait (unlike
+// Atomic.waitAsync).
 
 /// <reference types="node" />
 
 import { Worker, isMainThread, parentPort, workerData } from 'worker_threads';
 
-import { Float32RingBuffer } from './ring-buffer.ts';
+import { Float32RingBuffer } from './sync.ts';
 
 interface StartMessage {
     type: 'producer' | 'consumer',
@@ -27,7 +27,8 @@ async function main(): Promise<void> {
     const TOTAL_ELEMENTS = 10000000;
 
     console.log(`Testing Float32RingBuffer with ${TOTAL_ELEMENTS} elements, capacity ${CAPACITY}`);
-    const buffer = Float32RingBuffer.bufferForCapacity(CAPACITY);
+    const ringBuffer = Float32RingBuffer.withCapacity(CAPACITY);
+    const buffer = ringBuffer.buffer;
     const producerWorker = new Worker(new URL(import.meta.url), {
         workerData: {
             type: 'producer',

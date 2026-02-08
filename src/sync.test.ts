@@ -1,23 +1,72 @@
 import { describe, expect, test } from 'vitest';
+import { CountDownLatch, Float32RingBuffer, drainRingBuffer } from './sync';
 
-import { Float32RingBuffer, drainRingBuffer } from './ring-buffer';
+describe('CountDownLatch', () => {
+    test('withCount creates latch with correct count', () => {
+        const latch = CountDownLatch.withCount(5);
+        expect(latch.count).toBe(5);
+    });
+
+    test('countDown decrements count', () => {
+        const latch = CountDownLatch.withCount(5);
+
+        latch.countDown(2);
+        expect(latch.count).toBe(3);
+
+        latch.countDown();
+        expect(latch.count).toBe(2);
+    });
+
+    test('countDown throws on non-positive count', () => {
+        const latch = CountDownLatch.withCount(5);
+
+        expect(() => latch.countDown(0)).toThrow();
+        expect(() => latch.countDown(-1)).toThrow();
+    });
+
+    test('waitAsync resolves immediately when count is already zero', async () => {
+        const latch = CountDownLatch.withCount(0);
+
+        await expect(latch.waitAsync()).resolves.toBeUndefined();
+    });
+
+    test('multiple countDown calls trigger waitAsync', async () => {
+        const latch = CountDownLatch.withCount(3);
+
+        const waitPromise = latch.waitAsync();
+
+        latch.countDown();
+        latch.countDown();
+        latch.countDown();
+
+        await expect(waitPromise).resolves.toBeUndefined();
+    });
+
+    test('constructor validates buffer size', () => {
+        const smallBuffer = new SharedArrayBuffer(2);
+        expect(() => new CountDownLatch(smallBuffer)).toThrow();
+
+        const validBuffer = new SharedArrayBuffer(4);
+        expect(() => new CountDownLatch(validBuffer)).not.toThrow();
+    });
+});
 
 // Note: Testing actual blocking behavior requires multiple threads, which is beyond the scope of unit tests.
 describe('Float32RingBuffer', () => {
     test('constructor', () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(1024));
+        const buffer = Float32RingBuffer.withCapacity(1024);
         expect(buffer.available).toBe(0);
     });
 
     test('push returns number of elements pushed', () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        const buffer = Float32RingBuffer.withCapacity(8);
         const src = new Float32Array([1, 2, 3]);
         expect(buffer.push(src)).toBe(3);
         expect(buffer.available).toBe(3);
     });
 
     test('push respects capacity', () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(4));
+        const buffer = Float32RingBuffer.withCapacity(4);
         const src1 = new Float32Array([1, 2, 3, 4]);
         expect(buffer.push(src1)).toBe(4);
         expect(buffer.available).toBe(4);
@@ -28,7 +77,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('pop returns number of elements popped', () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        const buffer = Float32RingBuffer.withCapacity(8);
         const src = new Float32Array([1, 2, 3]);
         buffer.push(src);
         const dst = new Float32Array(2);
@@ -39,7 +88,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('pop respects available data', () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        const buffer = Float32RingBuffer.withCapacity(8);
         const src = new Float32Array([1, 2]);
         buffer.push(src);
         const dst = new Float32Array(5);
@@ -50,7 +99,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('push and pop wrap around', () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(4));
+        const buffer = Float32RingBuffer.withCapacity(4);
         buffer.push(new Float32Array([1, 2, 3, 4]));
         const dst1 = new Float32Array(2);
         buffer.pop(dst1);
@@ -64,7 +113,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('push and pop many times', () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        const buffer = Float32RingBuffer.withCapacity(8);
         for (let i = 0; i < 100; i++) {
             const src = new Float32Array([1, 2, 3, 4, 5, 6, 7]);
             buffer.push(src);
@@ -77,7 +126,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('handles index overflow correctly', () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        const buffer = Float32RingBuffer.withCapacity(8);
 
         // Access private fields for testing
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -105,7 +154,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('waitPushAsync resolves immediately', async () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        const buffer = Float32RingBuffer.withCapacity(8);
         buffer.push(new Float32Array([1, 2, 3]));
         let resolved = false;
         await buffer.waitPushAsync(2).then(() => resolved = true);
@@ -121,7 +170,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('waitPopAsync resolves immediately', async () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        const buffer = Float32RingBuffer.withCapacity(8);
         buffer.push(new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]));
         let resolved = false;
         await buffer.waitPopAsync(5).then(() => resolved = true);
@@ -137,19 +186,19 @@ describe('Float32RingBuffer', () => {
     });
 
     test('waitPush throws if n exceeds capacity', async () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        const buffer = Float32RingBuffer.withCapacity(8);
         expect(() => buffer.waitPush(9)).toThrow('exceeds capacity');
         await expect(buffer.waitPushAsync(9)).rejects.toThrow('exceeds capacity');
     });
 
     test('waitPop throws if n exceeds capacity', async () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        const buffer = Float32RingBuffer.withCapacity(8);
         expect(() => buffer.waitPop(9)).toThrow('exceeds capacity');
         await expect(buffer.waitPopAsync(9)).rejects.toThrow('exceeds capacity');
     });
 
     test('waitPushAsync waits for push', async () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        const buffer = Float32RingBuffer.withCapacity(8);
         buffer.push(new Float32Array([1, 2, 3]));
         let resolved = false;
         const promise = buffer.waitPushAsync(5).then(() => resolved = true);
@@ -165,7 +214,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('waitPopAsync waits for pop', async () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        const buffer = Float32RingBuffer.withCapacity(8);
         buffer.push(new Float32Array([1, 2, 3, 4, 5]));
         let resolved = false;
         const promise = buffer.waitPopAsync(3).then(() => resolved = true);
@@ -181,7 +230,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('waitPushAsync/waitPopAsync concurrency', async () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(16));
+        const buffer = Float32RingBuffer.withCapacity(16);
 
         // CHUNK_SIZE must divide ITERATIONS
         const ITERATIONS = 1000000;
@@ -246,14 +295,14 @@ describe('Float32RingBuffer', () => {
     });
 
     test('close method sets closed flag', () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        const buffer = Float32RingBuffer.withCapacity(8);
         expect(buffer.isClosed).toBe(false);
         buffer.close();
         expect(buffer.isClosed).toBe(true);
     });
 
     test('push returns 0 when closed', () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        const buffer = Float32RingBuffer.withCapacity(8);
         const src = new Float32Array([1, 2, 3]);
         expect(buffer.push(src)).toBe(3);
         buffer.close();
@@ -261,7 +310,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('waitPush returns immediately when closed', async () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        const buffer = Float32RingBuffer.withCapacity(8);
         buffer.push(new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]));
         buffer.close();
         // Should return immediately without throwing
@@ -271,7 +320,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('waitPop returns immediately when closed', async () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        const buffer = Float32RingBuffer.withCapacity(8);
         buffer.close();
         // Should return immediately without throwing
         expect(() => buffer.waitPop(1)).not.toThrow();
@@ -280,7 +329,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('close wakes waitPush', async () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        const buffer = Float32RingBuffer.withCapacity(8);
         buffer.push(new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]));
         // buffer is full, waitPush will block
         const waitPromise = buffer.waitPushAsync(1);
@@ -290,7 +339,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('close wakes waitPop', async () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        const buffer = Float32RingBuffer.withCapacity(8);
         // buffer is empty, waitPop will block
         const waitPromise = buffer.waitPopAsync(1);
         buffer.close();
@@ -299,7 +348,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('pop still works after close', () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
+        const buffer = Float32RingBuffer.withCapacity(8);
         const src = new Float32Array([1, 2, 3]);
         buffer.push(src);
         buffer.close();
@@ -311,7 +360,7 @@ describe('Float32RingBuffer', () => {
     });
 
     test('drainRingBuffer collects all data', async () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(16));
+        const buffer = Float32RingBuffer.withCapacity(16);
 
         const data1 = new Float32Array([1, 2, 3, 4]);
         const data2 = new Float32Array([5, 6, 7, 8]);
@@ -329,11 +378,5 @@ describe('Float32RingBuffer', () => {
         expect(result.length).toBe(12);
         expect(Array.from(result)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
         expect(buffer.available).toBe(0);
-    });
-
-    test('waitCloseAsync', async () => {
-        const buffer = new Float32RingBuffer(Float32RingBuffer.bufferForCapacity(8));
-        buffer.close();
-        await expect(buffer.waitCloseAsync()).resolves.toBeUndefined();
     });
 });

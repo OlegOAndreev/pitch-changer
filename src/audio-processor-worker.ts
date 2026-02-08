@@ -3,8 +3,8 @@
 import * as Comlink from 'comlink';
 
 import initWasmModule, { Float32Vec, PitchShifter, PitchShiftParams, TimeStretcher, TimeStretchParams } from '../wasm/build/wasm_main_module';
-import type { WorkerParams, WorkerApi } from './audio-processor';
-import { Float32RingBuffer } from './ring-buffer';
+import type { WorkerApi, WorkerParams } from './audio-processor';
+import { Float32RingBuffer } from './sync';
 
 type Processor = PitchShifter | TimeStretcher;
 
@@ -30,7 +30,10 @@ class WorkerImpl implements WorkerApi {
 
     async process(source: Float32Array, sampleRate: number, outputSab: SharedArrayBuffer): Promise<void> {
         const output = new Float32RingBuffer(outputSab);
-        const chunkSize = output.available / 4;
+        const chunkSize = output.capacity / 4;
+
+        // Clean the state if previous process() was aborted.
+        this.getProcessor(sampleRate).reset();
 
         let sourcePos = 0;
         // Main processing loop.

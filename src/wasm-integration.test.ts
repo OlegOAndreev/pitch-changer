@@ -1,8 +1,8 @@
-import { describe, expect, test, beforeAll } from 'vitest';
-import { initSync, Float32Vec } from '../wasm/build/wasm_main_module';
 import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
+import { beforeAll, describe, expect, test } from 'vitest';
+import { Float32Vec, initSync } from '../wasm/build/wasm_main_module';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
