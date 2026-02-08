@@ -13,6 +13,7 @@
     "test:ts": "vitest run",
     "test:wasm": "cd wasm && cargo test --release",
     "test:ring-buffer": "node src/ring-buffer.worker-test.ts",
+    "test:wasm-integration": "npm run build:wasm && WASM_INTEGRATION=true vitest run src/wasm-integration.test.ts",
     "clippy": "cd wasm && cargo clippy"
   },
   "dependencies": {

@@ -4,7 +4,6 @@ mod resampler;
 mod stft;
 mod time_stretcher;
 mod util;
-mod owned;
 mod web;
 mod window;
 

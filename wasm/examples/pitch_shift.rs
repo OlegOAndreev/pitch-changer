@@ -370,9 +370,9 @@ fn main() -> Result<()> {
             let mut output_data = vec![];
             // Use fft_size - 1 for chunks to test edge cases.
             for chunk in input.data.chunks(fft_size - 1) {
-                output_data.append(&mut stretcher.process(chunk));
+                stretcher.process_vec(chunk, &mut output_data);
             }
-            output_data.append(&mut stretcher.finish());
+            stretcher.finish_vec(&mut output_data);
             println!(
                 "Output generated: {} samples in {}ms",
                 output_data.len(),
@@ -421,9 +421,9 @@ fn main() -> Result<()> {
             let mut output_data = vec![];
             // Use fft_size - 1 for chunks to test edge cases.
             for chunk in input.data.chunks(fft_size - 1) {
-                output_data.append(&mut shifter.process(chunk));
+                shifter.process_vec(chunk, &mut output_data);
             }
-            output_data.append(&mut shifter.finish());
+            shifter.finish_vec(&mut output_data);
             println!(
                 "Output generated: {} samples in {}ms",
                 output_data.len(),

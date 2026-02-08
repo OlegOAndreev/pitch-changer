@@ -43,9 +43,9 @@ impl StreamingResampler {
     ///
     /// Note: you need to call `finish()` to receive the last output chunks after you call `resample()` for all input
     /// samples.
-    pub fn resample(&mut self, input: &[f32]) -> Vec<f32> {
+    pub fn resample(&mut self, input: &[f32], output: &mut Vec<f32>) {
         if input.is_empty() {
-            return vec![];
+            return;
         }
 
         // input_frames_next() and output_frames_next() return constant values.
@@ -53,7 +53,7 @@ impl StreamingResampler {
         let output_chunk_size = self.resampler.output_frames_max();
 
         let output_capacity = (self.previous_chunk.len() + input.len()) / input_chunk_size * output_chunk_size;
-        let mut output = Vec::with_capacity(output_capacity);
+        output.reserve(output_capacity);
 
         let mut input_pos = 0;
 
@@ -68,20 +68,17 @@ impl StreamingResampler {
             let to_copy = input_chunk_size - self.previous_chunk.len();
             if input.len() < to_copy {
                 self.previous_chunk.extend_from_slice(input);
-                return vec![];
+                return;
             }
 
             self.previous_chunk.extend_from_slice(&input[..to_copy]);
-            // This is an annoying dance around Rust borrowck.
-            let mut previous_chunk = mem::take(&mut self.previous_chunk);
-            self.resample_chunk(&previous_chunk, &mut output);
-            mem::swap(&mut self.previous_chunk, &mut previous_chunk);
+            self.resample_previous_chunk(output);
             input_pos += to_copy;
         }
 
         // Now run the main loop
         while input_pos + input_chunk_size <= input.len() {
-            self.resample_chunk(&input[input_pos..], &mut output);
+            self.resample_chunk(&input[input_pos..], output);
             input_pos += input_chunk_size;
         }
 
@@ -94,8 +91,6 @@ impl StreamingResampler {
             self.previous_chunk.len(),
             input_chunk_size
         );
-
-        output
     }
 
     /// Finish processing any remaining audio data in the internal buffers.
@@ -108,9 +103,7 @@ impl StreamingResampler {
 
         let input_chunk_size = self.resampler.input_frames_next();
         self.previous_chunk.resize(input_chunk_size, 0.0);
-        // This is an annoying dance around Rust borrowck.
-        let previous_chunk = mem::take(&mut self.previous_chunk);
-        self.resample_chunk(&previous_chunk, output);
+        self.resample_previous_chunk(output);
 
         self.reset();
     }
@@ -148,6 +141,16 @@ impl StreamingResampler {
             self.should_delay_output = false;
         }
     }
+
+    fn resample_previous_chunk(&mut self, output: &mut Vec<f32>) {
+        // This is an annoying dance around Rust borrowck: temporarily move the previous_chunk into local var and move
+        // local var back after processing.
+        let mut previous_chunk = mem::take(&mut self.previous_chunk);
+        self.resample_chunk(&previous_chunk, output);
+        mem::swap(&mut self.previous_chunk, &mut previous_chunk);
+        // Sanity check that nothing was added to self.previous_chunk during resample_chunk.
+        assert!(previous_chunk.is_empty());
+    }
 }
 
 #[cfg(test)]
@@ -158,13 +161,19 @@ mod tests {
     use anyhow::Result;
 
     fn resample_all_small_chunks(resampler: &mut StreamingResampler, input: &[f32]) -> Vec<f32> {
+        const PREFIX_SIZE: usize = 1000;
+        const PREFIX: f32 = -1234.0;
         const CHUNK_SIZE: usize = 256;
 
-        let mut output = Vec::new();
+        let mut output = vec![PREFIX; PREFIX_SIZE];
         for chunk in input.chunks(CHUNK_SIZE) {
-            output.extend_from_slice(&resampler.resample(chunk));
+            resampler.resample(chunk, &mut output);
         }
         resampler.finish(&mut output);
+        for i in 0..PREFIX_SIZE {
+            assert_eq!(output[i], PREFIX);
+        }
+        output.drain(..PREFIX_SIZE);
         output
     }
 

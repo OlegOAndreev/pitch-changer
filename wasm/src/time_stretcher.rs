@@ -5,7 +5,7 @@ use anyhow::{Result, bail};
 use crate::WindowType;
 use crate::phase_gradient_time_stretch::PhaseGradientTimeStretch;
 use crate::stft::Stft;
-use crate::web::WrapAnyhowError;
+use crate::web::{Float32Vec, WrapAnyhowError};
 
 /// Parameters for audio time stretching/.
 #[derive(Debug, Clone, Copy)]
@@ -116,23 +116,8 @@ impl TimeStretcher {
     /// Note: you need to call `finish()` to receive the last output chunks after you call `process()` for all input
     /// samples.
     #[wasm_bindgen]
-    pub fn process(&mut self, input: &[f32]) -> Vec<f32> {
-        let output_capacity = input.len() / self.ana_hop_size * self.syn_hop_size;
-        let mut output = Vec::with_capacity(output_capacity);
-        let mut input_pos = 0;
-        while input_pos < input.len() {
-            let needed = self.params.fft_size - self.input_buf.len();
-            let available = input.len() - input_pos;
-            let n = available.min(needed);
-            self.input_buf.extend_from_slice(&input[input_pos..input_pos + n]);
-            input_pos += n;
-
-            if self.input_buf.len() == self.params.fft_size {
-                self.do_stft();
-                self.append_output_and_shift(&mut output);
-            }
-        }
-        output
+    pub fn process(&mut self, input: &Float32Vec, output: &mut Float32Vec) {
+        self.process_vec(&input.0, &mut output.0);
     }
 
     /// Finish processing any remaining audio data in the internal buffers. This method must be called after all input
@@ -140,38 +125,8 @@ impl TimeStretcher {
     ///
     /// Note: after calling `finish()`, the pitch shifter is reset and ready to process new audio data.
     #[wasm_bindgen]
-    pub fn finish(&mut self) -> Vec<f32> {
-        // We want to process all data remaining in input_buf, which is done by running stft fft_size/ana_hop_size times
-        // and padding with zeros after each iteration. We want to fade out this tail to zero by applying half-window
-        // stored in tail_window.
-        //
-        // This is especially important for large stretches where syn_hop_size > ana_hop_size leads to rapid amplitude
-        // changes and noise.
-        //
-        // Another way to solve this problem is simply appending the whole output_accum_buf into result on final
-        // iteration, but this makes testing more annoying =)
-        let result_capacity = (self.params.fft_size / self.ana_hop_size) * self.syn_hop_size;
-        let mut result = Vec::with_capacity(result_capacity);
-
-        let iters = self.params.fft_size / self.ana_hop_size;
-        for i in 0..iters {
-            self.input_buf.resize(self.params.fft_size, 0.0);
-            self.do_stft();
-
-            let tail_window_offset = i * self.syn_hop_size;
-            // After the last iteration do windowing first.
-            for (a, w) in self.output_accum_buf[..self.syn_hop_size]
-                .iter_mut()
-                .zip(&self.tail_window[tail_window_offset..])
-            {
-                *a *= *w;
-            }
-            self.append_output_and_shift(&mut result);
-        }
-        debug_assert_eq!(result.len(), result_capacity);
-
-        self.reset();
-        result
+    pub fn finish(&mut self, output: &mut Float32Vec) {
+        self.finish_vec(&mut output.0);
     }
 
     /// Do one iteration of stft
@@ -214,6 +169,61 @@ impl TimeStretcher {
     }
 }
 
+// https://stackoverflow.com/questions/51388721/is-it-possible-to-have-wasm-bindgen-ignore-certain-public-functions-in-an-impl
+impl TimeStretcher {
+    /// See documentation for process()
+    pub fn process_vec(&mut self, input: &[f32], output: &mut Vec<f32>) {
+        let output_capacity = input.len() / self.ana_hop_size * self.syn_hop_size;
+        output.reserve(output_capacity);
+        let mut input_pos = 0;
+        while input_pos < input.len() {
+            let needed = self.params.fft_size - self.input_buf.len();
+            let available = input.len() - input_pos;
+            let n = available.min(needed);
+            self.input_buf.extend_from_slice(&input[input_pos..input_pos + n]);
+            input_pos += n;
+
+            if self.input_buf.len() == self.params.fft_size {
+                self.do_stft();
+                self.append_output_and_shift(output);
+            }
+        }
+    }
+
+    /// See documentation for finish()
+    pub fn finish_vec(&mut self, output: &mut Vec<f32>) {
+        // We want to process all data remaining in input_buf, which is done by running stft fft_size/ana_hop_size times
+        // and padding with zeros after each iteration. We want to fade out this tail to zero by applying half-window
+        // stored in tail_window.
+        //
+        // This is especially important for large stretches where syn_hop_size > ana_hop_size leads to rapid amplitude
+        // changes and noise.
+        //
+        // Another way to solve this problem is simply appending the whole output_accum_buf into result on final
+        // iteration, but this makes testing more annoying =)
+        let output_capacity = (self.params.fft_size / self.ana_hop_size) * self.syn_hop_size;
+        output.reserve(output_capacity);
+
+        let iters = self.params.fft_size / self.ana_hop_size;
+        for i in 0..iters {
+            self.input_buf.resize(self.params.fft_size, 0.0);
+            self.do_stft();
+
+            let tail_window_offset = i * self.syn_hop_size;
+            // After the last iteration do windowing first.
+            for (a, w) in self.output_accum_buf[..self.syn_hop_size]
+                .iter_mut()
+                .zip(&self.tail_window[tail_window_offset..])
+            {
+                *a *= *w;
+            }
+            self.append_output_and_shift(output);
+        }
+
+        self.reset();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::generate_sine_wave;
@@ -223,19 +233,38 @@ mod tests {
     use rand::Rng;
 
     fn process_all(stretcher: &mut TimeStretcher, input: &[f32]) -> Vec<f32> {
-        let mut result = stretcher.process(input);
-        result.append(&mut stretcher.finish());
+        const PREFIX_SIZE: usize = 1000;
+        const PREFIX: f32 = -1234.0;
+
+        let input = Float32Vec(input.to_vec());
+        let mut output = Float32Vec(vec![PREFIX; PREFIX_SIZE]);
+        stretcher.process(&input, &mut output);
+        stretcher.finish(&mut output);
+
+        let mut result = output.0;
+        for i in 0..PREFIX_SIZE {
+            assert_eq!(result[i], PREFIX);
+        }
+        result.drain(..PREFIX_SIZE);
         result
     }
 
     fn process_all_small_chunks(stretcher: &mut TimeStretcher, input: &[f32]) -> Vec<f32> {
+        const PREFIX_SIZE: usize = 1000;
+        const PREFIX: f32 = -1234.0;
         const CHUNK_SIZE: usize = 100;
 
-        let mut result = vec![];
+        let mut output = Float32Vec(vec![PREFIX; PREFIX_SIZE]);
         for chunk in input.chunks(CHUNK_SIZE) {
-            result.append(&mut stretcher.process(chunk));
+            stretcher.process(&Float32Vec(chunk.to_vec()), &mut output);
         }
-        result.append(&mut stretcher.finish());
+        stretcher.finish(&mut output);
+
+        let mut result = output.0;
+        for i in 0..PREFIX_SIZE {
+            assert_eq!(result[i], PREFIX);
+        }
+        result.drain(..PREFIX_SIZE);
         result
     }
 

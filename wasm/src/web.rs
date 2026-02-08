@@ -102,3 +102,56 @@ pub fn get_settings() -> String {
         optimized, atomics, bulk_memory, multivalue, nontrapping_fptoint, sign_ext, simd128, relaxed_simd, memory_bytes
     )
 }
+
+/// Float32Vec is a wrapper for Vec<f32> that is used to optimize passing data between wasm and js:
+///  * Float32Arrays can be created from wasm memory using data_ptr() and len() to fill input and read output parameters
+///  * clear() can be used to reuse Float32Owneds between calls
+#[wasm_bindgen]
+pub struct Float32Vec(#[wasm_bindgen(skip)] pub Vec<f32>);
+
+#[wasm_bindgen]
+impl Float32Vec {
+    /// Create a new Float32Vec with given size, filled with 0.0.
+    #[wasm_bindgen(constructor)]
+    pub fn new(len: usize) -> Float32Vec {
+        Float32Vec(vec![0.0; len])
+    }
+
+    /// Return Float32Vec data ptr (is a number on JS side). Accessing Float32Array a la Emscripten HEAPF32 on JS side
+    /// should be marginally faster than creating Float32Array using array property.
+    #[wasm_bindgen(getter)]
+    pub fn data_ptr(&mut self) -> *mut f32 {
+        self.0.as_mut_ptr()
+    }
+
+    /// Return Float32Vec length.
+    #[wasm_bindgen(getter)]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Remove all data from Float32Vec.
+    #[wasm_bindgen]
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    /// Resize Float32Vec to given size, either truncating or appending 0.0 if required.
+    #[wasm_bindgen]
+    pub fn resize(&mut self, n: usize) {
+        self.0.resize(n, 0.0);
+    }
+
+    /// Set Float32Vec contents from Float32Array.
+    #[wasm_bindgen]
+    pub fn set(&mut self, arr: &js_sys::Float32Array) {
+        self.0.resize(arr.length() as usize, 0.0);
+        arr.copy_to(&mut self.0);
+    }
+
+    /// Create a Float32Array view for Float32Vec. Warning: the view is valid only until the Float32Vec is resized.
+    #[wasm_bindgen(getter)]
+    pub fn array(&self) -> js_sys::Float32Array {
+        unsafe { js_sys::Float32Array::view(&self.0) }
+    }
+}

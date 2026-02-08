@@ -5,7 +5,7 @@ use anyhow::{Result, bail};
 use crate::WindowType;
 use crate::resampler::StreamingResampler;
 use crate::time_stretcher::{TimeStretchParams, TimeStretcher};
-use crate::web::WrapAnyhowError;
+use crate::web::{Float32Vec, WrapAnyhowError};
 
 /// Parameters for audio pitch shifting
 #[derive(Debug, Clone, Copy)]
@@ -43,14 +43,16 @@ impl PitchShiftParams {
     }
 }
 
+/// PitchShifter stretches the time by pitch_shift factor and then resamples the rate back so that the output has the
+/// ~same length as the input.
 #[wasm_bindgen]
 pub struct PitchShifter {
     time_stretcher: TimeStretcher,
     resampler: StreamingResampler,
+    // Scratch buffer
+    stretched: Vec<f32>,
 }
 
-// PitchShifter stretches the time by pitch_shift factor and then resamples the rate back so that the output has the
-// ~same length as the input.
 #[wasm_bindgen]
 impl PitchShifter {
     #[wasm_bindgen(constructor)]
@@ -66,7 +68,33 @@ impl PitchShifter {
 
         let resampler = StreamingResampler::new(params.sample_rate, 1.0 / params.pitch_shift)?;
 
-        Ok(Self { time_stretcher, resampler })
+        Ok(Self { time_stretcher, resampler, stretched: vec![] })
+    }
+
+    /// Process a chunk of audio samples through the pitch shifter.
+    ///
+    /// Note: you need to call `finish()` to receive the last output chunks after you call `process()` for all input
+    /// samples.
+    #[wasm_bindgen]
+    pub fn process(&mut self, input: &Float32Vec, output: &mut Float32Vec) {
+        self.process_vec(&input.0, &mut output.0);
+    }
+
+    /// Finish processing any remaining audio data in the internal buffers. This method must be called after all input
+    /// has been processed via `process()`.
+    ///
+    /// Note: after calling `finish()`, the pitch shifter is reset and ready to process new audio data.
+    #[wasm_bindgen]
+    pub fn finish(&mut self, output: &mut Float32Vec) {
+        self.finish_vec(&mut output.0);
+    }
+
+    /// Reset the pitch shifter to its initial state.
+    #[wasm_bindgen]
+    pub fn reset(&mut self) {
+        self.time_stretcher.reset();
+        self.resampler.reset();
+        self.stretched.clear();
     }
 
     fn validate_params(params: &PitchShiftParams) -> Result<()> {
@@ -76,35 +104,24 @@ impl PitchShifter {
         // Most of the parameter validation will be done by TimeStretcher.
         Ok(())
     }
+}
 
-    /// Process a chunk of audio samples through the pitch shifter.
-    ///
-    /// Note: you need to call `finish()` to receive the last output chunks after you call `process()` for all input
-    /// samples.
-    #[wasm_bindgen]
-    pub fn process(&mut self, input: &[f32]) -> Vec<f32> {
-        let time_stretched = self.time_stretcher.process(input);
-        self.resampler.resample(&time_stretched)
+// https://stackoverflow.com/questions/51388721/is-it-possible-to-have-wasm-bindgen-ignore-certain-public-functions-in-an-impl
+impl PitchShifter {
+    /// See documentation for process()
+    pub fn process_vec(&mut self, input: &[f32], output: &mut Vec<f32>) {
+        self.stretched.clear();
+        self.time_stretcher.process_vec(input, &mut self.stretched);
+        self.resampler.resample(&self.stretched, output);
     }
 
-    /// Finish processing any remaining audio data in the internal buffers. This method must be called after all input
-    /// has been processed via `process()`.
-    ///
-    /// Note: after calling `finish()`, the pitch shifter is reset and ready to process new audio data.
-    #[wasm_bindgen]
-    pub fn finish(&mut self) -> Vec<f32> {
-        let time_stretched = self.time_stretcher.finish();
-        let mut result = self.resampler.resample(&time_stretched);
-        self.resampler.finish(&mut result);
+    /// See documentation for finish()
+    pub fn finish_vec(&mut self, output: &mut Vec<f32>) {
+        self.stretched.clear();
+        self.time_stretcher.finish_vec(&mut self.stretched);
+        self.resampler.resample(&self.stretched, output);
+        self.resampler.finish(output);
         self.reset();
-        result
-    }
-
-    /// Reset the pitch shifter to its initial state.
-    #[wasm_bindgen]
-    pub fn reset(&mut self) {
-        self.time_stretcher.reset();
-        self.resampler.reset();
     }
 }
 
@@ -116,19 +133,38 @@ mod tests {
     use anyhow::Result;
 
     fn process_all(shifter: &mut PitchShifter, input: &[f32]) -> Vec<f32> {
-        let mut result = shifter.process(input);
-        result.append(&mut shifter.finish());
+        const PREFIX_SIZE: usize = 1000;
+        const PREFIX: f32 = -1234.0;
+
+        let input = Float32Vec(input.to_vec());
+        let mut output = Float32Vec(vec![PREFIX; PREFIX_SIZE]);
+        shifter.process(&input, &mut output);
+        shifter.finish(&mut output);
+
+        let mut result = output.0;
+        for i in 0..PREFIX_SIZE {
+            assert_eq!(result[i], PREFIX);
+        }
+        result.drain(..PREFIX_SIZE);
         result
     }
 
     fn process_all_small_chunks(shifter: &mut PitchShifter, input: &[f32]) -> Vec<f32> {
+        const PREFIX_SIZE: usize = 1000;
+        const PREFIX: f32 = -1234.0;
         const CHUNK_SIZE: usize = 100;
 
-        let mut result = vec![];
+        let mut output = Float32Vec(vec![PREFIX; PREFIX_SIZE]);
         for chunk in input.chunks(CHUNK_SIZE) {
-            result.append(&mut shifter.process(chunk));
+            shifter.process(&Float32Vec(chunk.to_vec()), &mut output);
         }
-        result.append(&mut shifter.finish());
+        shifter.finish(&mut output);
+
+        let mut result = output.0;
+        for i in 0..PREFIX_SIZE {
+            assert_eq!(result[i], PREFIX);
+        }
+        result.drain(..PREFIX_SIZE);
         result
     }
 

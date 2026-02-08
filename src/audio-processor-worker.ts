@@ -2,12 +2,12 @@
 
 import * as Comlink from 'comlink';
 
-import initWasmModule, { PitchShifter, PitchShiftParams, TimeStretcher, TimeStretchParams } from '../wasm/build/wasm_main_module';
+import initWasmModule, { Float32Vec, PitchShifter, PitchShiftParams, TimeStretcher, TimeStretchParams } from '../wasm/build/wasm_main_module';
 import type { WorkerParams, WorkerApi } from './audio-processor';
 import { Float32RingBuffer } from './ring-buffer';
 
-// Write in chunks of 2048 samples ~= 40-50msec at normal sample rates
-const CHUNK_SIZE = 2048;
+// Write in chunks of 16384 samples ~= 350-400msec at regular sample rates
+const CHUNK_SIZE = 16384;
 
 type Processor = PitchShifter | TimeStretcher;
 
@@ -15,11 +15,14 @@ class WorkerImpl implements WorkerApi {
     params: WorkerParams = { processingMode: 'pitch', pitchValue: 1.0 }
     paramsDirty: boolean = false;
     processor: Processor | null = null;
+    wasmMemory: WebAssembly.Memory | null = null
 
     async init(): Promise<boolean> {
         // Initialize WASM module. It must be done in the function, not top-level:
         // https://github.com/GoogleChromeLabs/comlink/issues/635 
-        await initWasmModule();
+        const module = await initWasmModule();
+        this.wasmMemory = module.memory;
+        console.log(`Initial wasm memory size: ${this.wasmMemory.buffer.byteLength}`);
         return true;
     }
 
@@ -38,36 +41,46 @@ class WorkerImpl implements WorkerApi {
 
         let sourcePos = 0;
         // Main processing loop.
-        while (sourcePos < source.length) {
-            const chunkSize = Math.min(CHUNK_SIZE, source.length - sourcePos);
-            const chunk = source.subarray(sourcePos, sourcePos + chunkSize);
-            sourcePos += chunkSize;
-            const processor = this.getProcessor(sampleRate);
-            const processedChunk = processor.process(chunk);
+        const sourceVec = new Float32Vec(0);
+        const processedVec = new Float32Vec(0);
+        try {
+            while (sourcePos < source.length) {
+                const chunkSize = Math.min(CHUNK_SIZE, source.length - sourcePos);
+                sourceVec.set(source.subarray(sourcePos, sourcePos + chunkSize));
+                sourcePos += chunkSize;
+                const processor = this.getProcessor(sampleRate);
+                processedVec.clear();
+                processor.process(sourceVec, processedVec);
 
-            await output.waitPushAsync(processedChunk.length);
-            const n = output.push(processedChunk);
+                await output.waitPushAsync(processedVec.len);
+                const n = output.push(processedVec.array);
+                if (output.isClosed) {
+                    return;
+                }
+                // console.debug(`Processing chunks of size ${sourceVec.len} with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}, stored ${n} samples`);
+                if (n !== processedVec.len && !output.isClosed) {
+                    throw new Error(`Internal error: unexpected push(${processedVec.len}) result: ${n}`);
+                }
+            }
+
+            // Finish processing (get remaining data from processor)
+            const processor = this.getProcessor(sampleRate);
+            processedVec.clear();
+            processor.finish(processedVec);
+            await output.waitPushAsync(processedVec.len);
+            const n = output.push(processedVec.array);
+            // console.debug(`Processing final chunk with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}, stored ${n} samples`);
             if (output.isClosed) {
                 return;
             }
-            // console.debug(`Processing chunks of size ${chunk.length} with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedChunk.length}, stored ${n} samples`);
-            if (n !== processedChunk.length && !output.isClosed) {
-                throw new Error(`Internal error: unexpected push(${processedChunk.length}) result: ${n}`);
+            if (n !== processedVec.len && !output.isClosed) {
+                throw new Error(`Internal error: unexpected push(${processedVec.len}) result: ${n}`);
             }
+        } finally {
+            sourceVec.free();
+            processedVec.free();
         }
-
-        // Finish processing (get remaining data from processor)
-        const processor = this.getProcessor(sampleRate);
-        const finalChunk = processor.finish();
-        await output.waitPushAsync(finalChunk.length);
-        const n = output.push(finalChunk);
-        // console.debug(`Processing final chunk with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${finalChunk.length}, stored ${n} samples`);
-        if (output.isClosed) {
-            return;
-        }
-        if (n !== finalChunk.length && !output.isClosed) {
-            throw new Error(`Internal error: unexpected push(${finalChunk.length}) result: ${n}`);
-        }
+        console.log(`Wasm memory size: ${this.wasmMemory!.buffer.byteLength}`);
     }
 
     private getProcessor(sampleRate: number): Processor {
@@ -84,7 +97,7 @@ class WorkerImpl implements WorkerApi {
                 const params = new PitchShiftParams(sampleRate, this.params.pitchValue);
                 try {
                     this.processor = new PitchShifter(params);
-                    console.log(`Created PitchShifter with ${params.to_string()}`);
+                    console.log(`Created PitchShifter with ${params.to_debug_string()}`);
                 } finally {
                     params.free();
                 }
@@ -92,7 +105,7 @@ class WorkerImpl implements WorkerApi {
                 const params = new TimeStretchParams(sampleRate, this.params.pitchValue);
                 try {
                     this.processor = new TimeStretcher(params);
-                    console.log(`Created TimeStretcher with ${params.to_string()}`);
+                    console.log(`Created TimeStretcher with ${params.to_debug_string()}`);
                 } finally {
                     params.free();
                 }
