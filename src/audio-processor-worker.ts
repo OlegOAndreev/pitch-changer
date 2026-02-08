@@ -6,9 +6,6 @@ import initWasmModule, { Float32Vec, PitchShifter, PitchShiftParams, TimeStretch
 import type { WorkerParams, WorkerApi } from './audio-processor';
 import { Float32RingBuffer } from './ring-buffer';
 
-// Write in chunks of 16384 samples ~= 350-400msec at regular sample rates
-const CHUNK_SIZE = 16384;
-
 type Processor = PitchShifter | TimeStretcher;
 
 class WorkerImpl implements WorkerApi {
@@ -33,11 +30,7 @@ class WorkerImpl implements WorkerApi {
 
     async process(source: Float32Array, sampleRate: number, outputSab: SharedArrayBuffer): Promise<void> {
         const output = new Float32RingBuffer(outputSab);
-        // Force the higher buffer size to prevent underruns. We also want to be sure that the chunks returned from the
-        // processor do not exceed the ring buffer capacity.
-        if (output.capacity < CHUNK_SIZE * 8) {
-            throw new Error(`Output buffer is too small, should be at least ${CHUNK_SIZE * 8}`)
-        }
+        const chunkSize = output.available / 4;
 
         let sourcePos = 0;
         // Main processing loop.
@@ -45,9 +38,9 @@ class WorkerImpl implements WorkerApi {
         const processedVec = new Float32Vec(0);
         try {
             while (sourcePos < source.length) {
-                const chunkSize = Math.min(CHUNK_SIZE, source.length - sourcePos);
-                sourceVec.set(source.subarray(sourcePos, sourcePos + chunkSize));
-                sourcePos += chunkSize;
+                const nextChunkSize = Math.min(chunkSize, source.length - sourcePos);
+                sourceVec.set(source.subarray(sourcePos, sourcePos + nextChunkSize));
+                sourcePos += nextChunkSize;
                 const processor = this.getProcessor(sampleRate);
                 processedVec.clear();
                 processor.process(sourceVec, processedVec);
@@ -79,6 +72,8 @@ class WorkerImpl implements WorkerApi {
         } finally {
             sourceVec.free();
             processedVec.free();
+            // Always close output so that the other side does not hang forever.
+            output.close();
         }
         console.log(`Wasm memory size: ${this.wasmMemory!.buffer.byteLength}`);
     }
