@@ -16,7 +16,6 @@ const CLOSED_BIT = 1;
 const INDEX_SHIFT = 1;
 
 export class Float32RingBuffer {
-
     private capacity_: number;
     private buffer_: SharedArrayBuffer;
     private data: Float32Array;
@@ -221,6 +220,20 @@ export class Float32RingBuffer {
                 return;
             }
             const result = Atomics.waitAsync(this.writeIndex, 0, writeValue);
+            if (result.async) {
+                await result.value;
+            }
+        }
+    }
+
+    async waitCloseAsync() {
+        while (true) {
+            // We wait on readIndex, but could wait on writeIndex
+            const value = Atomics.load(this.readIndex, 0);
+            if (this.isClosed) {
+                return;
+            }
+            const result = Atomics.waitAsync(this.readIndex, 0, value);
             if (result.async) {
                 await result.value;
             }
