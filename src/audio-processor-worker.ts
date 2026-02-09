@@ -51,9 +51,12 @@ class WorkerImpl implements WorkerApi {
                 const processor = this.getProcessor(source.sampleRate, source.numChannels);
                 processedVec.clear();
                 processor.process(sourceVec, processedVec);
+                // Copy processedVec: if WASM memory gets resized during pushAllRingBuffer, we will get an error with
+                // detached ArrayBuffer. 
+                const processedArr = new Float32Array(processedVec.array);
 
                 // console.debug(`Processing chunks of size ${sourceVec.len}, num channels ${numChannels} with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}`);
-                await pushAllRingBuffer(processedVec.array, output);
+                await pushAllRingBuffer(processedArr, output);
                 if (output.isClosed) {
                     return;
                 }
@@ -63,8 +66,9 @@ class WorkerImpl implements WorkerApi {
             const processor = this.getProcessor(source.sampleRate, source.numChannels);
             processedVec.clear();
             processor.finish(processedVec);
+            const processedArr = new Float32Array(processedVec.array);
             // console.debug(`Processing final chunk num channels ${numChannels} with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}`);
-            await pushAllRingBuffer(processedVec.array, output);
+            await pushAllRingBuffer(processedArr, output);
         } finally {
             sourceVec.free();
             processedVec.free();
