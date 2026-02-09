@@ -39,7 +39,7 @@ impl TimeStretchParams {
     }
 }
 
-/// TimeStretcher stretches the mono audio time by time_stretch factor.
+/// TimeStretcher stretches the mono audio by time_stretch factor.
 #[wasm_bindgen]
 pub struct TimeStretcher {
     params: TimeStretchParams,
@@ -287,13 +287,19 @@ impl MultiTimeStretcher {
 impl MultiTimeStretcher {
     /// Process interleaved multi-channel audio data.
     pub fn process_vec(&mut self, input: &[f32], output: &mut Vec<f32>) {
+        if self.num_channels == 1 {
+            self.stretchers[0].process_vec(input, output);
+            return;
+        }
+
         assert!(input.len().is_multiple_of(self.num_channels));
 
-        let samples_per_channel = input.len() / self.num_channels;
         self.deinterleaved_buf.clear();
+        self.output_buf.clear();
+
+        let samples_per_channel = input.len() / self.num_channels;
         deinterleave_samples(input, self.num_channels, &mut self.deinterleaved_buf);
 
-        self.output_buf.clear();
         for (ch, stretcher) in self.stretchers.iter_mut().enumerate() {
             let channel_start = ch * samples_per_channel;
             let channel_end = (ch + 1) * samples_per_channel;
@@ -305,6 +311,11 @@ impl MultiTimeStretcher {
 
     /// Finish processing for all channels.
     pub fn finish_vec(&mut self, output: &mut Vec<f32>) {
+        if self.num_channels == 1 {
+            self.stretchers[0].finish_vec(output);
+            return;
+        }
+
         self.output_buf.clear();
         for stretcher in &mut self.stretchers {
             stretcher.finish_vec(&mut self.output_buf);
