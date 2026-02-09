@@ -5,6 +5,7 @@ use anyhow::{Result, bail};
 use crate::WindowType;
 use crate::resampler::StreamingResampler;
 use crate::time_stretcher::{TimeStretchParams, TimeStretcher};
+use crate::util::{deinterleave_samples, interleave_samples};
 use crate::web::{Float32Vec, WrapAnyhowError};
 
 /// Parameters for audio pitch shifting.
@@ -45,8 +46,8 @@ impl PitchShiftParams {
     }
 }
 
-/// PitchShifter stretches the time by pitch_shift factor and then resamples the rate back so that the output has the
-/// ~same length as the input.
+/// PitchShifter stretches the mono audio time by pitch_shift factor and then resamples the rate back so that the output
+/// has the ~same length as the input.
 #[wasm_bindgen]
 pub struct PitchShifter {
     time_stretcher: TimeStretcher,
@@ -126,6 +127,101 @@ impl PitchShifter {
         self.resampler.resample(&self.stretched, output);
         self.resampler.finish(output);
         self.reset();
+    }
+}
+
+/// Multi-channel pitch shifter that processes interleaved audio data.
+#[wasm_bindgen]
+pub struct MultiPitchShifter {
+    shifters: Vec<PitchShifter>,
+    num_channels: usize,
+    // Scratch buffers
+    deinterleaved_buf: Vec<f32>,
+    output_buf: Vec<f32>,
+}
+
+#[wasm_bindgen]
+impl MultiPitchShifter {
+    #[wasm_bindgen(constructor)]
+    /// Create a new multi-channel pitch shifter for given number of channels.
+    pub fn new(params: &PitchShiftParams, num_channels: usize) -> std::result::Result<Self, WrapAnyhowError> {
+        if num_channels == 0 {
+            return Err(WrapAnyhowError(anyhow::anyhow!("Number of channels must be at least 1")));
+        }
+
+        let mut shifters = vec![];
+        for _ in 0..num_channels {
+            shifters.push(PitchShifter::new(params)?);
+        }
+
+        Ok(Self { shifters, num_channels, deinterleaved_buf: vec![], output_buf: vec![] })
+    }
+
+    /// Process a chunk of interleaved audio samples through the pitch shifter. Output is NOT cleared.
+    ///
+    /// Note: you need to call `finish()` to receive the last output chunks after you call `process()` for all input
+    /// samples.
+    #[wasm_bindgen]
+    pub fn process(&mut self, input: &Float32Vec, output: &mut Float32Vec) {
+        self.process_vec(&input.0, &mut output.0);
+    }
+
+    /// Finish processing any remaining audio data in the internal buffers. This method must be called after all input
+    /// has been processed via `process()`. Output is NOT cleared.
+    ///
+    /// Note: after calling `finish()`, the pitch shifter is reset and ready to process new audio data.
+    #[wasm_bindgen]
+    pub fn finish(&mut self, output: &mut Float32Vec) {
+        self.finish_vec(&mut output.0);
+    }
+
+    /// Reset all internal pitch shifters.
+    #[wasm_bindgen]
+    pub fn reset(&mut self) {
+        for shifter in &mut self.shifters {
+            shifter.reset();
+        }
+    }
+}
+
+impl MultiPitchShifter {
+    /// Process interleaved multi-channel audio data.
+    pub fn process_vec(&mut self, input: &[f32], output: &mut Vec<f32>) {
+        if self.num_channels == 1 {
+            self.shifters[0].process_vec(input, output);
+            return;
+        }
+
+        assert!(input.len().is_multiple_of(self.num_channels));
+
+        self.deinterleaved_buf.clear();
+        self.output_buf.clear();
+
+        let samples_per_channel = input.len() / self.num_channels;
+        deinterleave_samples(input, self.num_channels, &mut self.deinterleaved_buf);
+
+        for (ch, shifter) in self.shifters.iter_mut().enumerate() {
+            let channel_start = ch * samples_per_channel;
+            let channel_end = (ch + 1) * samples_per_channel;
+            shifter.process_vec(&self.deinterleaved_buf[channel_start..channel_end], &mut self.output_buf);
+        }
+
+        interleave_samples(&self.output_buf, self.num_channels, output);
+    }
+
+    /// Finish processing for all channels.
+    pub fn finish_vec(&mut self, output: &mut Vec<f32>) {
+        if self.num_channels == 1 {
+            self.shifters[0].finish_vec(output);
+            return;
+        }
+
+        self.output_buf.clear();
+        for shifter in &mut self.shifters {
+            shifter.finish_vec(&mut self.output_buf);
+        }
+
+        interleave_samples(&self.output_buf, self.num_channels, output);
     }
 }
 
@@ -332,6 +428,104 @@ mod tests {
                         );
                     }
                 }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Helper function to process all input through MultiPitchShifter
+    fn process_all_multi(shifter: &mut MultiPitchShifter, input: &[f32]) -> Vec<f32> {
+        const PREFIX_SIZE: usize = 1000;
+        const PREFIX: f32 = -1234.0;
+
+        let input = Float32Vec(input.to_vec());
+        let mut output = Float32Vec(vec![PREFIX; PREFIX_SIZE]);
+        shifter.process(&input, &mut output);
+        shifter.finish(&mut output);
+
+        let mut result = output.0;
+        for i in 0..PREFIX_SIZE {
+            assert_eq!(result[i], PREFIX);
+        }
+        result.drain(..PREFIX_SIZE);
+        result
+    }
+
+    #[test]
+    fn test_multi_pitch_shift_single_sine_wave() -> Result<()> {
+        const DURATION: f32 = 0.5;
+        const MAGNITUDE: f32 = 3.2;
+        const SAMPLE_RATE: f32 = 48000.0;
+        const OVERLAP: u32 = 8;
+        const WINDOW_TYPE: WindowType = WindowType::SqrtHann;
+        const PITCH_SHIFT: f32 = 1.5;
+
+        let input_freqs = [500.0, 750.0, 850.0];
+        let num_channels = input_freqs.len();
+
+        for fft_size in [1024, 4096] {
+            // Generate individual channel data and interleave it
+            let mut separate_input = generate_sine_wave(input_freqs[0], SAMPLE_RATE, MAGNITUDE, DURATION);
+            for i in 1..num_channels {
+                separate_input.append(&mut generate_sine_wave(input_freqs[i], SAMPLE_RATE, MAGNITUDE, DURATION));
+            }
+            let mut input = vec![];
+            interleave_samples(&separate_input, num_channels, &mut input);
+
+            let mut params = PitchShiftParams::new(SAMPLE_RATE as u32, PITCH_SHIFT);
+            params.fft_size = fft_size;
+            params.overlap = OVERLAP;
+            params.window_type = WINDOW_TYPE;
+
+            let mut stretcher = MultiPitchShifter::new(&params, num_channels).unwrap();
+            let output = process_all_multi(&mut stretcher, &input);
+
+            assert!(output.len().is_multiple_of(num_channels));
+            let output_len = output.len() / num_channels;
+            let mut deinterleaved = vec![];
+            deinterleave_samples(&output, num_channels, &mut deinterleaved);
+
+            for ch in 0..num_channels {
+                let expected_freq = input_freqs[ch] * PITCH_SHIFT;
+                let channel_start = ch * output_len;
+                let channel_end = (ch + 1) * output_len;
+                let output_freq = compute_dominant_frequency(&deinterleaved[channel_start..channel_end], SAMPLE_RATE);
+                let output_magn = compute_magnitude(&deinterleaved[channel_start..channel_end]);
+
+                let bin_width = SAMPLE_RATE as f32 / fft_size as f32;
+                let tolerance = bin_width * 2.0;
+                let channel_input_len = input.len() / num_channels;
+                println!(
+                    "Channel {}: input {} Hz, output {} Hz, magnitude {}, input length {}, output length {}",
+                    ch, expected_freq, output_freq, output_magn, channel_input_len, output_len
+                );
+
+                assert!(
+                    (output_freq - expected_freq).abs() < tolerance,
+                    "channel {}: expected {} Hz, got {} Hz for fft_size {}",
+                    ch,
+                    expected_freq,
+                    output_freq,
+                    fft_size
+                );
+                assert!(
+                    (output_magn - MAGNITUDE).abs() < MAGNITUDE * 0.1,
+                    "channel {}: expected magnitude {}, got {} for fft_size {}",
+                    ch,
+                    MAGNITUDE,
+                    output_magn,
+                    fft_size
+                );
+
+                assert!(
+                    output_len.abs_diff(channel_input_len) < channel_input_len / 20,
+                    "channel {}: expected output length {}, got {} for fft_size {}",
+                    ch,
+                    channel_input_len,
+                    output_len,
+                    fft_size
+                );
             }
         }
 
