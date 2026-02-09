@@ -2,16 +2,19 @@
 
 import * as Comlink from 'comlink';
 
-import initWasmModule, { Float32Vec, get_settings, PitchShifter, PitchShiftParams, TimeStretcher, TimeStretchParams } from '../wasm/build/wasm_main_module';
+import initWasmModule, { Float32Vec, get_settings, MultiPitchShifter, MultiTimeStretcher, PitchShiftParams, TimeStretchParams } from '../wasm/build/wasm_main_module';
 import type { WorkerApi, WorkerParams } from './audio-processor';
 import { Float32RingBuffer, pushAllRingBuffer } from './sync';
+import type { InterleavedAudio } from './types';
 
-type Processor = PitchShifter | TimeStretcher;
+type Processor = MultiPitchShifter | MultiTimeStretcher;
 
 class WorkerImpl implements WorkerApi {
     params: WorkerParams = { processingMode: 'pitch', pitchValue: 1.0 }
     paramsDirty: boolean = false;
     processor: Processor | null = null;
+    processorSampleRate: number | null = null;
+    processorNumChannels: number | null = null;
     wasmMemory: WebAssembly.Memory | null = null
 
     async init(): Promise<boolean> {
@@ -29,27 +32,27 @@ class WorkerImpl implements WorkerApi {
         this.paramsDirty = true;
     }
 
-    async process(source: Float32Array, sampleRate: number, outputSab: SharedArrayBuffer): Promise<void> {
+    async process(source: InterleavedAudio, outputSab: SharedArrayBuffer): Promise<void> {
         const output = new Float32RingBuffer(outputSab);
         const chunkSize = output.capacity / 4;
 
         // Clean the state if previous process() was aborted.
-        this.getProcessor(sampleRate).reset();
+        this.getProcessor(source.sampleRate, source.numChannels).reset();
 
         let sourcePos = 0;
         // Main processing loop.
         const sourceVec = new Float32Vec(0);
         const processedVec = new Float32Vec(0);
         try {
-            while (sourcePos < source.length) {
-                const nextChunkSize = Math.min(chunkSize, source.length - sourcePos);
-                sourceVec.set(source.subarray(sourcePos, sourcePos + nextChunkSize));
+            while (sourcePos < source.data.length) {
+                const nextChunkSize = Math.min(chunkSize, source.data.length - sourcePos);
+                sourceVec.set(source.data.subarray(sourcePos, sourcePos + nextChunkSize));
                 sourcePos += nextChunkSize;
-                const processor = this.getProcessor(sampleRate);
+                const processor = this.getProcessor(source.sampleRate, source.numChannels);
                 processedVec.clear();
                 processor.process(sourceVec, processedVec);
 
-                // console.debug(`Processing chunks of size ${sourceVec.len} with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}`);
+                // console.debug(`Processing chunks of size ${sourceVec.len}, num channels ${numChannels} with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}`);
                 await pushAllRingBuffer(processedVec.array, output);
                 if (output.isClosed) {
                     return;
@@ -57,10 +60,10 @@ class WorkerImpl implements WorkerApi {
             }
 
             // Finish processing (get remaining data from processor)
-            const processor = this.getProcessor(sampleRate);
+            const processor = this.getProcessor(source.sampleRate, source.numChannels);
             processedVec.clear();
             processor.finish(processedVec);
-            // console.debug(`Processing final chunk with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}`);
+            // console.debug(`Processing final chunk num channels ${numChannels} with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}`);
             await pushAllRingBuffer(processedVec.array, output);
         } finally {
             sourceVec.free();
@@ -71,12 +74,13 @@ class WorkerImpl implements WorkerApi {
         console.log(`Wasm memory size: ${this.wasmMemory!.buffer.byteLength}`);
     }
 
-    private getProcessor(sampleRate: number): Processor {
-        if (this.processor && !this.paramsDirty) {
+    private getProcessor(sampleRate: number, numChannels: number): Processor {
+        if (this.processor && !this.paramsDirty
+            && this.processorSampleRate == sampleRate && this.processorNumChannels == numChannels) {
             return this.processor;
         }
 
-        console.log('Recreating processor with params', this.params);
+        console.log('Recreating processor with params', this.params, 'numChannels', numChannels);
         if (this.processor) {
             this.processor.free();
         }
@@ -84,23 +88,25 @@ class WorkerImpl implements WorkerApi {
             if (this.params.processingMode === 'pitch') {
                 const params = new PitchShiftParams(sampleRate, this.params.pitchValue);
                 try {
-                    this.processor = new PitchShifter(params);
-                    console.log(`Created PitchShifter with ${params.to_debug_string()}`);
+                    this.processor = new MultiPitchShifter(params, numChannels);
+                    console.log(`Created MultiPitchShifter with ${params.to_debug_string()}, numChannels ${numChannels}`);
                 } finally {
                     params.free();
                 }
             } else {
                 const params = new TimeStretchParams(sampleRate, this.params.pitchValue);
                 try {
-                    this.processor = new TimeStretcher(params);
-                    console.log(`Created TimeStretcher with ${params.to_debug_string()}`);
+                    this.processor = new MultiTimeStretcher(params, numChannels);
+                    console.log(`Created MultiTimeStretcher with ${params.to_debug_string()}, numChannels ${numChannels}`);
                 } finally {
                     params.free();
                 }
             }
-            return this.processor;
+            return this.processor!;
         } finally {
             this.paramsDirty = false;
+            this.processorSampleRate = sampleRate;
+            this.processorNumChannels = numChannels;
         }
     }
 }

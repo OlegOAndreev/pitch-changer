@@ -5,6 +5,7 @@ import { Player } from './player';
 import { Recorder } from './recorder';
 import { saveFile, showSaveDialog } from './save-dialog';
 import { drainRingBuffer, Float32RingBuffer } from './sync';
+import { getAudioLength, getAudioSeconds, type InterleavedAudio } from './types';
 import { debounce, getById, secondsToString, withButtonsDisabled } from './utils';
 
 const MAX_PITCH_VALUE = 2.0;
@@ -43,9 +44,7 @@ interface AppSettings {
 
 class AppState {
     // Audio data
-    sourceAudioData: Float32Array | null = null;
-    // Sample rate should be always the same and taken from AudioContext.
-    sampleRate: number | null = null;
+    sourceAudio: InterleavedAudio | null = null;
     processor: AudioProcessor = new AudioProcessor();
 
     // Audio player and recorder are lazy initialized because they affect the browser (and OS) UI
@@ -194,11 +193,9 @@ async function handleRecordClick(): Promise<void> {
         recordBtn.title = 'Stop';
         recordBtn.classList.add('recording');
 
-        appState.sourceAudioData = await recorder.record();
-        appState.sampleRate = appState.getAudioContext().sampleRate;
+        appState.sourceAudio = await recorder.record();
 
-        const sourceSeconds = appState.sourceAudioData.length / appState.sampleRate;
-        sourceLabel.textContent = `Recorded ${secondsToString(sourceSeconds)}`;
+        sourceLabel.textContent = `Recorded ${secondsToString(getAudioSeconds(appState.sourceAudio))}`;
         recordBtnEmoji.textContent = '⏺';
         recordBtn.title = 'Record';
         recordBtn.classList.remove('recording');
@@ -211,10 +208,12 @@ async function handleRecordClick(): Promise<void> {
 
 async function runPlay(player: Player): Promise<void> {
     // Use smaller ring buffer (around 0.6-0.7s). This means we react faster to changes in ratio or processing mode.
-    const BUFFER_SIZE = 32 * 1024;
+    const bufferSize = 32 * 1024;
+    // TODO: Fix the Float32RingBuffer to use any buffer size, not pow-of-two.
+    // const bufferSize = 32 * 1024 * appState.sourceAudio!.numChannels;
 
     console.log('Start playing audio');
-    const buffer = Float32RingBuffer.withCapacity(BUFFER_SIZE);
+    const buffer = Float32RingBuffer.withCapacity(bufferSize);
 
     // Synchronization for playing is rather complicated:
     // 1. Start the processor
@@ -223,9 +222,9 @@ async function runPlay(player: Player): Promise<void> {
     // 4. If all source data is processed, AudioProcessor closes the buffer
     // 5. If a user clicks the stop button, Player closes the buffer
     // 6. The Player promise completes once the AudioWorklet signals it has processed all data from the ring buffer
-    const processPromise = appState.processor.process(appState.sourceAudioData!, appState.sampleRate!, buffer);
-    await buffer.waitPopAsync(BUFFER_SIZE / 2);
-    const playerPromise = player.play(buffer);
+    const processPromise = appState.processor.process(appState.sourceAudio!, buffer);
+    await buffer.waitPopAsync(bufferSize / 2);
+    const playerPromise = player.play(buffer, appState.sourceAudio!.numChannels);
 
     // We do not need to wait for this promise, but let's do it for symmetry.
     await processPromise;
@@ -237,7 +236,7 @@ async function runPlay(player: Player): Promise<void> {
 async function handlePlayClick(): Promise<void> {
     const player = await appState.getPlayer();
     if (!player.isPlaying) {
-        if (!appState.sourceAudioData) {
+        if (!appState.sourceAudio) {
             console.error('Error: no audio data to play');
             return;
         }
@@ -269,13 +268,10 @@ async function handleFileInputChange(file: File): Promise<void> {
         const startTime = performance.now();
         processingSpinner.style.display = 'inline-block';
         processingLabel.textContent = `Decoding ${file.name}...`;
-        const data = await decodeAudioFromBlob(file, audioContext);
-        appState.sourceAudioData = data;
-        appState.sampleRate = audioContext.sampleRate;
+        appState.sourceAudio = await decodeAudioFromBlob(file, audioContext);
 
-        console.log(`Loaded ${file.name} in ${performance.now() - startTime}ms: ${appState.sourceAudioData.length} samples at ${appState.sampleRate}Hz`);
-        const sourceSeconds = appState.sourceAudioData.length / appState.sampleRate;
-        sourceLabel.textContent = `Loaded ${secondsToString(sourceSeconds)} of ${file.name}`;
+        console.log(`Loaded ${file.name} in ${performance.now() - startTime}ms: ${getAudioLength(appState.sourceAudio)} samples per channel, ${appState.sourceAudio.numChannels} channels at ${appState.sourceAudio.sampleRate}Hz`);
+        sourceLabel.textContent = `Loaded ${secondsToString(getAudioSeconds(appState.sourceAudio))} of ${file.name}`;
         onAfterSourceAudioDataSet();
     } catch (error) {
         sourceLabel.textContent = `Error loading audio file: ${error}`;
@@ -288,22 +284,26 @@ async function handleFileInputChange(file: File): Promise<void> {
     }
 }
 
-async function processAllAudio(): Promise<Float32Array> {
+async function processAllAudio(): Promise<InterleavedAudio> {
     // This is a background task, use larger buffers.
     const BUFFER_SIZE = 1024 * 1024;
     const startTime = performance.now();
 
     const output = Float32RingBuffer.withCapacity(BUFFER_SIZE);
-    const processPromise = appState.processor.process(appState.sourceAudioData!, appState.sampleRate!, output);
+    const processPromise = appState.processor.process(appState.sourceAudio!, output);
     const drainPromise = drainRingBuffer(output);
 
     await processPromise;
     //  processor.process() closes the output and forces drainRingBuffer completion.
-    const result = await drainPromise;
+    const data = await drainPromise;
 
     const deltaTime = performance.now() - startTime;
-    console.log(`Process all audio, got ${result.length} samples in ${deltaTime}ms`);
-    return result;
+    console.log(`Process all audio, got ${data.length} samples in ${deltaTime}ms`);
+    return {
+        data,
+        sampleRate: appState.sourceAudio!.sampleRate,
+        numChannels: appState.sourceAudio!.numChannels
+    };
 }
 
 async function handleSaveClick(): Promise<void> {
@@ -321,10 +321,10 @@ async function handleSaveClick(): Promise<void> {
     try {
         processingSpinner.style.display = 'inline-block';
         processingLabel.textContent = 'Processing...';
-        const processedAudioData = await processAllAudio();
-        console.log(`Encoding audio to ${fileType} with sample rate ${appState.sampleRate}Hz`);
+        const processedAudio = await processAllAudio();
+        console.log(`Encoding audio to ${fileType} with sample rate ${processedAudio.sampleRate}Hz`);
         processingLabel.textContent = 'Encoding...';
-        const blob = await encodeAudioToBlob(fileType, processedAudioData, appState.sampleRate!);
+        const blob = await encodeAudioToBlob(fileType, processedAudio);
         await saveFile(filename, fileHandle, blob);
     } finally {
         processingSpinner.style.display = 'none';

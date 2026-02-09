@@ -1,5 +1,6 @@
 import recorderProcessorUrl from './recorder-processor.ts?url';
 import { drainRingBuffer, Float32RingBuffer } from './sync';
+import type { InterleavedAudio } from './types';
 
 // Ring buffer capacity. 2^18 = 262144 samples ~= 5.5s at 48kHz.
 const RING_BUFFER_CAPACITY = 1 << 18;
@@ -37,7 +38,7 @@ export class Recorder {
 
     // Start recording, wait until stop() is called and return the full recording when stop() is called. This method can
     // be called from the main thread.
-    async record(): Promise<Float32Array> {
+    async record(): Promise<InterleavedAudio> {
         if (this.isRecording) {
             throw new Error('Recorder is already recording');
         }
@@ -67,10 +68,14 @@ export class Recorder {
         console.log('Recording started');
         try {
             // Drain loop: collect data from the ring buffer until closed.
-            const result = await drainRingBuffer(this.ringBuffer);
+            const data = await drainRingBuffer(this.ringBuffer);
             this.ringBuffer = null;
-            console.log(`Recorded ${result.length} audio samples`);
-            return result;
+            console.log(`Recorded ${data.length} audio samples`);
+            return {
+                data,
+                sampleRate: this.audioContext.sampleRate,
+                numChannels: 1
+            };
         } finally {
             // If we do not disconnect the MediaStreamAudioSourceNode, even if we stop the media stream tracks, it continues
             // sending data to connected nodes.

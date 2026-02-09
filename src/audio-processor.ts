@@ -1,6 +1,7 @@
 import * as Comlink from 'comlink';
 
 import type { Float32RingBuffer } from './sync';
+import type { InterleavedAudio } from './types';
 
 // The following are exported only for audio-modifier-worker.ts
 export interface WorkerParams {
@@ -12,7 +13,7 @@ export interface WorkerApi {
     init(): Promise<boolean>;
     setParams(params: WorkerParams): void;
     // outputSab must be a buffer for Float32RingBuffer
-    process(source: Float32Array, sampleRate: number, outputSab: SharedArrayBuffer): Promise<void>;
+    process(source: InterleavedAudio, outputSab: SharedArrayBuffer): Promise<void>;
 }
 
 // AudioProcessor runs processing audio in the web worker. The output is written asynchronously into Float32RingBuffer.
@@ -44,7 +45,7 @@ export class AudioProcessor {
 
     // Run processing source audio data and store the result into output. The processing stops when either all source
     // data is processed, or output is closed.
-    async process(source: Float32Array, sampleRate: number, output: Float32RingBuffer): Promise<void> {
-        await this.proxy.process(source, sampleRate, output.buffer);
+    async process(source: InterleavedAudio, output: Float32RingBuffer): Promise<void> {
+        await this.proxy.process(source, output.buffer);
     }
 }

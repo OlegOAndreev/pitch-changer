@@ -6,6 +6,7 @@ export const playerProcessorName = 'player-processor';
 export interface PlayerProcessorOptions {
     ringBufferSab: SharedArrayBuffer;
     latchSab: SharedArrayBuffer;
+    numChannels: number,
 }
 
 let moduleInitialized = false;
@@ -13,7 +14,6 @@ let moduleInitialized = false;
 export class Player {
     readonly audioContext: AudioContext;
     private ringBuffer: Float32RingBuffer | null = null;
-    private latch: CountDownLatch | null = null;
 
     private constructor(audioContext: AudioContext) {
         this.audioContext = audioContext;
@@ -29,11 +29,16 @@ export class Player {
         return new Player(audioContext);
     }
 
+    // Return true if playing is in progress.
     get isPlaying(): boolean {
         return this.ringBuffer != null;
     }
 
-    async play(ringBuffer: Float32RingBuffer): Promise<void> {
+    // Play interleaved data form ring buffer. When the promise completes, playing has completed. When the buffer is
+    // closed, player stops.
+    //
+    // Note: Player expectes ringBuffer to contain data in sample rate of AudioContext passed to constructor.
+    async play(ringBuffer: Float32RingBuffer, numChannels: number): Promise<void> {
         if (this.isPlaying) {
             return;
         }
@@ -45,13 +50,14 @@ export class Player {
         }
 
         const latch = CountDownLatch.withCount(1);
-        this.latch = latch;
         const options: PlayerProcessorOptions = {
             ringBufferSab: ringBuffer.buffer,
-            latchSab: latch.buffer
+            latchSab: latch.buffer,
+            numChannels: numChannels,
         };
         const workletNode = new AudioWorkletNode(this.audioContext, playerProcessorName, {
-            processorOptions: options
+            processorOptions: options,
+            outputChannelCount: [numChannels],
         });
         workletNode.connect(this.audioContext.destination);
 
@@ -60,11 +66,10 @@ export class Player {
         } finally {
             workletNode.disconnect();
             this.ringBuffer = null;
-            this.latch = null;
         }
     }
 
-    // Stops the playback, forcing the current record() call to complete.
+    // Stop the playback, forcing the current record() call to complete.
     stop() {
         if (!this.isPlaying) {
             console.log('Player is already stopped');

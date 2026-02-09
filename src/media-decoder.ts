@@ -1,21 +1,27 @@
-// Decode an audio file from blob to mono PCM array with sample rate, the result is backed by SharedArrayBuffer. We must
+// Decode an audio file from blob to interleaved PCM array with sample rate, the result is backed by SharedArrayBuffer. We must
 // use a real AudioContext, not OfflineAudioContext, because we want to get data automatically resampled into playable
 // sample rate.
-export async function decodeAudioFromBlob(blob: Blob, audioContext: AudioContext): Promise<Float32Array> {
+import type { InterleavedAudio } from './types';
+
+export async function decodeAudioFromBlob(blob: Blob, audioContext: AudioContext): Promise<InterleavedAudio> {
     const audioData = await blob.arrayBuffer();
     const audioBuffer = await audioContext.decodeAudioData(audioData);
 
-    const resultSab = new SharedArrayBuffer(audioBuffer.length * 4);
-    const result = new Float32Array(resultSab);
-    for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
+    const numChannels = audioBuffer.numberOfChannels;
+    const samplesPerChannel = audioBuffer.length;
+    const resultSab = new SharedArrayBuffer(numChannels * samplesPerChannel * 4);
+    const data = new Float32Array(resultSab);
+
+    for (let ch = 0; ch < numChannels; ch++) {
         const channelData = audioBuffer.getChannelData(ch);
-        for (let i = 0; i < channelData.length; i++) {
-            result[i] += channelData[i];
+        for (let i = 0; i < samplesPerChannel; i++) {
+            data[i * numChannels + ch] = channelData[i];
         }
     }
-    for (let i = 0; i < result.length; i++) {
-        result[i] /= audioBuffer.numberOfChannels;
-    }
 
-    return result;
+    return {
+        data: data,
+        sampleRate: audioBuffer.sampleRate,
+        numChannels: numChannels,
+    };
 }
