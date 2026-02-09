@@ -57,6 +57,52 @@ pub fn generate_sine_wave(freq: f32, sample_rate: f32, magnitude: f32, duration:
     result
 }
 
+/// Deinterleave multi-channel audio samples:
+///   [ch0s0, ch1s0, ch2s0, ch0s1, ch1s1, ...] -> [ch0s0, ch0s1, ..., ch1s0, ch1s1, ...]
+///
+/// The output is NOT cleared.
+pub fn deinterleave_samples(input: &[f32], num_channels: usize, output: &mut Vec<f32>) {
+    assert!(input.len().is_multiple_of(num_channels));
+
+    let num_samples = input.len() / num_channels;
+    output.reserve(input.len());
+
+    // Fast-path for mono
+    if num_channels == 1 {
+        output.extend_from_slice(input);
+        return;
+    }
+
+    // Deinterleave
+    for channel in 0..num_channels {
+        for sample_idx in 0..num_samples {
+            output.push(input[sample_idx * num_channels + channel]);
+        }
+    }
+}
+
+/// Interleave multi-channel audio samples:
+///    [ch0s0, ch0s1, ..., ch1s0, ch1s1, ...] -> [ch0s0, ch1s0, ch2s0, ch0s1, ch1s1, ...]
+///
+/// The output is NOT cleared.
+pub fn interleave_samples(input: &[f32], num_channels: usize, output: &mut Vec<f32>) {
+    assert!(input.len().is_multiple_of(num_channels));
+
+    let num_samples = input.len() / num_channels;
+    output.reserve(input.len());
+
+    if num_channels == 1 {
+        output.extend_from_slice(input);
+        return;
+    }
+
+    for sample_idx in 0..num_samples {
+        for channel in 0..num_channels {
+            output.push(input[channel * num_samples + sample_idx]);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,5 +162,52 @@ mod tests {
             computed_magnitude,
             magnitude
         );
+    }
+
+    #[test]
+    fn test_deinterleave_samples() {
+        let input_mono = vec![1.0, 2.0, 3.0, 4.0];
+        let mut output = Vec::new();
+        deinterleave_samples(&input_mono, 1, &mut output);
+        assert_eq!(output, vec![1.0, 2.0, 3.0, 4.0]);
+
+        let input_3ch = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        output.clear();
+        deinterleave_samples(&input_3ch, 3, &mut output);
+        // Expected: [C0_S0, C0_S1, C1_S0, C1_S1, C2_S0, C2_S1]
+        assert_eq!(output, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+    }
+
+    #[test]
+    fn test_interleave_samples() {
+        let input_mono = vec![1.0, 2.0, 3.0, 4.0];
+        let mut output = Vec::new();
+        interleave_samples(&input_mono, 1, &mut output);
+        assert_eq!(output, vec![1.0, 2.0, 3.0, 4.0]);
+
+        let input_3ch = vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0];
+        output.clear();
+        interleave_samples(&input_3ch, 3, &mut output);
+        assert_eq!(output, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+    }
+
+    #[test]
+    fn test_deinterleave_interleave_roundtrip() {
+        // Test roundtrip for various channel counts
+        for num_channels in 1..=5 {
+            let num_samples = 10;
+            let total_samples = num_channels * num_samples;
+            let original: Vec<f32> = (0..total_samples).map(|i| i as f32).collect();
+
+            // Deinterleave
+            let mut deinterleaved = Vec::new();
+            deinterleave_samples(&original, num_channels, &mut deinterleaved);
+
+            // Interleave back
+            let mut interleaved = Vec::new();
+            interleave_samples(&deinterleaved, num_channels, &mut interleaved);
+
+            assert_eq!(interleaved, original);
+        }
     }
 }
