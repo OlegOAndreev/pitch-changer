@@ -140,6 +140,12 @@ impl Float32Vec {
         self.0.resize(n, 0.0);
     }
 
+    /// Resize Float32Vec with zeros.
+    #[wasm_bindgen]
+    pub fn fill(&mut self) {
+        self.0.fill(0.0);
+    }
+
     /// Set Float32Vec contents from Float32Array.
     #[wasm_bindgen]
     pub fn set(&mut self, arr: &js_sys::Float32Array) {

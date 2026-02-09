@@ -1,6 +1,7 @@
 //! STFT (Short-Time Fourier Transform) state and operations.
 
 use realfft::num_complex::Complex;
+use realfft::{ComplexToReal, RealToComplex};
 use std::sync::Arc;
 
 use crate::window::WindowType;
@@ -23,14 +24,16 @@ use crate::window::WindowType;
 /// in general things smooth out nicely if your synthesis hop size is not too large. I do not know why =)
 pub struct Stft {
     fft_size: usize,
-    forward_plan: Arc<dyn realfft::RealToComplex<f32>>,
-    inverse_plan: Arc<dyn realfft::ComplexToReal<f32>>,
+    forward_plan: Arc<dyn RealToComplex<f32>>,
+    inverse_plan: Arc<dyn ComplexToReal<f32>>,
     window: Vec<f32>,
     // Scratch buffers
     input_buf: Vec<f32>,
     input_freq_buf: Vec<Complex<f32>>,
+    scratch_forward: Vec<Complex<f32>>,
     output_buf: Vec<f32>,
     output_freq_buf: Vec<Complex<f32>>,
+    scratch_inverse: Vec<Complex<f32>>,
 }
 
 impl Stft {
@@ -47,10 +50,23 @@ impl Stft {
 
         let input_buf = vec![0.0; fft_size];
         let input_freq_buf = vec![Complex::new(0.0, 0.0); fft_size / 2 + 1];
+        let scratch_forward = forward_plan.make_scratch_vec();
         let output_buf = vec![0.0; fft_size];
         let output_freq_buf = vec![Complex::new(0.0, 0.0); fft_size / 2 + 1];
+        let scratch_inverse = inverse_plan.make_scratch_vec();
 
-        Self { fft_size, forward_plan, inverse_plan, window, input_buf, input_freq_buf, output_buf, output_freq_buf }
+        Self {
+            fft_size,
+            forward_plan,
+            inverse_plan,
+            window,
+            input_buf,
+            input_freq_buf,
+            scratch_forward,
+            output_buf,
+            output_freq_buf,
+            scratch_inverse,
+        }
     }
 
     // Apply window, run forward pass, call freq_func on frequencies, run inverse pass, apply window again and return
@@ -65,13 +81,13 @@ impl Stft {
             *s *= w;
         }
         self.forward_plan
-            .process(&mut self.input_buf, &mut self.input_freq_buf)
+            .process_with_scratch(&mut self.input_buf, &mut self.input_freq_buf, &mut self.scratch_forward)
             .expect("failed forward STFT pass");
 
         processor(&self.input_freq_buf, &mut self.output_freq_buf);
 
         self.inverse_plan
-            .process(&mut self.output_freq_buf, &mut self.output_buf)
+            .process_with_scratch(&mut self.output_freq_buf, &mut self.output_buf, &mut self.scratch_inverse)
             .expect("failed inverse STFT pass");
         for (s, w) in self.output_buf.iter_mut().zip(&self.window) {
             *s *= w;
