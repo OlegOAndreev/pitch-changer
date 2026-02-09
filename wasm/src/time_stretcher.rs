@@ -5,9 +5,10 @@ use anyhow::{Result, bail};
 use crate::WindowType;
 use crate::phase_gradient_time_stretch::PhaseGradientTimeStretch;
 use crate::stft::Stft;
+use crate::util::{deinterleave_samples, interleave_samples};
 use crate::web::{Float32Vec, WrapAnyhowError};
 
-/// Parameters for audio time stretching/.
+/// Parameters for audio time stretching.
 #[derive(Debug, Clone, Copy)]
 #[wasm_bindgen]
 pub struct TimeStretchParams {
@@ -26,16 +27,19 @@ pub struct TimeStretchParams {
 #[wasm_bindgen]
 impl TimeStretchParams {
     #[wasm_bindgen(constructor)]
+    /// Create new time stretch parameters with default FFT size (4096), overlap (8), and Hann window.
     pub fn new(sample_rate: u32, time_stretch: f32) -> Self {
         Self { time_stretch, sample_rate, fft_size: 4096, overlap: 8, window_type: WindowType::Hann }
     }
 
     #[wasm_bindgen]
+    /// Return a debug string representation of the parameters.
     pub fn to_debug_string(&self) -> String {
         format!("{:?}", self)
     }
 }
 
+/// TimeStretcher stretches the mono audio time by time_stretch factor.
 #[wasm_bindgen]
 pub struct TimeStretcher {
     params: TimeStretchParams,
@@ -60,6 +64,7 @@ pub struct TimeStretcher {
 #[wasm_bindgen]
 impl TimeStretcher {
     #[wasm_bindgen(constructor)]
+    /// Create a new time stretcher instance with given parameters.
     pub fn new(params: &TimeStretchParams) -> std::result::Result<Self, WrapAnyhowError> {
         use crate::window::generate_tail_window;
 
@@ -111,7 +116,7 @@ impl TimeStretcher {
         Ok(())
     }
 
-    /// Process a chunk of audio samples through the time stretcher.
+    /// Process a chunk of audio samples through the time stretcher. Output is NOT cleared.
     ///
     /// Note: you need to call `finish()` to receive the last output chunks after you call `process()` for all input
     /// samples.
@@ -121,9 +126,9 @@ impl TimeStretcher {
     }
 
     /// Finish processing any remaining audio data in the internal buffers. This method must be called after all input
-    /// has been processed via `process()`.
+    /// has been processed via `process()`. Output is NOT cleared.
     ///
-    /// Note: after calling `finish()`, the pitch shifter is reset and ready to process new audio data.
+    /// Note: after calling `finish()`, the time stretcher is reset and ready to process new audio data.
     #[wasm_bindgen]
     pub fn finish(&mut self, output: &mut Float32Vec) {
         self.finish_vec(&mut output.0);
@@ -160,7 +165,7 @@ impl TimeStretcher {
         self.input_buf.drain(0..self.ana_hop_size);
     }
 
-    /// Reset the pitch shifter to its initial state.
+    /// Reset the time stretcher to its initial state.
     #[wasm_bindgen]
     pub fn reset(&mut self) {
         self.phase_gradient_vocoder.reset();
@@ -169,6 +174,7 @@ impl TimeStretcher {
     }
 }
 
+// Why do we need a separate mod:
 // https://stackoverflow.com/questions/51388721/is-it-possible-to-have-wasm-bindgen-ignore-certain-public-functions-in-an-impl
 impl TimeStretcher {
     /// See documentation for process()
@@ -224,6 +230,90 @@ impl TimeStretcher {
     }
 }
 
+/// Multi-channel time stretcher that processes interleaved audio data.
+#[wasm_bindgen]
+pub struct MultiTimeStretcher {
+    stretchers: Vec<TimeStretcher>,
+    num_channels: usize,
+    // Scratch buffers
+    deinterleaved_buf: Vec<f32>,
+    output_buf: Vec<f32>,
+}
+
+#[wasm_bindgen]
+impl MultiTimeStretcher {
+    #[wasm_bindgen(constructor)]
+    /// Create a new multi-channel time stretcher for given number of channels.
+    pub fn new(params: &TimeStretchParams, num_channels: usize) -> std::result::Result<Self, WrapAnyhowError> {
+        if num_channels == 0 {
+            return Err(WrapAnyhowError(anyhow::anyhow!("Number of channels must be at least 1")));
+        }
+
+        let mut stretchers = vec![];
+        for _ in 0..num_channels {
+            stretchers.push(TimeStretcher::new(params)?);
+        }
+
+        Ok(Self { stretchers, num_channels, deinterleaved_buf: vec![], output_buf: vec![] })
+    }
+
+    /// Process a chunk of interleaved audio samples through the time stretcher. Output is NOT cleared.
+    ///
+    /// Note: you need to call `finish()` to receive the last output chunks after you call `process()` for all input
+    /// samples.
+    #[wasm_bindgen]
+    pub fn process(&mut self, input: &Float32Vec, output: &mut Float32Vec) {
+        self.process_vec(&input.0, &mut output.0);
+    }
+
+    /// Finish processing any remaining audio data in the internal buffers. This method must be called after all input
+    /// has been processed via `process()`. Output is NOT cleared.
+    ///
+    /// Note: after calling `finish()`, the time stretcher is reset and ready to process new audio data.
+    #[wasm_bindgen]
+    pub fn finish(&mut self, output: &mut Float32Vec) {
+        self.finish_vec(&mut output.0);
+    }
+
+    /// Reset all internal time stretchers.
+    #[wasm_bindgen]
+    pub fn reset(&mut self) {
+        for stretcher in &mut self.stretchers {
+            stretcher.reset();
+        }
+    }
+}
+
+impl MultiTimeStretcher {
+    /// Process interleaved multi-channel audio data.
+    pub fn process_vec(&mut self, input: &[f32], output: &mut Vec<f32>) {
+        assert!(input.len().is_multiple_of(self.num_channels));
+
+        let samples_per_channel = input.len() / self.num_channels;
+        self.deinterleaved_buf.clear();
+        deinterleave_samples(input, self.num_channels, &mut self.deinterleaved_buf);
+
+        self.output_buf.clear();
+        for (ch, stretcher) in self.stretchers.iter_mut().enumerate() {
+            let channel_start = ch * samples_per_channel;
+            let channel_end = (ch + 1) * samples_per_channel;
+            stretcher.process_vec(&self.deinterleaved_buf[channel_start..channel_end], &mut self.output_buf);
+        }
+
+        interleave_samples(&self.output_buf, self.num_channels, output);
+    }
+
+    /// Finish processing for all channels.
+    pub fn finish_vec(&mut self, output: &mut Vec<f32>) {
+        self.output_buf.clear();
+        for stretcher in &mut self.stretchers {
+            stretcher.finish_vec(&mut self.output_buf);
+        }
+
+        interleave_samples(&self.output_buf, self.num_channels, output);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::generate_sine_wave;
@@ -269,7 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn test_randomized_pitch_stretcher_no_crash() {
+    fn test_randomized_time_stretcher_no_crash() {
         use rand;
 
         let mut rng = rand::rng();
@@ -316,8 +406,10 @@ mod tests {
 
                                 let bin_width = sample_rate as f32 / params.fft_size as f32;
                                 let tolerance = bin_width * 2.0;
+
+                                let expected_output_len = (input.len() as f32 * time_stretch) as usize;
                                 println!(
-                                    "Sample rate {}, fft size {}, overlap {}, window {:?}, stretch {}, input {} Hz, output {} Hz, expected {} Hz, magnitude {}",
+                                    "Sample rate {}, fft size {}, overlap {}, window {:?}, stretch {}, input {} Hz, output {} Hz, expected {} Hz, magnitude {}, input length {}, output length {}",
                                     sample_rate,
                                     fft_size,
                                     overlap,
@@ -326,7 +418,9 @@ mod tests {
                                     input_freq,
                                     output_freq,
                                     expected_freq,
-                                    output_magn
+                                    output_magn,
+                                    input.len(),
+                                    output.len()
                                 );
                                 assert!(
                                     (output_freq - expected_freq).abs() < tolerance,
@@ -345,6 +439,18 @@ mod tests {
                                     "expected magnitude {}, got {} for sample rate {}, fft size {}, overlap {}, window {:?}, stretch {}, input {} Hz",
                                     MAGNITUDE,
                                     output_magn,
+                                    sample_rate,
+                                    fft_size,
+                                    overlap,
+                                    window_type,
+                                    time_stretch,
+                                    input_freq,
+                                );
+                                assert!(
+                                    output.len().abs_diff(expected_output_len) < expected_output_len / 20,
+                                    "expected output length {}, got {} for sample rate {}, fft size {}, overlap {}, window {:?}, stretch {}, input {} Hz",
+                                    expected_output_len,
+                                    output.len(),
                                     sample_rate,
                                     fft_size,
                                     overlap,
@@ -406,6 +512,105 @@ mod tests {
                         );
                     }
                 }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Helper function to process all input through MultiTimeStretcher
+    fn process_all_multi(stretcher: &mut MultiTimeStretcher, input: &[f32]) -> Vec<f32> {
+        const PREFIX_SIZE: usize = 1000;
+        const PREFIX: f32 = -1234.0;
+
+        let input = Float32Vec(input.to_vec());
+        let mut output = Float32Vec(vec![PREFIX; PREFIX_SIZE]);
+        stretcher.process(&input, &mut output);
+        stretcher.finish(&mut output);
+
+        let mut result = output.0;
+        for i in 0..PREFIX_SIZE {
+            assert_eq!(result[i], PREFIX);
+        }
+        result.drain(..PREFIX_SIZE);
+        result
+    }
+
+    #[test]
+    fn test_multi_time_stretch_single_sine_wave() -> Result<()> {
+        const DURATION: f32 = 0.5;
+        const MAGNITUDE: f32 = 3.2;
+        const SAMPLE_RATE: f32 = 48000.0;
+        const OVERLAP: u32 = 8;
+        const WINDOW_TYPE: WindowType = WindowType::SqrtHann;
+        const TIME_STRETCH: f32 = 1.5;
+
+        let input_freqs = [500.0, 750.0, 850.0];
+        let num_channels = input_freqs.len();
+
+        for fft_size in [1024, 4096] {
+            // Generate individual channel data and interleave it
+            let mut separate_input = generate_sine_wave(input_freqs[0], SAMPLE_RATE, MAGNITUDE, DURATION);
+            for i in 1..num_channels {
+                separate_input.append(&mut generate_sine_wave(input_freqs[i], SAMPLE_RATE, MAGNITUDE, DURATION));
+            }
+            let mut input = vec![];
+            interleave_samples(&separate_input, num_channels, &mut input);
+
+            let mut params = TimeStretchParams::new(SAMPLE_RATE as u32, TIME_STRETCH);
+            params.fft_size = fft_size;
+            params.overlap = OVERLAP;
+            params.window_type = WINDOW_TYPE;
+
+            let mut stretcher = MultiTimeStretcher::new(&params, num_channels).unwrap();
+            let output = process_all_multi(&mut stretcher, &input);
+
+            assert!(output.len().is_multiple_of(num_channels));
+            let output_len = output.len() / num_channels;
+            let mut deinterleaved = vec![];
+            deinterleave_samples(&output, num_channels, &mut deinterleaved);
+
+            for ch in 0..num_channels {
+                let expected_freq = input_freqs[ch];
+                let channel_start = ch * output_len;
+                let channel_end = (ch + 1) * output_len;
+                let output_freq = compute_dominant_frequency(&deinterleaved[channel_start..channel_end], SAMPLE_RATE);
+                let output_magn = compute_magnitude(&deinterleaved[channel_start..channel_end]);
+
+                let bin_width = SAMPLE_RATE as f32 / fft_size as f32;
+                let tolerance = bin_width * 2.0;
+                let channel_input_len = input.len() / num_channels;
+                let expected_output_len = (channel_input_len as f32 * TIME_STRETCH) as usize;
+                println!(
+                    "Channel {}: input {} Hz, output {} Hz, magnitude {}, input length {}, output length {}",
+                    ch, expected_freq, output_freq, output_magn, channel_input_len, output_len
+                );
+
+                assert!(
+                    (output_freq - expected_freq).abs() < tolerance,
+                    "channel {}: expected {} Hz, got {} Hz for fft_size {}",
+                    ch,
+                    expected_freq,
+                    output_freq,
+                    fft_size
+                );
+                assert!(
+                    (output_magn - MAGNITUDE).abs() < MAGNITUDE * 0.1,
+                    "channel {}: expected magnitude {}, got {} for fft_size {}",
+                    ch,
+                    MAGNITUDE,
+                    output_magn,
+                    fft_size
+                );
+
+                assert!(
+                    output_len.abs_diff(expected_output_len) < expected_output_len / 20,
+                    "channel {}: expected output length {}, got {} for fft_size {}",
+                    ch,
+                    expected_output_len,
+                    output_len,
+                    fft_size
+                );
             }
         }
 
