@@ -1,6 +1,6 @@
 use std::f32::consts::PI;
 
-/// Normalize a phase value to the range [-PI, PI)
+/// Normalize a phase value to the range [-PI, PI).
 pub fn normalize_phase(phase: f32) -> f32 {
     (phase + PI).rem_euclid(2.0 * PI) - PI
 }

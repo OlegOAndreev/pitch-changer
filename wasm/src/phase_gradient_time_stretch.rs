@@ -50,6 +50,7 @@ pub struct PhaseGradientTimeStretch {
 }
 
 impl PhaseGradientTimeStretch {
+    /// Create a new phase gradient time stretcher with given FFT size.
     pub fn new(fft_size: usize) -> Self {
         let num_bins = fft_size / 2 + 1;
 
@@ -80,6 +81,7 @@ impl PhaseGradientTimeStretch {
         }
     }
 
+    /// Process a single STFT frame.
     pub fn process(
         &mut self,
         ana_freq: &[Complex<f32>],
@@ -221,6 +223,7 @@ impl PhaseGradientTimeStretch {
         }
     }
 
+    /// Reset internal state (clear previous frame data).
     pub fn reset(&mut self) {
         self.prev_magnitudes.fill(0.0);
         self.prev_ana_phases.fill(0.0);

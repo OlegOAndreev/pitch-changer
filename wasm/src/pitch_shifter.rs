@@ -7,7 +7,7 @@ use crate::resampler::StreamingResampler;
 use crate::time_stretcher::{TimeStretchParams, TimeStretcher};
 use crate::web::{Float32Vec, WrapAnyhowError};
 
-/// Parameters for audio pitch shifting
+/// Parameters for audio pitch shifting.
 #[derive(Debug, Clone, Copy)]
 #[wasm_bindgen]
 pub struct PitchShiftParams {
@@ -26,6 +26,7 @@ pub struct PitchShiftParams {
 #[wasm_bindgen]
 impl PitchShiftParams {
     #[wasm_bindgen(constructor)]
+    /// Create new pitch shift parameters with default FFT size, overlap, and window.
     pub fn new(sample_rate: u32, pitch_shift: f32) -> Self {
         let stretch_params = TimeStretchParams::new(sample_rate, 1.0);
         Self {
@@ -38,6 +39,7 @@ impl PitchShiftParams {
     }
 
     #[wasm_bindgen]
+    /// Return a debug representation of the parameters for JS.
     pub fn to_debug_string(&self) -> String {
         format!("{:?}", self)
     }
@@ -56,6 +58,7 @@ pub struct PitchShifter {
 #[wasm_bindgen]
 impl PitchShifter {
     #[wasm_bindgen(constructor)]
+    /// Create a new pitch shifter instance with given parameters.
     pub fn new(params: &PitchShiftParams) -> std::result::Result<Self, WrapAnyhowError> {
         Self::validate_params(params).map_err(WrapAnyhowError)?;
 
@@ -71,7 +74,7 @@ impl PitchShifter {
         Ok(Self { time_stretcher, resampler, stretched: vec![] })
     }
 
-    /// Process a chunk of audio samples through the pitch shifter.
+    /// Process a chunk of audio samples through the pitch shifter. Output is NOT cleared.
     ///
     /// Note: you need to call `finish()` to receive the last output chunks after you call `process()` for all input
     /// samples.
@@ -81,7 +84,7 @@ impl PitchShifter {
     }
 
     /// Finish processing any remaining audio data in the internal buffers. This method must be called after all input
-    /// has been processed via `process()`.
+    /// has been processed via `process()`. Output is NOT cleared.
     ///
     /// Note: after calling `finish()`, the pitch shifter is reset and ready to process new audio data.
     #[wasm_bindgen]
@@ -106,6 +109,7 @@ impl PitchShifter {
     }
 }
 
+// Why do we need a separate mod:
 // https://stackoverflow.com/questions/51388721/is-it-possible-to-have-wasm-bindgen-ignore-certain-public-functions-in-an-impl
 impl PitchShifter {
     /// See documentation for process()

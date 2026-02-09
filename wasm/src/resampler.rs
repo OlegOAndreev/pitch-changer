@@ -39,7 +39,7 @@ impl StreamingResampler {
     }
 
     /// Resample part of the input audio. The remainder will be buffered and used during next `resample()` or `finish()`
-    /// calls.
+    /// calls. Output is NOT cleared.
     ///
     /// Note: you need to call `finish()` to receive the last output chunks after you call `resample()` for all input
     /// samples.
@@ -93,7 +93,7 @@ impl StreamingResampler {
         );
     }
 
-    /// Finish processing any remaining audio data in the internal buffers.
+    /// Finish processing any remaining audio data in the internal buffers. Output is NOT cleared.
     ///
     /// Note: after calling `finish()`, the resampler is reset and ready to process new audio data.
     pub fn finish(&mut self, output: &mut Vec<f32>) {

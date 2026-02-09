@@ -34,6 +34,7 @@ pub struct Stft {
 }
 
 impl Stft {
+    /// Create a new STFT instance with given FFT size and window type.
     pub fn new(fft_size: usize, window_type: WindowType) -> Self {
         use crate::window::generate_window;
         use realfft::RealFftPlanner;
