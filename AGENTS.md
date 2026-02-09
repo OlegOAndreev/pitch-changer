@@ -20,6 +20,12 @@
 ## TypeScript rules
 * We use SharedArrayBuffer for synchronization with workers and audio worklets
 
+## Audio
+* WebAudio produces and accepts all audio in deinterleaved (planar) formats, one Float32Array per channel.
+* Internally all data is interleaved for passing around:
+  * when using Float32RingBuffer
+  * when passing to/from WASM module
+
 ## Build & testing commands
 * Only attempt running any commands for building and testing as outlined here
 * Install JavaScript/TypeScript libraries with `npm install`, do not run any other commands
