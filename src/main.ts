@@ -207,21 +207,19 @@ async function handleRecordClick(): Promise<void> {
 }
 
 async function runPlay(player: Player): Promise<void> {
-    // Use smaller ring buffer (around 0.6-0.7s). This means we react faster to changes in ratio or processing mode.
-    const bufferSize = 32 * 1024;
-    // TODO: Fix the Float32RingBuffer to use any buffer size, not pow-of-two.
-    // const bufferSize = 32 * 1024 * appState.sourceAudio!.numChannels;
+    // Use smaller ring buffer of 0.5s. This means we react faster to changes in ratio or processing mode.
+    const bufferSize = appState.sourceAudio!.sampleRate * appState.sourceAudio!.numChannels / 2;
 
-    console.log('Start playing audio');
+    console.log(`Start playing audio with buffer size ${bufferSize}`);
     const buffer = Float32RingBuffer.withCapacity(bufferSize);
 
     // Synchronization for playing is rather complicated:
-    // 1. Start the processor
-    // 2. Wait until the buffer is at least partially filled to prevent underruns
-    // 3. Only after that start playing audio
-    // 4. If all source data is processed, AudioProcessor closes the buffer
-    // 5. If a user clicks the stop button, Player closes the buffer
-    // 6. The Player promise completes once the AudioWorklet signals it has processed all data from the ring buffer
+    //   1. Start the processor
+    //   2. Wait until the buffer is at least partially filled to prevent underruns
+    //   3. Only after that start playing audio
+    //   4. If all source data is processed, AudioProcessor closes the buffer
+    //   5. If a user clicks the stop button, Player closes the buffer
+    //   6. The Player promise completes once the AudioWorklet signals it has processed all data from the ring buffer
     const processPromise = appState.processor.process(appState.sourceAudio!, buffer);
     await buffer.waitPopAsync(bufferSize / 2);
     const playerPromise = player.play(buffer, appState.sourceAudio!.numChannels);

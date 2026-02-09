@@ -182,11 +182,11 @@ export class Float32RingBuffer {
 
         // We do not directly store the new writeIndex because we want to preserve the closed bit which may be
         // concurrently set.
-        let idxDiff = toPush;
+        let writeIdxDiff = toPush;
         if (writeIdx + toPush >= this.capacity_ * 2) {
-            idxDiff -= this.capacity_ * 2;
+            writeIdxDiff -= this.capacity_ * 2;
         }
-        Atomics.add(this.writeIndex, 0, idxDiff << INDEX_SHIFT);
+        Atomics.add(this.writeIndex, 0, writeIdxDiff << INDEX_SHIFT);
         Atomics.notify(this.writeIndex, 0);
         return toPush;
     }
@@ -213,11 +213,11 @@ export class Float32RingBuffer {
 
         // We do not directly store the new readIndex because we want to preserve the closed bit which may be
         // concurrently set.
-        let idxDiff = toPop;
+        let reaIdxDiff = toPop;
         if (readIdx + toPop >= this.capacity_ * 2) {
-            idxDiff -= this.capacity_ * 2;
+            reaIdxDiff -= this.capacity_ * 2;
         }
-        Atomics.add(this.readIndex, 0, idxDiff << INDEX_SHIFT);
+        Atomics.add(this.readIndex, 0, reaIdxDiff << INDEX_SHIFT);
         Atomics.notify(this.readIndex, 0);
         return toPop;
     }
