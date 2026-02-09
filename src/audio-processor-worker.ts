@@ -2,7 +2,7 @@
 
 import * as Comlink from 'comlink';
 
-import initWasmModule, { Float32Vec, PitchShifter, PitchShiftParams, TimeStretcher, TimeStretchParams } from '../wasm/build/wasm_main_module';
+import initWasmModule, { Float32Vec, get_settings, PitchShifter, PitchShiftParams, TimeStretcher, TimeStretchParams } from '../wasm/build/wasm_main_module';
 import type { WorkerApi, WorkerParams } from './audio-processor';
 import { Float32RingBuffer, pushAllRingBuffer } from './sync';
 
@@ -19,6 +19,7 @@ class WorkerImpl implements WorkerApi {
         // https://github.com/GoogleChromeLabs/comlink/issues/635 
         const module = await initWasmModule();
         this.wasmMemory = module.memory;
+        console.log(`Wasm settings: ${get_settings()}`);
         console.log(`Initial wasm memory size: ${this.wasmMemory.buffer.byteLength}`);
         return true;
     }

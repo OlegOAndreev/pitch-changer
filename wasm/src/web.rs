@@ -9,8 +9,10 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = console)]
+    /// Proxy for browser console.log()
     pub fn log(s: &str);
     #[wasm_bindgen(js_namespace = console)]
+    /// Proxy for browser console.error()
     pub fn error(s: &str);
 }
 
@@ -80,6 +82,7 @@ impl From<WrapAnyhowError> for JsValue {
 }
 
 #[wasm_bindgen]
+/// Return a string describing compilation flags.
 pub fn get_settings() -> String {
     let optimized = !cfg!(debug_assertions);
 
@@ -91,15 +94,10 @@ pub fn get_settings() -> String {
     let simd128 = cfg!(target_feature = "simd128");
     let relaxed_simd = cfg!(target_feature = "relaxed-simd");
 
-    #[cfg(target_arch = "wasm32")]
-    let memory_bytes = std::arch::wasm32::memory_size(0) * 65536;
-    #[cfg(not(target_arch = "wasm32"))]
-    let memory_bytes: usize = 0;
-
     format!(
         "optimized: {}, atomics: {}, bulk-memory: {}, multivalue: {}, nontrapping-fptoint: {}, sign-ext: {}, \
-         simd128: {}, relaxed-simd: {}, memory: {}",
-        optimized, atomics, bulk_memory, multivalue, nontrapping_fptoint, sign_ext, simd128, relaxed_simd, memory_bytes
+         simd128: {}, relaxed-simd: {}",
+        optimized, atomics, bulk_memory, multivalue, nontrapping_fptoint, sign_ext, simd128, relaxed_simd
     )
 }
 
