@@ -220,7 +220,7 @@ async function runPlay(player: Player): Promise<void> {
     //   4. If all source data is processed, AudioProcessor closes the buffer
     //   5. If a user clicks the stop button, Player closes the buffer
     //   6. The Player promise completes once the AudioWorklet signals it has processed all data from the ring buffer
-    const processPromise = appState.processor.process(appState.sourceAudio!, buffer);
+    const processPromise = appState.processor.process(appState.sourceAudio!, buffer, null);
     await buffer.waitPopAsync(bufferSize / 2);
     const playerPromise = player.play(buffer, appState.sourceAudio!.numChannels);
 
@@ -288,7 +288,7 @@ async function processAllAudio(): Promise<InterleavedAudio> {
     const startTime = performance.now();
 
     const output = Float32RingBuffer.withCapacity(BUFFER_SIZE);
-    const processPromise = appState.processor.process(appState.sourceAudio!, output);
+    const processPromise = appState.processor.process(appState.sourceAudio!, output, null);
     const drainPromise = drainRingBuffer(output);
 
     await processPromise;
