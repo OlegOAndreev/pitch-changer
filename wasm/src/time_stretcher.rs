@@ -172,6 +172,12 @@ impl TimeStretcher {
         self.input_buf.clear();
         self.output_accum_buf.fill(0.0);
     }
+
+    /// Copy the current magnitude spectrum from the last processed STFT frame.
+    #[wasm_bindgen]
+    pub fn get_magnitudes(&self, output: &mut Float32Vec) {
+        self.phase_gradient_vocoder.get_magnitudes(&mut output.0);
+    }
 }
 
 // Why do we need a separate mod:
@@ -227,6 +233,11 @@ impl TimeStretcher {
         }
 
         self.reset();
+    }
+
+    /// Copy the current magnitude spectrum from the last processed STFT frame.
+    pub fn get_magnitudes_vec(&self, output: &mut Vec<f32>) {
+        self.phase_gradient_vocoder.get_magnitudes(output);
     }
 }
 

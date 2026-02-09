@@ -101,6 +101,12 @@ impl PitchShifter {
         self.stretched.clear();
     }
 
+    /// Copy the current magnitude spectrum from the last processed STFT frame.
+    #[wasm_bindgen]
+    pub fn get_magnitudes(&self, output: &mut Float32Vec) {
+        self.time_stretcher.get_magnitudes(output);
+    }
+
     fn validate_params(params: &PitchShiftParams) -> Result<()> {
         if params.pitch_shift < 0.25 || params.pitch_shift > 4.0 {
             bail!("Pitch shifting factor cannot be lower than 0.25 or higher than 4");
@@ -127,6 +133,11 @@ impl PitchShifter {
         self.resampler.resample(&self.stretched, output);
         self.resampler.finish(output);
         self.reset();
+    }
+
+    /// Copy the current magnitude spectrum from the last processed STFT frame.
+    pub fn get_magnitudes_vec(&self, output: &mut Vec<f32>) {
+        self.time_stretcher.get_magnitudes_vec(output);
     }
 }
 

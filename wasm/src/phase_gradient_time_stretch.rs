@@ -223,6 +223,12 @@ impl PhaseGradientTimeStretch {
         }
     }
 
+    /// Copy the current magnitude spectrum.
+    pub fn get_magnitudes(&self, output: &mut Vec<f32>) {
+        output.clear();
+        output.extend_from_slice(&self.magnitudes);
+    }
+
     /// Reset internal state (clear previous frame data).
     pub fn reset(&mut self) {
         self.prev_magnitudes.fill(0.0);
