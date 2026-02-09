@@ -41,7 +41,8 @@ export class CountDownLatch {
         return Atomics.load(this.count_, 0);
     }
 
-    // Decrement the count by the specified amount. If the count reaches zero, all waiting threads are notified.
+    // Decrement the count by the specified amount. If the count reaches zero, all waiting threads are notified. We
+    // allow the counter to become negative.
     countDown(count: number = 1): void {
         if (count <= 0) {
             throw new Error(`Count value must be positive, is ${count}`);
