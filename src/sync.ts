@@ -82,8 +82,6 @@ export class CountDownLatch {
 // web worker generates the new data when buffer becomes e.g. half-empty (but not completely empty to prevent
 // underruns).
 
-// We encode the closed status in both readIndex and writeIndex so that we can notify both consumer and producers
-// when the buffer is closed.
 const CLOSED_BIT = 1;
 const INDEX_SHIFT = 1;
 
@@ -91,6 +89,10 @@ export class Float32RingBuffer {
     private capacity_: number;
     private buffer_: SharedArrayBuffer;
     private data: Float32Array;
+    // Read and write index can be in [0, 2 * capacity) range, which allows using full capacity. The indices are stored
+    // in the upper bits, while the lower bit (see INDEX_SHIFT and CLOSED_BIT) stores the closed status. We encode the
+    // closed status in both readIndex and writeIndex so that we can notify both consumer and producers when the buffer
+    // is closed.
     private readIndex: Int32Array;
     private writeIndex: Int32Array;
 
@@ -99,7 +101,7 @@ export class Float32RingBuffer {
     constructor(buffer: SharedArrayBuffer) {
         const capacity = (buffer.byteLength - 8) / 4;
         Float32RingBuffer.validateCapacity(capacity);
-        this.capacity_ = capacity;
+        this.capacity_ = capacity >>> 0;
         this.buffer_ = buffer;
         this.readIndex = new Int32Array(this.buffer_, 0, 1);
         this.writeIndex = new Int32Array(this.buffer_, 4, 1);
@@ -119,7 +121,7 @@ export class Float32RingBuffer {
     }
 
     private static validateCapacity(capacity: number) {
-        if (capacity <= 0 || capacity !== capacity >>> 0 || (capacity & (capacity - 1)) !== 0) {
+        if (capacity <= 0 || capacity !== capacity >>> 0) {
             throw new Error(`Invalid capacity for Float32RingBuffer: ${capacity}`);
         }
     }
@@ -155,16 +157,18 @@ export class Float32RingBuffer {
         if (this.isClosed) {
             return 0;
         }
-        const read = Atomics.load(this.readIndex, 0) >>> INDEX_SHIFT;
-        const write = Atomics.load(this.writeIndex, 0) >>> INDEX_SHIFT;
-        const used = (write - read) >>> 0;
+        const readIdx = Atomics.load(this.readIndex, 0) >>> INDEX_SHIFT;
+        const writeIdx = Atomics.load(this.writeIndex, 0) >>> INDEX_SHIFT;
+        const used = this.getUsed(readIdx, writeIdx);
         const free = this.capacity_ - used;
         const toPush = Math.min(free, src.length);
         if (toPush === 0) {
             return 0;
         }
-        const mask = this.capacity_ - 1;
-        const writePos = write & mask;
+        let writePos = writeIdx;
+        if (writePos >= this.capacity_) {
+            writePos -= this.capacity_;
+        }
         // The push should write one or two contiguous chunks, depending on whether the writePos is near the end of the
         // buffer.
         const firstChunkSize = Math.min(toPush, this.capacity_ - writePos);
@@ -176,23 +180,30 @@ export class Float32RingBuffer {
             this.data.set(src.subarray(firstChunkSize, firstChunkSize + remaining), 0);
         }
 
-        // We rely on wrapround here
-        Atomics.add(this.writeIndex, 0, toPush << INDEX_SHIFT);
+        // We do not directly store the new writeIndex because we want to preserve the closed bit which may be
+        // concurrently set.
+        let idxDiff = toPush;
+        if (writeIdx + toPush >= this.capacity_ * 2) {
+            idxDiff -= this.capacity_ * 2;
+        }
+        Atomics.add(this.writeIndex, 0, idxDiff << INDEX_SHIFT);
         Atomics.notify(this.writeIndex, 0);
         return toPush;
     }
 
     // Pop data to dst and return the number of elements popped.
     pop(dst: Float32Array): number {
-        const read = Atomics.load(this.readIndex, 0) >>> INDEX_SHIFT;
-        const write = Atomics.load(this.writeIndex, 0) >>> INDEX_SHIFT;
-        const used = (write - read) >>> 0;
+        const readIdx = Atomics.load(this.readIndex, 0) >>> INDEX_SHIFT;
+        const writeIdx = Atomics.load(this.writeIndex, 0) >>> INDEX_SHIFT;
+        const used = this.getUsed(readIdx, writeIdx);
         const toPop = Math.min(used, dst.length);
         if (toPop === 0) {
             return 0;
         }
-        const mask = this.capacity_ - 1;
-        const readPos = read & mask;
+        let readPos = readIdx;
+        if (readPos >= this.capacity_) {
+            readPos -= this.capacity_;
+        }
         const firstChunkSize = Math.min(toPop, this.capacity_ - readPos);
         dst.set(this.data.subarray(readPos, readPos + firstChunkSize), 0);
         const remaining = toPop - firstChunkSize;
@@ -200,17 +211,22 @@ export class Float32RingBuffer {
             dst.set(this.data.subarray(0, remaining), firstChunkSize);
         }
 
-        // We rely on wrapround here
-        Atomics.add(this.readIndex, 0, toPop << INDEX_SHIFT);
+        // We do not directly store the new readIndex because we want to preserve the closed bit which may be
+        // concurrently set.
+        let idxDiff = toPop;
+        if (readIdx + toPop >= this.capacity_ * 2) {
+            idxDiff -= this.capacity_ * 2;
+        }
+        Atomics.add(this.readIndex, 0, idxDiff << INDEX_SHIFT);
         Atomics.notify(this.readIndex, 0);
         return toPop;
     }
 
     // Return the number of elements available
     get available(): number {
-        const readValue = Atomics.load(this.readIndex, 0);
-        const writeValue = Atomics.load(this.writeIndex, 0);
-        return (writeValue - readValue) >>> INDEX_SHIFT;
+        const readIdx = Atomics.load(this.readIndex, 0) >>> INDEX_SHIFT;
+        const writeIdx = Atomics.load(this.writeIndex, 0) >>> INDEX_SHIFT;
+        return this.getUsed(readIdx, writeIdx);
     }
 
     // Wait until there are at least n free elements in the buffer (blocks the producer).
@@ -220,9 +236,9 @@ export class Float32RingBuffer {
         }
         while (true) {
             const readValue = Atomics.load(this.readIndex, 0);
-            const read = readValue >>> INDEX_SHIFT;
-            const write = Atomics.load(this.writeIndex, 0) >>> INDEX_SHIFT;
-            const used = (write - read) >>> 0;
+            const readIdx = readValue >>> INDEX_SHIFT;
+            const writeIdx = Atomics.load(this.writeIndex, 0) >>> INDEX_SHIFT;
+            const used = this.getUsed(readIdx, writeIdx);
             const free = this.capacity_ - used;
             if (free >= n) {
                 return;
@@ -241,9 +257,9 @@ export class Float32RingBuffer {
         }
         while (true) {
             const readValue = Atomics.load(this.readIndex, 0);
-            const read = readValue >>> INDEX_SHIFT;
-            const write = Atomics.load(this.writeIndex, 0) >>> INDEX_SHIFT;
-            const used = (write - read) >>> 0;
+            const readIdx = readValue >>> INDEX_SHIFT;
+            const writeIdx = Atomics.load(this.writeIndex, 0) >>> INDEX_SHIFT;
+            const used = this.getUsed(readIdx, writeIdx);
             const free = this.capacity_ - used;
             if (free >= n) {
                 return;
@@ -264,11 +280,11 @@ export class Float32RingBuffer {
             throw new Error(`waitPop(${n}) exceeds capacity ${this.capacity_}`);
         }
         while (true) {
-            const read = Atomics.load(this.readIndex, 0) >>> INDEX_SHIFT;
+            const readIdx = Atomics.load(this.readIndex, 0) >>> INDEX_SHIFT;
             const writeValue = Atomics.load(this.writeIndex, 0);
-            const write = writeValue >>> INDEX_SHIFT;
-            const available = (write - read) >>> 0;
-            if (available >= n) {
+            const writeIdx = writeValue >>> INDEX_SHIFT;
+            const used = this.getUsed(readIdx, writeIdx);
+            if (used >= n) {
                 return;
             }
             if (this.isClosed) {
@@ -284,11 +300,11 @@ export class Float32RingBuffer {
             throw new Error(`waitPopAsync(${n}) exceeds capacity ${this.capacity_}`);
         }
         while (true) {
-            const read = Atomics.load(this.readIndex, 0) >>> INDEX_SHIFT;
+            const readIdx = Atomics.load(this.readIndex, 0) >>> INDEX_SHIFT;
             const writeValue = Atomics.load(this.writeIndex, 0);
-            const write = writeValue >>> INDEX_SHIFT;
-            const available = (write - read) >>> 0;
-            if (available >= n) {
+            const writeIdx = writeValue >>> INDEX_SHIFT;
+            const used = this.getUsed(readIdx, writeIdx);
+            if (used >= n) {
                 return;
             }
             if (this.isClosed) {
@@ -300,11 +316,19 @@ export class Float32RingBuffer {
             }
         }
     }
+
+    getUsed(readIdx: number, writeIdx: number): number {
+        if (writeIdx >= readIdx) {
+            return writeIdx - readIdx;
+        } else {
+            return this.capacity_ * 2 + writeIdx - readIdx;
+        }
+    }
 }
 
 // Write the contents of ring buffer into a Float32Array, backed by SharedBufferArray, until the ring buffer is closed.
 export async function drainRingBuffer(buffer: Float32RingBuffer): Promise<Float32Array> {
-    const chunkSize = buffer.capacity / 4;
+    const chunkSize = (buffer.capacity / 4) >>> 0;
     const recordedChunks: Float32Array[] = [];
     while (!buffer.isClosed) {
         await buffer.waitPopAsync(chunkSize);
@@ -340,8 +364,10 @@ export async function drainRingBuffer(buffer: Float32RingBuffer): Promise<Float3
 // Write the contents of input into ring buffer until either all input is pushed or ring buffer is closed.
 export async function pushAllRingBuffer(input: Float32Array, buffer: Float32RingBuffer): Promise<void> {
     let pushed = 0;
+    // Do not try to push the whole buffer at once.
+    const chunkSize = (buffer.capacity / 4) >>> 0;
     while (pushed < input.length) {
-        const toPush = Math.min(buffer.capacity, input.length - pushed);
+        const toPush = Math.min(chunkSize, input.length - pushed);
         await buffer.waitPushAsync(toPush);
         const n = buffer.push(input.subarray(pushed, pushed + toPush));
         if (buffer.isClosed) {
@@ -350,6 +376,6 @@ export async function pushAllRingBuffer(input: Float32Array, buffer: Float32Ring
         if (n !== toPush && !buffer.isClosed) {
             throw new Error(`Internal error: unexpected push(${toPush}) result: ${n}`);
         }
-        pushed += toPush;
+        pushed += n;
     }
 }
