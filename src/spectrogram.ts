@@ -29,7 +29,7 @@ export function drawSpectrogram(canvas: HTMLCanvasElement, audioData: Float32Arr
     const barWidth = width / spectrogramRange;
     canvasCtx.fillStyle = '#444444';
     for (let i = 0; i < spectrogramRange; i++) {
-        const barHeight = spectrogram[i] * height / NORM;
+        const barHeight = Math.round(spectrogram[i] * height / NORM);
 
         const x = i * barWidth;
         canvasCtx.fillRect(x, height - barHeight, barWidth, barHeight);
