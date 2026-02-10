@@ -1,16 +1,12 @@
-use lanczos_resampler::BasicChunkedResampler;
 use wasm_bindgen::prelude::*;
 
 use anyhow::{Result, bail};
 
 use crate::WindowType;
+use crate::resampler::StreamingResampler;
 use crate::time_stretcher::{TimeStretchParams, TimeStretcher};
 use crate::util::{deinterleave_samples, interleave_samples};
 use crate::web::{Float32Vec, WrapAnyhowError};
-
-// We can't use rubato FFT resampler, because its latency is too high for "non-standard" ratios (e.g. 1.125). FIR-based
-// resamplers unfortunately have much higher performance requirements, use a somewhat more performant parameters.
-type Resampler = BasicChunkedResampler<16, 2>;
 
 /// Parameters for audio pitch shifting.
 #[derive(Debug, Clone, Copy)]
@@ -55,8 +51,7 @@ impl PitchShiftParams {
 #[wasm_bindgen]
 pub struct PitchShifter {
     time_stretcher: TimeStretcher,
-    resampler: Resampler,
-    // resampler: StreamingResampler,
+    resampler: StreamingResampler,
     // Scratch buffer
     stretched: Vec<f32>,
 }
@@ -75,8 +70,7 @@ impl PitchShifter {
 
         let time_stretcher = TimeStretcher::new(&time_stretch_params)?;
 
-        let output_sample_rate = (params.sample_rate as f32 / params.pitch_shift) as usize;
-        let resampler = Resampler::new(params.sample_rate as usize, output_sample_rate);
+        let resampler = StreamingResampler::new(1.0 / params.pitch_shift)?;
 
         Ok(Self { time_stretcher, resampler, stretched: vec![] })
     }
@@ -129,9 +123,7 @@ impl PitchShifter {
     pub fn process_vec(&mut self, input: &[f32], output: &mut Vec<f32>) {
         self.stretched.clear();
         self.time_stretcher.process_vec(input, &mut self.stretched);
-        output.reserve(self.resampler.max_num_output_frames(self.stretched.len()));
-        let resampled = self.resampler.resample(&self.stretched, output);
-        assert_eq!(resampled, self.stretched.len());
+        self.resampler.resample(&self.stretched, output);
     }
 
     /// See documentation for finish()
@@ -139,6 +131,7 @@ impl PitchShifter {
         self.stretched.clear();
         self.time_stretcher.finish_vec(&mut self.stretched);
         self.resampler.resample(&self.stretched, output);
+        self.resampler.finish(output);
         self.reset();
     }
 
@@ -425,7 +418,9 @@ mod tests {
                         let offset = fft_size * 2;
                         let middle_len = (input.len() - offset * 2).min(output.len() - offset * 2);
                         let input_slice = &input[offset..offset + middle_len];
-                        let output_slice = &output[offset..offset + middle_len];
+                        // Account of resampling latency.
+                        let output_off = StreamingResampler::LATENCY;
+                        let output_slice = &output[offset + output_off..offset + output_off + middle_len];
 
                         let mut max_diff = 0.0f32;
                         for (i, o) in input_slice.iter().zip(output_slice) {
@@ -436,7 +431,7 @@ mod tests {
                         }
 
                         assert!(
-                            max_diff < 1e-1,
+                            max_diff < 1e-3,
                             "Max difference {} for sample_rate {}, fft_size {}, overlap {}, window {:?}",
                             max_diff,
                             sample_rate,

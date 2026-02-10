@@ -14,7 +14,9 @@ anyhow = "1.0"
 js-sys = "0.3"
 wasm-bindgen = "=0.2.108"
 realfft = { version = "3.5", features = ["wasm_simd"] }
-lanczos-resampler = "0.4"
+rubato = "1.0"
+audioadapter = "2.0"
+audioadapter-buffers = "2.0"
 
 [dev-dependencies]
 argh = "0.1"
@@ -22,7 +24,5 @@ hound = "3.5.0"
 plotters = { version = "0.3", default-features = false, features = ["line_series", "svg_backend"] }
 rand = "0.9"
 symphonia = { version = "0.5", features = ["aac", "isomp4", "mp3"] }
-
-[profile.release]
 # Disabled by default for better build times
 # debug = true
