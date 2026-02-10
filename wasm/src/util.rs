@@ -74,10 +74,14 @@ pub fn deinterleave_samples(input: &[f32], num_channels: usize, output: &mut Vec
         return;
     }
 
-    // Deinterleave
-    for channel in 0..num_channels {
+    let output_base = output.len();
+    output.resize(output.len() + input.len(), 0.0);
+    for ch in 0..num_channels {
         for sample_idx in 0..num_samples {
-            output.push(input[sample_idx * num_channels + channel]);
+            unsafe {
+                *output.get_unchecked_mut(output_base + ch * num_samples + sample_idx) =
+                    *input.get_unchecked(sample_idx * num_channels + ch);
+            }
         }
     }
 }
@@ -97,9 +101,14 @@ pub fn interleave_samples(input: &[f32], num_channels: usize, output: &mut Vec<f
         return;
     }
 
+    let output_base = output.len();
+    output.resize(output.len() + input.len(), 0.0);
     for sample_idx in 0..num_samples {
-        for channel in 0..num_channels {
-            output.push(input[channel * num_samples + sample_idx]);
+        for ch in 0..num_channels {
+            unsafe {
+                *output.get_unchecked_mut(output_base + sample_idx * num_channels + ch) =
+                    *input.get_unchecked(ch * num_samples + sample_idx);
+            };
         }
     }
 }
