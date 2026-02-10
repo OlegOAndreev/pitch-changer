@@ -5,7 +5,7 @@ import { encodeAudioToBlob } from './media-encoder';
 import { Player } from './player';
 import { Recorder } from './recorder';
 import { saveFile, showSaveDialog } from './save-dialog';
-import { clearSpectrogram, drawSpectrogram, SPECTROGRAM_SIZE } from './spectrogram';
+import { clearSpectrogram, drawSpectrogram, setupCanvasEvents, SPECTROGRAM_SIZE } from './spectrogram';
 import { drainRingBuffer, Float32RingBuffer } from './sync';
 import { getAudioLength, getAudioSeconds, type InterleavedAudio } from './types';
 import { debounce, getById, secondsToString, withButtonsDisabled } from './utils';
@@ -407,3 +407,4 @@ fileInput.addEventListener('change', withButtonsDisabled([loadBtn], async () => 
     await handleFileInputChange(file);
 }));
 debugToggleBtn.addEventListener('click', () => handleDebugPanelClick());
+setupCanvasEvents(spectrogramCanvas);
