@@ -89,7 +89,7 @@ export class Player {
     // Get the latest played audio samples from the player processor.
     getLatestSamples(numSamples: number, numChannels: number): Float32Array {
         if (!this.isPlaying) {
-            throw new Error('Player is not currently playing');
+            return new Float32Array(0);
         }
 
         // This is inherently racy operation, but the probability of concurrent update is very low for sufficiently
