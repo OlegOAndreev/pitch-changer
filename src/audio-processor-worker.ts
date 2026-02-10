@@ -2,11 +2,15 @@
 
 import * as Comlink from 'comlink';
 
-const HISTOGRAM_SIZE = 2048;
-const HISTOGRAM_INTERVAL = 50; // ms
-
-import initWasmModule, { Float32Vec, get_settings, MultiPitchShifter, MultiTimeStretcher, PitchShiftParams, SpectralHistogram, TimeStretchParams } from '../wasm/build/wasm_main_module';
-import type { HistogramCallback, WorkerApi, WorkerParams } from './audio-processor';
+import initWasmModule, {
+    Float32Vec,
+    get_settings,
+    MultiPitchShifter,
+    MultiTimeStretcher,
+    PitchShiftParams,
+    TimeStretchParams
+} from '../wasm/build/wasm_main_module';
+import type { WorkerApi, WorkerParams } from './audio-processor';
 import { Float32RingBuffer, pushAllRingBuffer } from './sync';
 import type { InterleavedAudio } from './types';
 
@@ -27,8 +31,6 @@ class WorkerImpl implements WorkerApi {
         this.wasmMemory = module.memory;
         console.log(`Wasm settings: ${get_settings()}`);
         console.log(`Initial wasm memory size: ${this.wasmMemory.buffer.byteLength}`);
-
-        // Initialize histogram for FFT_SIZE = 4096 (same as visualizer.ts)
         return true;
     }
 
@@ -37,17 +39,12 @@ class WorkerImpl implements WorkerApi {
         this.paramsDirty = true;
     }
 
-    async process(input: InterleavedAudio, outputSab: SharedArrayBuffer, histogramCallback: HistogramCallback): Promise<void> {
+    async process(input: InterleavedAudio, outputSab: SharedArrayBuffer): Promise<void> {
         const output = new Float32RingBuffer(outputSab);
         const chunkSize = output.capacity / 4;
 
         // Clean the state if previous process() was aborted.
         this.getProcessor(input.sampleRate, input.numChannels).reset();
-
-        const spectralHistogram = new SpectralHistogram(HISTOGRAM_SIZE);
-        const histogramInputVec = new Float32Vec(HISTOGRAM_SIZE * input.numChannels);
-        const histogramOutputVec = new Float32Vec(0);
-        let lastHistogramTime = performance.now();
 
         let inputPos = 0;
         // Main processing loop.
@@ -66,15 +63,7 @@ class WorkerImpl implements WorkerApi {
                 // detached ArrayBuffer.
                 const processedArr = new Float32Array(processedVec.array);
 
-                // Send the histogram
-                if (histogramCallback && lastHistogramTime + HISTOGRAM_INTERVAL < performance.now()) {
-                    lastHistogramTime = performance.now();
-                    histogramInputVec.set(processedArr.subarray(0, HISTOGRAM_SIZE * input.numChannels));
-                    spectralHistogram.compute(histogramInputVec, input.numChannels, histogramOutputVec);
-                    histogramCallback(histogramOutputVec.array);
-                }
-
-                // console.debug(`Processing chunks of size ${inputVec.len}, num channels ${numChannels} with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}`);
+                // console.debug(`Processing chunks of size ${inputVec.len}, num channels ${input.numChannels} with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}`);
                 await pushAllRingBuffer(processedArr, output);
                 if (output.isClosed) {
                     return;
@@ -86,19 +75,13 @@ class WorkerImpl implements WorkerApi {
             processedVec.clear();
             processor.finish(processedVec);
             const processedArr = new Float32Array(processedVec.array);
-            // console.debug(`Processing final chunk num channels ${numChannels} with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}`);
+            // console.debug(`Processing final chunk num channels ${input.numChannels} with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}`);
             await pushAllRingBuffer(processedArr, output);
         } finally {
             inputVec.free();
             processedVec.free();
             // Always close output so that the other side does not hang forever.
             output.close();
-
-            // Send zero histogram at the end.
-            if (histogramCallback) {
-                histogramOutputVec.fill();
-                histogramCallback(histogramOutputVec.array);
-            }
         }
         console.log(`Wasm memory size: ${this.wasmMemory!.buffer.byteLength}`);
     }

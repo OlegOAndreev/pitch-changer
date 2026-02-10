@@ -195,23 +195,7 @@ export class Float32RingBuffer {
     // Pop data to dst and return the number of elements popped.
     pop(dst: Float32Array): number {
         const readIdx = Atomics.load(this.readIndex, 0) >>> INDEX_SHIFT;
-        const writeIdx = Atomics.load(this.writeIndex, 0) >>> INDEX_SHIFT;
-        const used = this.getUsed(readIdx, writeIdx);
-        const toPop = Math.min(used, dst.length);
-        if (toPop === 0) {
-            return 0;
-        }
-        let readPos = readIdx;
-        if (readPos >= this.capacity_) {
-            readPos -= this.capacity_;
-        }
-        const firstChunkSize = Math.min(toPop, this.capacity_ - readPos);
-        dst.set(this.data.subarray(readPos, readPos + firstChunkSize), 0);
-        const remaining = toPop - firstChunkSize;
-        if (remaining > 0) {
-            dst.set(this.data.subarray(0, remaining), firstChunkSize);
-        }
-
+        const toPop = this.peekImpl(dst, readIdx);
         // We do not directly store the new readIndex because we want to preserve the closed bit which may be
         // concurrently set.
         let reaIdxDiff = toPop;
@@ -221,6 +205,32 @@ export class Float32RingBuffer {
         Atomics.add(this.readIndex, 0, reaIdxDiff << INDEX_SHIFT);
         Atomics.notify(this.readIndex, 0);
         return toPop;
+    }
+
+    // Read data to dst and return the number of elements read, but do not move the position.
+    peek(dst: Float32Array): number {
+        const readIdx = Atomics.load(this.readIndex, 0) >>> INDEX_SHIFT;
+        return this.peekImpl(dst, readIdx);
+    }
+
+    private peekImpl(dst: Float32Array, readIdx: number): number {
+        const writeIdx = Atomics.load(this.writeIndex, 0) >>> INDEX_SHIFT;
+        const used = this.getUsed(readIdx, writeIdx);
+        const toPeek = Math.min(used, dst.length);
+        if (toPeek === 0) {
+            return 0;
+        }
+        let readPos = readIdx;
+        if (readPos >= this.capacity_) {
+            readPos -= this.capacity_;
+        }
+        const firstChunkSize = Math.min(toPeek, this.capacity_ - readPos);
+        dst.set(this.data.subarray(readPos, readPos + firstChunkSize), 0);
+        const remaining = toPeek - firstChunkSize;
+        if (remaining > 0) {
+            dst.set(this.data.subarray(0, remaining), firstChunkSize);
+        }
+        return toPeek;
     }
 
     // Return the number of elements available

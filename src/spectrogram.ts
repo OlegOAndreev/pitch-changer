@@ -1,4 +1,18 @@
-export function drawSpectrogram(canvas: HTMLCanvasElement, spectrogram: Float32Array) {
+import initWasmModule, { Float32Vec, SpectralHistogram } from "../wasm/build/wasm_main_module";
+
+export const SPECTROGRAM_SIZE = 2048;
+
+await initWasmModule();
+
+const spectralHistogram = new SpectralHistogram(SPECTROGRAM_SIZE);
+const histogramInputVec = new Float32Vec(0);
+const histogramOutputVec = new Float32Vec(0);
+
+export function drawSpectrogram(canvas: HTMLCanvasElement, audioData: Float32Array, numChannels: number) {
+    histogramInputVec.set(audioData);
+    spectralHistogram.compute(histogramInputVec, numChannels, histogramOutputVec);
+    const spectrogram = histogramOutputVec.array;
+
     const { width, height } = canvas.getBoundingClientRect();
     const canvasCtx = canvas.getContext('2d')!;
 

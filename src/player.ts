@@ -3,6 +3,7 @@ import { CountDownLatch, Float32RingBuffer } from './sync';
 
 // Exported only for player-processor.ts
 export const playerProcessorName = 'player-processor';
+
 export interface PlayerProcessorOptions {
     ringBufferSab: SharedArrayBuffer;
     latchSab: SharedArrayBuffer;
@@ -80,5 +81,18 @@ export class Player {
         }
         this.ringBuffer!.close();
         this.stoppedLatch!.countDown();
+    }
+
+    // Get the latest played audio samples from the player processor.
+    getLatestSamples(numSamples: number, numChannels: number): Float32Array {
+        if (!this.isPlaying) {
+            throw new Error('Player is not currently playing');
+        }
+
+        // This is inherently racy operation, but the probability of concurrent update is very low for sufficiently
+        // large buffer sizes.
+        const result = new Float32Array(numSamples * numChannels);
+        this.ringBuffer!.peek(result);
+        return result;
     }
 }

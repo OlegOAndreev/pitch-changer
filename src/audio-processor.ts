@@ -9,13 +9,11 @@ export interface WorkerParams {
     pitchValue: number;
 };
 
-export type HistogramCallback = ((histogram: Float32Array) => void) | null;
-
 export interface WorkerApi {
     init(): Promise<boolean>;
     setParams(params: WorkerParams): void;
     // outputSab must be a buffer for Float32RingBuffer
-    process(input: InterleavedAudio, outputSab: SharedArrayBuffer, histogramCallback: HistogramCallback): Promise<void>;
+    process(input: InterleavedAudio, outputSab: SharedArrayBuffer): Promise<void>;
 }
 
 // AudioProcessor runs processing audio in the web worker. The output is written asynchronously into Float32RingBuffer.
@@ -46,13 +44,8 @@ export class AudioProcessor {
     }
 
     // Run processing source audio data and store the result into output. The processing stops when either all source
-    // data is processed, or output is closed. If histogramCallback is not null, it will periodically be called with
-    // current output spectrogram.
-    async process(input: InterleavedAudio, output: Float32RingBuffer, histogramCallback: HistogramCallback): Promise<void> {
-        let proxyCallback = null;
-        if (histogramCallback != null) {
-            proxyCallback = Comlink.proxy(histogramCallback);
-        }
-        await this.proxy.process(input, output.buffer, proxyCallback);
+    // data is processed, or output is closed.
+    async process(input: InterleavedAudio, output: Float32RingBuffer): Promise<void> {
+        await this.proxy.process(input, output.buffer);
     }
 }
