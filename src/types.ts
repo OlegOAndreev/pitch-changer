@@ -5,10 +5,12 @@ export interface InterleavedAudio {
     numChannels: number,
 }
 
+// Calculate total duration in seconds of an interleaved audio buffer
 export function getAudioSeconds(audio: InterleavedAudio): number {
     return audio.data.length / (audio.sampleRate * audio.numChannels);
 }
 
+// Calculate number of samples per channel in an interleaved audio buffer
 export function getAudioLength(audio: InterleavedAudio): number {
     return audio.data.length / audio.numChannels;
 }

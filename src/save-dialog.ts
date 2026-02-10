@@ -72,6 +72,7 @@ export async function showSaveDialog(): Promise<[string | null, FileSystemFileHa
     }
 }
 
+// Save blob to file using FileSystem API or fallback download
 export async function saveFile(filename: string, fileHandle: FileSystemFileHandle | null, blob: Blob) {
     if (fileHandle) {
         const writable = await fileHandle.createWritable();

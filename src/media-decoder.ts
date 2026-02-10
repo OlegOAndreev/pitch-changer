@@ -3,6 +3,7 @@
 // sample rate.
 import type { InterleavedAudio } from './types';
 
+// Decode audio blob to interleaved PCM using AudioContext
 export async function decodeAudioFromBlob(blob: Blob, audioContext: AudioContext): Promise<InterleavedAudio> {
     const audioData = await blob.arrayBuffer();
     const audioBuffer = await audioContext.decodeAudioData(audioData);

@@ -9,6 +9,7 @@ export interface WorkerParams {
     pitchValue: number;
 };
 
+// Worker API exposed by the audio processor web worker
 export interface WorkerApi {
     init(): Promise<boolean>;
     setParams(params: WorkerParams): void;

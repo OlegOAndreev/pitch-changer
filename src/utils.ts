@@ -1,3 +1,4 @@
+// Get HTML element by ID with type safety, throws if element not found
 export function getById<T extends HTMLElement>(elementId: string): T {
     const element = document.getElementById(elementId);
     if (!element) {
