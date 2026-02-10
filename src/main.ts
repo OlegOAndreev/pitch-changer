@@ -232,7 +232,7 @@ async function runPlay(player: Player): Promise<void> {
     // We do not need to wait for this promise, but let's do it for symmetry.
     await processPromise;
     await playerPromise;
-    drawSpectrogram(spectrogramCanvas!, new Float32Array(0));
+    clearSpectrogram(spectrogramCanvas!);
 
     console.log('Stopped playing audio');
 }
