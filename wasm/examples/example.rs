@@ -412,7 +412,7 @@ fn main() -> Result<()> {
             let mut output_data = vec![];
             let mut stretcher = MultiTimeStretcher::new(&params, input.channels)?;
             start_time = Instant::now();
-            for chunk in input.data.chunks(fft_size - 1) {
+            for chunk in input.data.chunks((fft_size - 1) * input.channels) {
                 stretcher.process_vec(chunk, &mut output_data);
             }
             stretcher.finish_vec(&mut output_data);
@@ -477,7 +477,7 @@ fn main() -> Result<()> {
             let mut output_data = vec![];
             let mut shifter = MultiPitchShifter::new(&params, input.channels)?;
             start_time = Instant::now();
-            for chunk in input.data.chunks(fft_size - 1) {
+            for chunk in input.data.chunks((fft_size - 1) * input.channels) {
                 shifter.process_vec(chunk, &mut output_data);
             }
             shifter.finish_vec(&mut output_data);
