@@ -2,7 +2,8 @@ use std::f32::consts::PI;
 
 /// Normalize a phase value to the range [-PI, PI).
 pub fn normalize_phase(phase: f32) -> f32 {
-    (phase + PI).rem_euclid(2.0 * PI) - PI
+    let shifted = phase + PI;
+    shifted - (shifted / (2.0 * PI)).floor() * 2.0 * PI - PI
 }
 
 /// Compute the dominant frequency of a signal using FFT. Returns the frequency in Hz.
@@ -121,10 +122,10 @@ mod tests {
         assert!((normalize_phase(-2.5 * PI) - (-0.5 * PI)).abs() < 1e-6);
         assert!((normalize_phase(-4.0 * PI) - 0.0).abs() < 1e-6);
 
-        assert!(normalize_phase(100.0 * PI).abs() < 1e-4);
-        assert!(normalize_phase(-100.0 * PI).abs() < 1e-4);
-        assert!((normalize_phase(100.5 * PI) - (0.5 * PI)).abs() < 1e-4);
-        assert!((normalize_phase(-100.5 * PI) - (-0.5 * PI)).abs() < 1e-4);
+        assert!(normalize_phase(1000.0 * PI).abs() < 1e-4);
+        assert!(normalize_phase(-1000.0 * PI).abs() < 1e-4);
+        assert!((normalize_phase(1000.0 * PI + 0.5) - 0.5).abs() < 1e-4);
+        assert!((normalize_phase(-1000.0 * PI + 0.5) - 0.5).abs() < 1e-4);
 
         let epsilon = 1e-6;
         assert!((normalize_phase(PI + epsilon) - (-PI + epsilon)).abs() < 1e-5);
