@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fmt::Display;
+use std::panic;
 
 use wasm_bindgen::prelude::*;
 
@@ -31,6 +32,20 @@ macro_rules! console_log {
 }
 
 #[allow(unused_macros)]
+macro_rules! console_error {
+    ($($t:tt)*) => {
+        #[cfg(target_arch = "wasm32")]
+        {
+            crate::web::error(&format_args!($($t)*).to_string());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            println!($($t)*);
+        }
+    }
+}
+
+#[allow(unused_macros)]
 macro_rules! error_and_panic {
     ($($t:tt)*) => {
         #[cfg(target_arch = "wasm32")]
@@ -49,6 +64,15 @@ macro_rules! error_and_panic {
 pub(crate) use console_log;
 #[allow(unused)]
 pub(crate) use error_and_panic;
+
+/// Set the panic hook on start, otherwise we miss out on all our asserts.
+#[wasm_bindgen(start)]
+fn start() {
+    panic::set_hook(Box::new(|panic_info| {
+        let message = format!("Panic occurred: {}", panic_info);
+        console_error!("{}", message);
+    }));
+}
 
 /// WrapAnyhowError is a wrapper for anyhow Error which supports Into<JsError> (goddamn orphan rules).
 #[derive(Debug)]
