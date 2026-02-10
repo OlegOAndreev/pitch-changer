@@ -1,4 +1,4 @@
-# Brief instructions for code agents
+# Brief instructions for code agents and other developers
 
 ## General
 * This is a web audio pitch modifier, which can either record audio from microphone or upload from file
