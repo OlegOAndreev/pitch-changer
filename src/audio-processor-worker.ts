@@ -114,11 +114,11 @@ class WorkerImpl implements WorkerApi {
                     params.free();
                 }
             }
-            return this.processor!;
-        } finally {
             this.paramsDirty = false;
             this.processorSampleRate = sampleRate;
             this.processorNumChannels = numChannels;
+            return this.processor!;
+        } finally {
         }
     }
 }

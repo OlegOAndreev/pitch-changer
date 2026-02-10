@@ -61,7 +61,7 @@ class AppState {
     }
 
     async initProcessor(): Promise<void> {
-        this.processor.init();
+        await this.processor.init();
         this.processor.setParams(this.settings.processingMode, this.settings.pitchValue);
     }
 
@@ -71,7 +71,7 @@ class AppState {
             pitchValue: DEFAULT_PITCH_VALUE
         };
         Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}'));
-        if (settings.processingMode !== 'time') {
+        if (!settings.processingMode) {
             settings.processingMode = DEFAULT_PROCESSING_MODE;
         }
         return settings;
@@ -243,7 +243,7 @@ async function runPlay(player: Player): Promise<void> {
     await processPromise;
     await playerPromise;
 
-    clearTimeout(spectrogramTimer);
+    clearInterval(spectrogramTimer);
     clearSpectrogram(spectrogramCanvas!);
 
     console.log('Stopped playing audio');
@@ -281,7 +281,7 @@ function handleLoadClick(): void {
 
 async function handleFileInputChange(file: File): Promise<void> {
     await onBeforeSourceAudioDataSet();
-    const audioContext = await appState.getAudioContext();
+    const audioContext = appState.getAudioContext();
     try {
         const startTime = performance.now();
         processingSpinner.style.display = 'inline-block';
@@ -292,7 +292,7 @@ async function handleFileInputChange(file: File): Promise<void> {
         sourceLabel.textContent = `Loaded ${secondsToString(getAudioSeconds(appState.sourceAudio))} of ${file.name}`;
         onAfterSourceAudioDataSet();
     } catch (error) {
-        sourceLabel.textContent = `Error loading audio file: ${error}`;
+        sourceLabel.textContent = `Error loading audio file: ${String(error)}`;
         // In case of error, play and save buttons should stay disabled.
         recordBtn.disabled = false;
         loadBtn.disabled = false;
@@ -331,7 +331,7 @@ async function handleSaveClick(): Promise<void> {
     }
 
     const fileType = filename.split('.').pop()?.toLowerCase();
-    if (!fileType || (fileType !== 'mp3' && fileType != 'ogg' && fileType !== 'wav')) {
+    if (!fileType || (fileType !== 'mp3' && fileType !== 'ogg' && fileType !== 'wav')) {
         alert('Unsupported file format. Please use .mp3, .ogg or .wav');
         return;
     }
