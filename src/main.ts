@@ -4,6 +4,7 @@ import { encodeAudioToBlob } from './media-encoder';
 import { Player } from './player';
 import { Recorder } from './recorder';
 import { saveFile, showSaveDialog } from './save-dialog';
+import { clearSpectrogram, drawSpectrogram } from './spectrogram';
 import { drainRingBuffer, Float32RingBuffer } from './sync';
 import { getAudioLength, getAudioSeconds, type InterleavedAudio } from './types';
 import { debounce, getById, secondsToString, withButtonsDisabled } from './utils';
@@ -130,7 +131,7 @@ const sourceLabel = getById<HTMLElement>('source-label');
 const processingSpinner = getById<HTMLDivElement>('processing-spinner');
 const processingLabel = getById<HTMLDivElement>('processing-label');
 const fileInput = getById<HTMLInputElement>('file-input');
-
+const spectrogramCanvas = getById<HTMLCanvasElement>('spectrogram-canvas');
 
 // Reset all buttons to default state
 async function onBeforeSourceAudioDataSet() {
@@ -174,6 +175,8 @@ function applySettingsToUI(settings: AppSettings): void {
 
     // Show the content container after settings are applied
     contentContainer.style.visibility = 'visible';
+
+    drawSpectrogram(spectrogramCanvas!, new Float32Array(0));
 }
 
 applySettingsToUI(appState.settings);
@@ -220,13 +223,16 @@ async function runPlay(player: Player): Promise<void> {
     //   4. If all source data is processed, AudioProcessor closes the buffer
     //   5. If a user clicks the stop button, Player closes the buffer
     //   6. The Player promise completes once the AudioWorklet signals it has processed all data from the ring buffer
-    const processPromise = appState.processor.process(appState.sourceAudio!, buffer, null);
+    const processPromise = appState.processor.process(appState.sourceAudio!, buffer, (spectrogram) => {
+        drawSpectrogram(spectrogramCanvas!, spectrogram);
+    });
     await buffer.waitPopAsync(bufferSize / 2);
     const playerPromise = player.play(buffer, appState.sourceAudio!.numChannels);
 
     // We do not need to wait for this promise, but let's do it for symmetry.
     await processPromise;
     await playerPromise;
+    drawSpectrogram(spectrogramCanvas!, new Float32Array(0));
 
     console.log('Stopped playing audio');
 }

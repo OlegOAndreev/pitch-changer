@@ -252,3 +252,9 @@ h1 {
     height: 30px;
     border-radius: 6px;
 }
+
+#spectrogram-canvas {
+    width: 350px;
+    height: 125px;
+    margin-top: 20px;
+}

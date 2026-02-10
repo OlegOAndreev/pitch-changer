@@ -2,6 +2,9 @@
 
 import * as Comlink from 'comlink';
 
+const HISTOGRAM_SIZE = 2048;
+const HISTOGRAM_INTERVAL = 50; // ms
+
 import initWasmModule, { Float32Vec, get_settings, MultiPitchShifter, MultiTimeStretcher, PitchShiftParams, SpectralHistogram, TimeStretchParams } from '../wasm/build/wasm_main_module';
 import type { HistogramCallback, WorkerApi, WorkerParams } from './audio-processor';
 import { Float32RingBuffer, pushAllRingBuffer } from './sync';
@@ -41,8 +44,6 @@ class WorkerImpl implements WorkerApi {
         // Clean the state if previous process() was aborted.
         this.getProcessor(input.sampleRate, input.numChannels).reset();
 
-        const HISTOGRAM_SIZE = 4096;
-        const HISTOGRAM_INTERVAL = 250; // ms
         const spectralHistogram = new SpectralHistogram(HISTOGRAM_SIZE);
         const histogramInputVec = new Float32Vec(HISTOGRAM_SIZE * input.numChannels);
         const histogramOutputVec = new Float32Vec(0);
