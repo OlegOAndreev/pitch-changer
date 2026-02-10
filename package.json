@@ -17,6 +17,7 @@
     "clippy": "cd wasm && cargo clippy"
   },
   "dependencies": {
+    "@fortawesome/fontawesome-free": "^7.1.0",
     "@mediabunny/mp3-encoder": "^1.27.3",
     "coi-serviceworker": "^0.1.7",
     "comlink": "^4.4.2",

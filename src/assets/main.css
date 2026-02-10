@@ -66,13 +66,13 @@ h1 {
 }
 
 .small-control-btn span.emoji {
-    font-size: 24px;
+    font-size: 22px;
     margin-bottom: 2px;
 }
 
 #record-btn span.emoji {
     color: #c62828;
-    font-size: 56px;
+    font-size: 40px;
 }
 
 #record-btn.recording {
@@ -82,7 +82,7 @@ h1 {
 
 #play-btn span.emoji {
     color: #388e3c;
-    font-size: 42px;
+    font-size: 40px;
 }
 
 #play-btn.playing {
@@ -90,13 +90,8 @@ h1 {
     box-shadow: 0 0 4px #2e7d32;
 }
 
-#play-btn.playing span.emoji {
-    font-size: 56px;
-}
-
 #play-btn:disabled span.emoji {
     color: #aaaaaa;
-    font-size: 42px;
 }
 
 #message-row {

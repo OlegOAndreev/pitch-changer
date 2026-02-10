@@ -7,6 +7,7 @@
     <title>Pitch Changer</title>
     <link rel="stylesheet" href="/src/assets/main.css" />
     <link rel="icon" href="data:;base64,=" />
+    <link href="node_modules/@fortawesome/fontawesome-free/css/all.min.css" rel="stylesheet" />
 
     <!-- This file should not be bundled -->
     <script src="coi-serviceworker.min.js" data-external></script>
@@ -17,16 +18,20 @@
     <div id="content-container" style="visibility: hidden;">
         <h1>Pitch Changer</h1>
         <div id="big-buttons-row">
-            <button id="record-btn" class="big-control-btn control-btn" title="Record"><span id="record-btn-emoji"
-                    class="emoji">⏺</span></button>
-            <button id="play-btn" class="big-control-btn control-btn" title="Play" disabled="true"><span
-                    id="play-btn-emoji" class="emoji">▶</span></button>
+            <button id="record-btn" class="big-control-btn control-btn" title="Record">
+                <span id="record-btn-emoji" class="emoji fa-solid fa-microphone"></span>
+            </button>
+            <button id="play-btn" class="big-control-btn control-btn" title="Play" disabled="true">
+                <span id="play-btn-emoji" class="emoji fa-solid fa-play"></span>
+            </button>
         </div>
         <div id="small-buttons-row">
-            <button id="load-btn" class="small-control-btn control-btn" title="Load"><span
-                    class="emoji">🡅</span><br>Load</button>
-            <button id="save-btn" class="small-control-btn control-btn" title="Save" disabled="true"><span
-                    class="emoji">🡇</span><br>Save</button>
+            <button id="load-btn" class="small-control-btn control-btn" title="Load">
+                <span class="emoji fa-solid fa-upload"></span><br>Load
+            </button>
+            <button id="save-btn" class="small-control-btn control-btn" title="Save" disabled="true">
+                <span class="emoji fa-solid fa-download"></span><br>Save
+            </button>
         </div>
         <div id="mode-row">
             <div class="radio-option">

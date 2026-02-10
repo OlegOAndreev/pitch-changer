@@ -119,8 +119,11 @@ appState.initProcessor();
 const contentContainer = getById<HTMLDivElement>('content-container');
 const recordBtn = getById<HTMLButtonElement>('record-btn');
 const recordBtnEmoji = getById<HTMLButtonElement>('record-btn-emoji');
+const recordingBtnClass = 'fa-microphone';
+const stopBtnClass = 'fa-stop';
 const playBtn = getById<HTMLButtonElement>('play-btn');
 const playBtnEmoji = getById<HTMLButtonElement>('play-btn-emoji');
+const playingBtnClass = 'fa-play';
 const loadBtn = getById<HTMLButtonElement>('load-btn');
 const saveBtn = getById<HTMLButtonElement>('save-btn');
 const pitchSlider = getById<HTMLInputElement>('pitch-slider');
@@ -138,7 +141,8 @@ async function onBeforeSourceAudioDataSet() {
     recordBtn.disabled = true;
     loadBtn.disabled = true;
     playBtn.disabled = true;
-    playBtnEmoji.textContent = '▶';
+    playBtnEmoji.classList.remove(stopBtnClass);
+    playBtnEmoji.classList.add(playingBtnClass);
     playBtn.title = 'Play';
     playBtn.classList.remove('playing');
     saveBtn.disabled = true;
@@ -190,16 +194,18 @@ async function handleRecordClick(): Promise<void> {
 
         sourceLabel.textContent = 'Recording...';
         recordBtn.disabled = false;
-        recordBtnEmoji.textContent = '⏹';
         recordBtn.title = 'Stop';
         recordBtn.classList.add('recording');
+        recordBtnEmoji.classList.remove(recordingBtnClass);
+        recordBtnEmoji.classList.add(stopBtnClass);
 
         appState.sourceAudio = await recorder.record();
 
         sourceLabel.textContent = `Recorded ${secondsToString(getAudioSeconds(appState.sourceAudio))}`;
-        recordBtnEmoji.textContent = '⏺';
         recordBtn.title = 'Record';
         recordBtn.classList.remove('recording');
+        recordBtnEmoji.classList.remove(stopBtnClass);
+        recordBtnEmoji.classList.add(recordingBtnClass);
 
         onAfterSourceAudioDataSet();
     } else {
@@ -251,15 +257,17 @@ async function handlePlayClick(): Promise<void> {
             return;
         }
 
-        playBtnEmoji.textContent = '⏹';
+        playBtnEmoji.classList.remove(playingBtnClass);
+        playBtnEmoji.classList.add(stopBtnClass);
         playBtn.title = 'Pause';
         playBtn.classList.add('playing');
 
         await runPlay(player);
 
-        playBtnEmoji.textContent = '▶';
         playBtn.title = 'Play';
         playBtn.classList.remove('playing');
+        playBtnEmoji.classList.remove(stopBtnClass);
+        playBtnEmoji.classList.add(playingBtnClass);
     } else {
         player.stop();
     }
