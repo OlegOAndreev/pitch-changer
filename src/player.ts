@@ -1,9 +1,11 @@
-import playerProcessorUrl from './player-processor.ts?url';
+import playerProcessor from './player-processor.ts?worker&url';
+
 import { CountDownLatch, Float32RingBuffer } from './sync';
 
 // Exported only for player-processor.ts
 export const playerProcessorName = 'player-processor';
 
+// Options for configuring the player audio worklet processor
 export interface PlayerProcessorOptions {
     ringBufferSab: SharedArrayBuffer;
     latchSab: SharedArrayBuffer;
@@ -12,6 +14,7 @@ export interface PlayerProcessorOptions {
 
 let moduleInitialized = false;
 
+// Player for streaming interleaved audio through AudioWorklet
 export class Player {
     readonly audioContext: AudioContext;
     private ringBuffer: Float32RingBuffer | null = null;
@@ -24,8 +27,8 @@ export class Player {
     // Workaround for lack of async constructors
     static async create(audioContext: AudioContext): Promise<Player> {
         if (!moduleInitialized) {
-            console.log(`Initializing processor module ${playerProcessorUrl}`)
-            await audioContext.audioWorklet.addModule(playerProcessorUrl);
+            console.log(`Initializing processor player module`)
+            await audioContext.audioWorklet.addModule(playerProcessor);
             moduleInitialized = true;
         }
         return new Player(audioContext);

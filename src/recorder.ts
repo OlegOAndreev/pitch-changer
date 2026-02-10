@@ -1,4 +1,5 @@
-import recorderProcessorUrl from './recorder-processor.ts?url';
+import recorderProcessor from './recorder-processor.ts?worker&url';
+
 import { drainRingBuffer, Float32RingBuffer } from './sync';
 import type { InterleavedAudio } from './types';
 
@@ -7,6 +8,7 @@ const RING_BUFFER_CAPACITY = 1 << 18;
 
 // Exported only for recorder-processor.ts
 export const recorderProcessorName = 'recorder-processor';
+
 export interface RecorderProcessorOptions {
     ringBufferSab: SharedArrayBuffer
 }
@@ -25,8 +27,8 @@ export class Recorder {
     // Workaround for lack of async constructors
     static async create(audioContext: AudioContext): Promise<Recorder> {
         if (!moduleInitialized) {
-            console.log(`Initializing processor module ${recorderProcessorUrl}`)
-            await audioContext.audioWorklet.addModule(recorderProcessorUrl);
+            console.log(`Initializing recorder processor module`)
+            await audioContext.audioWorklet.addModule(recorderProcessor);
             moduleInitialized = true;
         }
         return new Recorder(audioContext);
