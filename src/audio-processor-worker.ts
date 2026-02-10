@@ -96,30 +96,27 @@ class WorkerImpl implements WorkerApi {
         if (this.processor) {
             this.processor.free();
         }
-        try {
-            if (this.params.processingMode === 'pitch') {
-                const params = new PitchShiftParams(sampleRate, this.params.pitchValue);
-                try {
-                    this.processor = new MultiPitchShifter(params, numChannels);
-                    console.log(`Created MultiPitchShifter with ${params.to_debug_string()}, numChannels ${numChannels}`);
-                } finally {
-                    params.free();
-                }
-            } else {
-                const params = new TimeStretchParams(sampleRate, this.params.pitchValue);
-                try {
-                    this.processor = new MultiTimeStretcher(params, numChannels);
-                    console.log(`Created MultiTimeStretcher with ${params.to_debug_string()}, numChannels ${numChannels}`);
-                } finally {
-                    params.free();
-                }
+        if (this.params.processingMode === 'pitch') {
+            const params = new PitchShiftParams(sampleRate, this.params.pitchValue);
+            try {
+                this.processor = new MultiPitchShifter(params, numChannels);
+                console.log(`Created MultiPitchShifter with ${params.to_debug_string()}, numChannels ${numChannels}`);
+            } finally {
+                params.free();
             }
-            this.paramsDirty = false;
-            this.processorSampleRate = sampleRate;
-            this.processorNumChannels = numChannels;
-            return this.processor!;
-        } finally {
+        } else {
+            const params = new TimeStretchParams(sampleRate, this.params.pitchValue);
+            try {
+                this.processor = new MultiTimeStretcher(params, numChannels);
+                console.log(`Created MultiTimeStretcher with ${params.to_debug_string()}, numChannels ${numChannels}`);
+            } finally {
+                params.free();
+            }
         }
+        this.paramsDirty = false;
+        this.processorSampleRate = sampleRate;
+        this.processorNumChannels = numChannels;
+        return this.processor!;
     }
 }
 

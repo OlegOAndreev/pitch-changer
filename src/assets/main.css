@@ -57,12 +57,14 @@ h1 {
     width: 100px;
     height: 100px;
     border-radius: 12px;
+    cursor: pointer;
 }
 
 .small-control-btn {
     width: 90px;
     height: 80px;
     border-radius: 12px;
+    cursor: pointer;
 }
 
 .small-control-btn span.emoji {
@@ -151,17 +153,20 @@ h1 {
     display: flex;
     align-items: center;
     gap: 4px;
+    cursor: pointer;
 }
 
 .radio-option input[type="radio"] {
     /* accent-color: #777777; */
     width: 16px;
     height: 16px;
+    cursor: pointer;
 }
 
 .radio-option label {
     font-size: 14px;
     color: #444444;
+    cursor: pointer;
 }
 
 #slider-row {
@@ -252,4 +257,47 @@ h1 {
     width: 350px;
     height: 125px;
     margin-top: 20px;
+}
+
+#debug-toggle-btn {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 36px;
+    height: 36px;
+    border-radius: 25%;
+    background-color: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(0, 0, 0, 0.3);
+    color: #000;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.35;
+    z-index: 9999;
+}
+
+/* Debug panel */
+.debug-panel {
+    position: fixed;
+    bottom: 70px;
+    right: 20px;
+    width: 450px;
+    max-height: 500px;
+    background-color: white;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#debug-info {
+    padding: 16px;
+    font-size: 13px;
+    overflow-y: auto;
+    flex-grow: 1;
+    white-space: pre-line;
 }

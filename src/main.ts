@@ -1,3 +1,4 @@
+import initWasmModule, { get_settings } from '../wasm/build/wasm_main_module';
 import { AudioProcessor } from './audio-processor';
 import { decodeAudioFromBlob } from './media-decoder';
 import { encodeAudioToBlob } from './media-encoder';
@@ -109,8 +110,9 @@ class AppState {
     }
 }
 
+await initWasmModule();
 const appState = new AppState();
-appState.initProcessor();
+await appState.initProcessor();
 
 //
 // UI elements
@@ -135,6 +137,11 @@ const processingSpinner = getById<HTMLDivElement>('processing-spinner');
 const processingLabel = getById<HTMLDivElement>('processing-label');
 const fileInput = getById<HTMLInputElement>('file-input');
 const spectrogramCanvas = getById<HTMLCanvasElement>('spectrogram-canvas');
+
+// Debug UI elements
+const debugToggleBtn = getById<HTMLButtonElement>('debug-toggle-btn');
+const debugPanel = getById<HTMLDivElement>('debug-panel');
+const debugInfo = getById<HTMLSpanElement>('debug-info');
 
 // Reset all buttons to default state
 async function onBeforeSourceAudioDataSet() {
@@ -370,6 +377,21 @@ function handlePitchSliderInput(): void {
     appState.updateSettings();
 }
 
+async function handleDebugPanelClick() {
+    if (debugPanel.style.display === 'none') {
+        let info = `User-agent: ${navigator.userAgent}\n\ndevicePixelRatio: ${window.devicePixelRatio}`;
+        try {
+            info += `\n\nWASM settings: ${get_settings()}`;
+        } catch (error) {
+            info += `\n\nWASM error: ${error}`;
+        }
+        debugInfo.textContent = info;
+        debugPanel.style.display = 'flex';
+    } else {
+        debugPanel.style.display = 'none';
+    }
+}
+
 recordBtn.addEventListener('click', () => handleRecordClick());
 playBtn.addEventListener('click', () => handlePlayClick());
 loadBtn.addEventListener('click', () => handleLoadClick());
@@ -384,3 +406,4 @@ fileInput.addEventListener('change', withButtonsDisabled([loadBtn], async () => 
     }
     await handleFileInputChange(file);
 }));
+debugToggleBtn.addEventListener('click', () => handleDebugPanelClick());
