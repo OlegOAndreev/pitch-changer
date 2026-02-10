@@ -1,7 +1,6 @@
 mod histogram;
 mod phase_gradient_time_stretch;
 mod pitch_shifter;
-mod resampler;
 mod stft;
 mod time_stretcher;
 mod util;

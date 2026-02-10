@@ -14,9 +14,7 @@ anyhow = "1.0"
 js-sys = "0.3"
 wasm-bindgen = "=0.2.108"
 realfft = { version = "3.5", features = ["wasm_simd"] }
-rubato = "1.0"
-audioadapter = "2.0"
-audioadapter-buffers = "2.0"
+lanczos-resampler = "0.4"
 
 [dev-dependencies]
 argh = "0.1"

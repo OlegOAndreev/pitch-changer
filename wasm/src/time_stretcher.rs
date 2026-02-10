@@ -406,7 +406,7 @@ mod tests {
     #[test]
     fn test_time_stretch_single_sine_wave() -> Result<()> {
         const DURATION: f32 = 0.5;
-        const MAGNITUDE: f32 = 3.2;
+        const MAGNITUDE: f32 = 0.37;
 
         for sample_rate in [44100.0, 96000.0] {
             for input_freq in [200.0, 500.0, 800.0, 5000.0] {
@@ -493,7 +493,7 @@ mod tests {
     #[test]
     fn test_time_stretch_identity() -> Result<()> {
         const FREQ: f32 = 440.0;
-        const MAGNITUDE: f32 = 2.2;
+        const MAGNITUDE: f32 = 0.22;
         const DURATION: f32 = 1.0;
 
         for sample_rate in [44100.0, 96000.0] {
@@ -561,7 +561,7 @@ mod tests {
     #[test]
     fn test_multi_time_stretch_single_sine_wave() -> Result<()> {
         const DURATION: f32 = 0.5;
-        const MAGNITUDE: f32 = 3.2;
+        const MAGNITUDE: f32 = 0.32;
         const SAMPLE_RATE: f32 = 48000.0;
         const OVERLAP: u32 = 8;
         const WINDOW_TYPE: WindowType = WindowType::SqrtHann;
