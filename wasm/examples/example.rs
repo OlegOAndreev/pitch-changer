@@ -7,8 +7,8 @@ use hound::{WavSpec, WavWriter};
 use plotters::prelude::*;
 
 use wasm_main_module::{
-    PitchShiftParams, PitchShifter, TimeStretchParams, TimeStretcher, WindowType, compute_dominant_frequency,
-    generate_sine_wave,
+    MultiPitchShifter, MultiTimeStretcher, PitchShiftParams, TimeStretchParams, WindowType, compute_dominant_frequency,
+    generate_sine_wave, interleave_samples,
 };
 
 fn parse_window_type(s: &str) -> Result<WindowType> {
@@ -21,8 +21,25 @@ fn parse_window_type(s: &str) -> Result<WindowType> {
 }
 
 struct AudioContents {
+    /// Interleaved audio data: [ch0s0, ch1s0, ch2s0, ch0s1, ch1s1, ...]
     data: Vec<f32>,
     sample_rate: u32,
+    channels: usize,
+}
+
+impl AudioContents {
+    /// Get the first channel data (mono) for plotting and frequency analysis
+    fn first_channel(&self) -> Vec<f32> {
+        if self.channels == 1 {
+            return self.data.clone();
+        }
+        let num_samples = self.data.len() / self.channels;
+        let mut result = Vec::with_capacity(num_samples);
+        for i in 0..num_samples {
+            result.push(self.data[i * self.channels]);
+        }
+        result
+    }
 }
 
 fn load_file(filename: &str) -> Result<AudioContents> {
@@ -55,45 +72,35 @@ fn load_file(filename: &str) -> Result<AudioContents> {
 
     let mut data = Vec::new();
     let mut sample_rate = 0;
+    let mut channels = 0;
 
     while let Ok(packet) = format.next_packet() {
         let decoded = decoder.decode(&packet).context("failed decoding")?;
         if sample_rate == 0 {
             sample_rate = decoded.spec().rate;
+            channels = decoded.spec().channels.count();
         } else if sample_rate != decoded.spec().rate {
             bail!("File contains multiple sample rates in one track: {} vs {}", sample_rate, decoded.spec().rate);
+        } else if channels != decoded.spec().channels.count() {
+            bail!("File contains varying channel counts: {} vs {}", channels, decoded.spec().channels.count());
         }
 
-        let channels = decoded.spec().channels.count();
         let frames = decoded.frames();
 
         match decoded {
             symphonia::core::audio::AudioBufferRef::F32(buf) => {
-                if channels == 1 {
-                    data.extend_from_slice(buf.chan(0));
-                } else {
-                    for i in 0..frames {
-                        let mut sum = 0.0;
-                        for ch in 0..channels {
-                            sum += buf.chan(ch)[i];
-                        }
-                        data.push(sum / channels as f32);
+                // Store interleaved
+                for i in 0..frames {
+                    for ch in 0..channels {
+                        data.push(buf.chan(ch)[i]);
                     }
                 }
             }
             symphonia::core::audio::AudioBufferRef::S16(buf) => {
-                if channels == 1 {
-                    let ch = buf.chan(0);
-                    for i in 0..frames {
-                        data.push(ch[i] as f32 / 32768.0);
-                    }
-                } else {
-                    for i in 0..frames {
-                        let mut sum = 0.0;
-                        for ch in 0..channels {
-                            sum += buf.chan(ch)[i] as f32 / 32768.0;
-                        }
-                        data.push(sum / channels as f32);
+                // Store interleaved, convert to f32
+                for i in 0..frames {
+                    for ch in 0..channels {
+                        data.push(buf.chan(ch)[i] as f32 / 32768.0);
                     }
                 }
             }
@@ -107,20 +114,32 @@ fn load_file(filename: &str) -> Result<AudioContents> {
         bail!("No audio data found in file");
     }
 
-    println!("Loaded {}: {} samples at {} Hz", filename, data.len(), sample_rate);
+    println!(
+        "Loaded {}: {} samples, {} channels, {} Hz ({} samples per channel)",
+        filename,
+        data.len(),
+        channels,
+        sample_rate,
+        data.len() / channels
+    );
 
-    Ok(AudioContents { data, sample_rate })
+    Ok(AudioContents { data, sample_rate, channels })
 }
 
-fn save_wav(data: &[f32], sample_rate: u32, filename: &str) -> Result<()> {
-    let spec = WavSpec { channels: 1, sample_rate, bits_per_sample: 32, sample_format: hound::SampleFormat::Float };
+fn save_wav(data: &[f32], sample_rate: u32, channels: usize, filename: &str) -> Result<()> {
+    let spec = WavSpec {
+        channels: channels as u16,
+        sample_rate,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
 
     let mut writer = WavWriter::create(filename, spec)?;
     for &sample in data {
         writer.write_sample(sample)?;
     }
     writer.finalize()?;
-    println!("WAV file saved to: {}", filename);
+    println!("WAV file saved to: {} ({} channels)", filename, channels);
     Ok(())
 }
 
@@ -260,6 +279,10 @@ struct Generate {
     #[argh(option, default = "3.0")]
     duration: f32,
 
+    /// number of channels (default: 1)
+    #[argh(option, default = "1")]
+    channels: usize,
+
     /// output WAV file path
     #[argh(option, default = "\"sine_wave.wav\".to_string()")]
     output: String,
@@ -335,12 +358,31 @@ fn main() -> Result<()> {
     let cli: Cli = argh::from_env();
 
     match cli.command {
-        Commands::Generate(Generate { frequency, sample_rate, duration, output }) => {
-            println!("Generating sine wave: {} Hz, {} samples/sec, {} seconds", frequency, sample_rate, duration);
-            let sine_wave = generate_sine_wave(frequency, sample_rate, 1.0, duration);
-            println!("Generated {} samples", sine_wave.len());
+        Commands::Generate(Generate { frequency, sample_rate, duration, channels, output }) => {
+            println!(
+                "Generating sine wave: {} Hz, {} samples/sec, {} seconds, {} channels",
+                frequency, sample_rate, duration, channels
+            );
+            let mut sine_wave = Vec::new();
+            for ch in 0..channels {
+                // Generate same frequency for all channels (could be modified)
+                let channel_data = generate_sine_wave(frequency, sample_rate, 1.0, duration);
+                if ch == 0 {
+                    sine_wave = channel_data;
+                } else {
+                    sine_wave.extend(channel_data);
+                }
+            }
+            // Interleave the channels
+            let mut interleaved_sine = Vec::with_capacity(sine_wave.len());
+            interleave_samples(&sine_wave, channels, &mut interleaved_sine);
+            println!(
+                "Generated {} samples ({} per channel)",
+                interleaved_sine.len(),
+                interleaved_sine.len() / channels
+            );
 
-            save_wav(&sine_wave, sample_rate as u32, &output)?;
+            save_wav(&interleaved_sine, sample_rate as u32, channels, &output)?;
         }
 
         Commands::TimeStretch(TimeStretch {
@@ -356,20 +398,21 @@ fn main() -> Result<()> {
             let input = load_file(&input_path).with_context(|| format!("loading {} failed", input_path))?;
             println!("Loading {} took {}ms", input_path, Instant::now().duration_since(start_time).as_millis());
 
-            println!("Time stretching {}: {} Hz, stretch: {}", input_path, input.sample_rate, stretch);
+            println!(
+                "Time stretching {}: {} Hz, {} channels, stretch: {}",
+                input_path, input.sample_rate, input.channels, stretch
+            );
 
             let window_type = parse_window_type(&window)?;
             let mut params = TimeStretchParams::new(input.sample_rate, stretch);
             params.overlap = overlap;
             params.fft_size = fft_size;
             params.window_type = window_type;
-            let mut stretcher = TimeStretcher::new(&params)?;
 
-            start_time = Instant::now();
-            // let mut output_data = shifter.process(&input.data);
             let mut output_data = vec![];
-            // Use fft_size - 1 for chunks to test edge cases.
-            for chunk in input.data.chunks(fft_size - 1) {
+            let mut stretcher = MultiTimeStretcher::new(&params, input.channels)?;
+            start_time = Instant::now();
+            for chunk in input.data.chunks((fft_size - 1) * input.channels) {
                 stretcher.process_vec(chunk, &mut output_data);
             }
             stretcher.finish_vec(&mut output_data);
@@ -379,17 +422,30 @@ fn main() -> Result<()> {
                 Instant::now().duration_since(start_time).as_millis()
             );
 
-            save_wav(&output_data, input.sample_rate, &output_path)
+            save_wav(&output_data, input.sample_rate, input.channels, &output_path)
                 .with_context(|| format!("saving {} failed", output_path))?;
 
-            let input_freq = compute_dominant_frequency(&input.data, input.sample_rate as f32);
-            println!("Input dominant frequency: {:.2} Hz", input_freq);
-            let output_freq = compute_dominant_frequency(&output_data, input.sample_rate as f32);
-            println!("Output dominant frequency: {:.2} Hz", output_freq);
+            // Compute dominant frequency on first channel
+            let input_first = input.first_channel();
+            let output_first = if input.channels == 1 {
+                output_data.clone()
+            } else {
+                let num_samples = output_data.len() / input.channels;
+                let mut result = Vec::with_capacity(num_samples);
+                for i in 0..num_samples {
+                    result.push(output_data[i * input.channels]);
+                }
+                result
+            };
+
+            let input_freq = compute_dominant_frequency(&input_first, input.sample_rate as f32);
+            println!("Input dominant frequency (first channel): {:.2} Hz", input_freq);
+            let output_freq = compute_dominant_frequency(&output_first, input.sample_rate as f32);
+            println!("Output dominant frequency (first channel): {:.2} Hz", output_freq);
 
             if plot {
                 let plot_filename = output_path.replace(".wav", "_plot.svg");
-                save_plot_data_svg(&input.data, &output_data, input.sample_rate, &plot_filename)
+                save_plot_data_svg(&input_first, &output_first, input.sample_rate, &plot_filename)
                     .with_context(|| format!("saving plot {} failed", plot_filename))?;
             }
         }
@@ -407,20 +463,21 @@ fn main() -> Result<()> {
             let input = load_file(&input_path).with_context(|| format!("loading {} failed", input_path))?;
             println!("Loading {} took {}ms", input_path, Instant::now().duration_since(start_time).as_millis());
 
-            println!("Pitch shifting {}: {} Hz, stretch: {}", input_path, input.sample_rate, shift);
+            println!(
+                "Pitch shifting {}: {} Hz, {} channels, shift: {}",
+                input_path, input.sample_rate, input.channels, shift
+            );
 
             let window_type = parse_window_type(&window)?;
             let mut params = PitchShiftParams::new(input.sample_rate, shift);
             params.overlap = overlap;
             params.fft_size = fft_size;
             params.window_type = window_type;
-            let mut shifter = PitchShifter::new(&params)?;
 
-            start_time = Instant::now();
-            // let mut output_data = shifter.process(&input.data);
             let mut output_data = vec![];
-            // Use fft_size - 1 for chunks to test edge cases.
-            for chunk in input.data.chunks(fft_size - 1) {
+            let mut shifter = MultiPitchShifter::new(&params, input.channels)?;
+            start_time = Instant::now();
+            for chunk in input.data.chunks((fft_size - 1) * input.channels) {
                 shifter.process_vec(chunk, &mut output_data);
             }
             shifter.finish_vec(&mut output_data);
@@ -430,17 +487,30 @@ fn main() -> Result<()> {
                 Instant::now().duration_since(start_time).as_millis()
             );
 
-            save_wav(&output_data, input.sample_rate, &output_path)
+            save_wav(&output_data, input.sample_rate, input.channels, &output_path)
                 .with_context(|| format!("saving {} failed", output_path))?;
 
-            let input_freq = compute_dominant_frequency(&input.data, input.sample_rate as f32);
-            println!("Input dominant frequency: {:.2} Hz", input_freq);
-            let output_freq = compute_dominant_frequency(&output_data, input.sample_rate as f32);
-            println!("Output dominant frequency: {:.2} Hz", output_freq);
+            // Compute dominant frequency on first channel
+            let input_first = input.first_channel();
+            let output_first = if input.channels == 1 {
+                output_data.clone()
+            } else {
+                let num_samples = output_data.len() / input.channels;
+                let mut result = Vec::with_capacity(num_samples);
+                for i in 0..num_samples {
+                    result.push(output_data[i * input.channels]);
+                }
+                result
+            };
+
+            let input_freq = compute_dominant_frequency(&input_first, input.sample_rate as f32);
+            println!("Input dominant frequency (first channel): {:.2} Hz", input_freq);
+            let output_freq = compute_dominant_frequency(&output_first, input.sample_rate as f32);
+            println!("Output dominant frequency (first channel): {:.2} Hz", output_freq);
 
             if plot {
                 let plot_filename = output_path.replace(".wav", "_plot.svg");
-                save_plot_data_svg(&input.data, &output_data, input.sample_rate, &plot_filename)
+                save_plot_data_svg(&input_first, &output_first, input.sample_rate, &plot_filename)
                     .with_context(|| format!("saving plot {} failed", plot_filename))?;
             }
         }

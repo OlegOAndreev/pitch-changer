@@ -8,9 +8,11 @@ mod util;
 mod web;
 mod window;
 
-pub use pitch_shifter::{PitchShiftParams, PitchShifter};
-pub use time_stretcher::{TimeStretchParams, TimeStretcher};
-pub use util::{compute_dominant_frequency, compute_magnitude, generate_sine_wave};
+pub use pitch_shifter::{MultiPitchShifter, PitchShiftParams, PitchShifter};
+pub use time_stretcher::{MultiTimeStretcher, TimeStretchParams, TimeStretcher};
+pub use util::{
+    compute_dominant_frequency, compute_magnitude, deinterleave_samples, generate_sine_wave, interleave_samples,
+};
 pub use window::WindowType;
 
 // Original source: https://github.com/OlegOAndreev/scratch/blob/master/audio-stretch/audio-stretch.cpp. Unlike the
