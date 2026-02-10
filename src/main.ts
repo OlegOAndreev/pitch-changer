@@ -381,7 +381,8 @@ async function handleDebugPanelClick() {
     if (debugPanel.style.display === 'none') {
         let info = `User-agent: ${navigator.userAgent}\n\ndevicePixelRatio: ${window.devicePixelRatio}`;
         try {
-            info += `\n\nWASM settings: ${get_settings()}`;
+            const wasm = await initWasmModule();
+            info += `\n\nWASM settings: ${get_settings()}\n\nWASM memory: ${wasm.memory.buffer.byteLength}`;
         } catch (error) {
             info += `\n\nWASM error: ${error}`;
         }
@@ -407,4 +408,6 @@ fileInput.addEventListener('change', withButtonsDisabled([loadBtn], async () => 
     await handleFileInputChange(file);
 }));
 debugToggleBtn.addEventListener('click', () => handleDebugPanelClick());
+debugPanel.addEventListener('click', () => navigator.clipboard.writeText(debugInfo.textContent));
+debugInfo.addEventListener('click', () => navigator.clipboard.writeText(debugInfo.textContent));
 setupCanvasEvents(spectrogramCanvas);
