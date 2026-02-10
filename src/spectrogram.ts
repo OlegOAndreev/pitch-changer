@@ -40,5 +40,5 @@ export function drawSpectrogram(canvas: HTMLCanvasElement, audioData: Float32Arr
 export function clearSpectrogram(canvas: HTMLCanvasElement) {
     const { width, height } = canvas.getBoundingClientRect();
     const canvasCtx = canvas.getContext('2d')!;
-    canvasCtx.clearRect(0, 0, width, height + 0.5);
+    canvasCtx.clearRect(0, 0, width + 1.0, height + 1.0);
 }
