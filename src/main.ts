@@ -5,7 +5,7 @@ import { encodeAudioToBlob } from './media-encoder';
 import { Player } from './player';
 import { Recorder } from './recorder';
 import { saveFile, showSaveDialog } from './save-dialog';
-import { clearSpectrogram, drawSpectrogram, setupCanvasEvents, SPECTROGRAM_SIZE } from './spectrogram';
+import { Spectrogram } from './spectrogram';
 import { drainRingBuffer, Float32RingBuffer } from './sync';
 import { getAudioLength, getAudioSeconds, type InterleavedAudio } from './types';
 import { debounce, getById, secondsToString, withButtonsDisabled } from './utils';
@@ -48,6 +48,7 @@ class AppState {
     // Audio data
     sourceAudio: InterleavedAudio | null = null;
     processor: AudioProcessor = new AudioProcessor();
+    spectrogram: Spectrogram | null = null;
 
     // Audio player and recorder are lazy initialized because they affect the browser (and OS) UI
     private audioContext: AudioContext | null = null;
@@ -189,6 +190,7 @@ function applySettingsToUI(settings: AppSettings): void {
 }
 
 applySettingsToUI(appState.settings);
+appState.spectrogram = new Spectrogram(spectrogramCanvas);
 
 //
 // Event handlers
@@ -223,9 +225,10 @@ async function handleRecordClick(): Promise<void> {
 async function runPlay(player: Player): Promise<void> {
     const SPECTROGRAM_INTERVAL = 30; // ms
 
+    const sampleRate = appState.sourceAudio!.sampleRate;
     const numChannels = appState.sourceAudio!.numChannels;
     // Use smaller ring buffer of 0.5s. This means we react faster to changes in ratio or processing mode.
-    const bufferSize = appState.sourceAudio!.sampleRate * numChannels / 2;
+    const bufferSize = sampleRate * numChannels / 2;
 
     console.log(`Start playing audio with buffer size ${bufferSize}`);
     const buffer = Float32RingBuffer.withCapacity(bufferSize);
@@ -242,8 +245,8 @@ async function runPlay(player: Player): Promise<void> {
     const playerPromise = player.play(buffer, numChannels);
 
     const spectrogramTimer = setInterval(() => {
-        const latestData = player.getLatestSamples(SPECTROGRAM_SIZE, numChannels);
-        drawSpectrogram(spectrogramCanvas!, latestData, numChannels);
+        const latestData = player.getLatestSamples(appState.spectrogram!.getSamples(), numChannels);
+        appState.spectrogram!.draw(latestData, numChannels, sampleRate);
     }, SPECTROGRAM_INTERVAL);
 
     // We do not need to wait for this promise, but let's do it for symmetry.
@@ -251,7 +254,7 @@ async function runPlay(player: Player): Promise<void> {
     await playerPromise;
 
     clearInterval(spectrogramTimer);
-    clearSpectrogram(spectrogramCanvas!);
+    appState.spectrogram!.clear();
 
     console.log('Stopped playing audio');
 }
@@ -410,4 +413,3 @@ fileInput.addEventListener('change', withButtonsDisabled([loadBtn], async () => 
 debugToggleBtn.addEventListener('click', () => handleDebugPanelClick());
 debugPanel.addEventListener('click', () => navigator.clipboard.writeText(debugInfo.textContent));
 debugInfo.addEventListener('click', () => navigator.clipboard.writeText(debugInfo.textContent));
-setupCanvasEvents(spectrogramCanvas);
