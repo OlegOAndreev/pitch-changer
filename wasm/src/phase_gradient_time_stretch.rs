@@ -4,7 +4,7 @@ use std::f32::consts::PI;
 use realfft::num_complex::Complex;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct PhaseGradientElem {
+struct PhaseGradientElem {
     pub bin: usize,
     pub magnitude: f32,
 }
@@ -28,7 +28,7 @@ impl Ord for PhaseGradientElem {
 ///
 /// TLDR: Phase of a bin in the current frame can be either computed from phase of the same bin from the previous frame
 /// or from the phase of a neighbor bin of the current frame.
-pub struct PhaseGradientTimeStretch {
+pub(crate) struct PhaseGradientTimeStretch {
     fft_size: usize,
     num_bins: usize,
 
@@ -51,7 +51,7 @@ pub struct PhaseGradientTimeStretch {
 
 impl PhaseGradientTimeStretch {
     /// Create a new phase gradient time stretcher with given FFT size.
-    pub fn new(fft_size: usize) -> Self {
+    pub(crate) fn new(fft_size: usize) -> Self {
         let num_bins = fft_size / 2 + 1;
 
         let prev_magnitudes = vec![0.0; num_bins];
@@ -76,13 +76,13 @@ impl PhaseGradientTimeStretch {
             ana_phases,
             syn_phases,
             prev_max_heap,
-            max_heap
+            max_heap,
             phase_assigned,
         }
     }
 
     /// Process a single STFT frame.
-    pub fn process(
+    pub(crate) fn process(
         &mut self,
         ana_freq: &[Complex<f32>],
         ana_hop_size: usize,
@@ -92,7 +92,7 @@ impl PhaseGradientTimeStretch {
         use crate::util::normalize_phase;
 
         // Ignore the frequencies with magnitude < (max magnitude * MIN_MAGNITUDE_TOLERANCE).
-        const MIN_MAGNITUDE_TOLERANCE: f32 = 1e-5;
+        const MIN_MAGNITUDE_TOLERANCE: f32 = 1e-3;
 
         let freq_size = ana_freq.len();
         assert_eq!(self.num_bins, freq_size);

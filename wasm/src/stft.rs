@@ -49,10 +49,10 @@ impl Stft {
         let window = generate_window(window_type, fft_size);
 
         let input_buf = vec![0.0; fft_size];
-        let input_freq_buf = vec![Complex::new(0.0, 0.0); fft_size / 2 + 1];
+        let input_freq_buf = vec![Complex::ZERO; fft_size / 2 + 1];
         let scratch_forward = forward_plan.make_scratch_vec();
         let output_buf = vec![0.0; fft_size];
-        let output_freq_buf = vec![Complex::new(0.0, 0.0); fft_size / 2 + 1];
+        let output_freq_buf = vec![Complex::ZERO; fft_size / 2 + 1];
         let scratch_inverse = inverse_plan.make_scratch_vec();
 
         Self {

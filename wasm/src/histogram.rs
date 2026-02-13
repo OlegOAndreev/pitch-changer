@@ -1,4 +1,3 @@
-
 use std::sync::Arc;
 
 use realfft::num_complex::Complex;
@@ -9,7 +8,7 @@ use crate::web::Float32Vec;
 /// SpectralHistogram computes the spectral histogram: the magnitudes of FFT bins.
 #[allow(dead_code)]
 #[wasm_bindgen]
-struct SpectralHistogram {
+pub struct SpectralHistogram {
     fft_size: usize,
     forward_plan: Arc<dyn realfft::RealToComplex<f32>>,
     // Scratch buffer
@@ -38,20 +37,27 @@ impl SpectralHistogram {
     /// spectrogram.
     #[wasm_bindgen]
     pub fn compute(&mut self, input: &Float32Vec, num_channels: usize, output: &mut Float32Vec) {
+        self.compute_vec(&input.0, num_channels, &mut output.0);
+    }
+}
+
+// Separate impl to prevent errors with wasm-bindgen.
+impl SpectralHistogram {
+    pub fn compute_vec(&mut self, input: &[f32], num_channels: usize, output: &mut Vec<f32>) {
         output.clear();
         self.input_buf.fill(0.0);
         let len = self.fft_size.min(input.len() / num_channels);
         for i in 0..len {
             for ch in 0..num_channels {
-                self.input_buf[i] += input.0[i * num_channels + ch];
+                self.input_buf[i] += input[i * num_channels + ch];
             }
             self.input_buf[i] /= num_channels as f32;
         }
         self.forward_plan
             .process_with_scratch(&mut self.input_buf, &mut self.output_buf, &mut self.scratch_buf)
             .expect("failed forward STFT pass");
-        output.resize(self.output_buf.len());
-        for (o, freq) in output.0.iter_mut().zip(&self.output_buf) {
+        output.resize(self.output_buf.len(), 0.0);
+        for (o, freq) in output.iter_mut().zip(&self.output_buf) {
             *o = freq.norm();
         }
     }
