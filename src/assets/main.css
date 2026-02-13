@@ -19,16 +19,16 @@ h1 {
 
 #big-buttons-row {
     display: flex;
-    width: 250px;
+    width: 275px;
     justify-content: space-between;
-    margin: 10px;
+    margin: 15px;
 }
 
 #small-buttons-row {
     display: flex;
-    width: 250px;
+    width: 275px;
     justify-content: space-between;
-    margin: 10px;
+    margin: 15px;
 }
 
 .control-btn {
@@ -142,31 +142,45 @@ h1 {
 #mode-row {
     display: flex;
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: center;
     width: 100%;
-    margin-top: 20px;
-    gap: 20px;
+    max-width: 450px;
+    margin-top: 30px;
+    gap: 2px;
 }
 
-.radio-option {
+#mode-row .radio-option {
     display: flex;
     align-items: center;
-    gap: 4px;
-    cursor: pointer;
+    position: relative;
 }
 
-.radio-option input[type="radio"] {
-    /* accent-color: #777777; */
-    width: 16px;
-    height: 16px;
-    cursor: pointer;
+#mode-row .radio-option input[type="radio"] {
+    opacity: 0;
+    width: 0;
+    height: 0;
 }
 
-.radio-option label {
+#mode-row .radio-option label {
     font-size: 14px;
     color: #444444;
     cursor: pointer;
+    padding: 8px 12px;
+    border: 2px solid #aaaaaa;
+    border-radius: 8px;
+    background-color: #fafbfc;
+    font-weight: 500;
+}
+
+#mode-row .radio-option label:hover {
+    background-color: #f0f1f2;
+}
+
+#mode-row .radio-option input[type="radio"]:checked + label {
+    background-color: #e7e8e9;
+    border-color: #999999;
 }
 
 #slider-row {

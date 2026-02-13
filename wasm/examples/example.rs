@@ -7,8 +7,9 @@ use hound::{WavSpec, WavWriter};
 use plotters::prelude::*;
 
 use wasm_main_module::{
-    MultiPitchShifter, MultiTimeStretcher, PitchShiftParams, TimeStretchParams, WindowType, compute_dominant_frequency,
-    generate_sine_wave, interleave_samples,
+    FormantPreservingPitchShifter, FormantPreservingPitchShifterParams, MultiProcessor,
+    PitchShiftParams, PitchShifter, TimeStretchParams, TimeStretcher, WindowType,
+    compute_dominant_frequency, generate_sine_wave, interleave_samples,
 };
 
 fn parse_window_type(s: &str) -> Result<WindowType> {
@@ -21,7 +22,7 @@ fn parse_window_type(s: &str) -> Result<WindowType> {
 }
 
 struct AudioContents {
-    /// Interleaved audio data: [ch0s0, ch1s0, ch2s0, ch0s1, ch1s1, ...]
+    /// Interleaved audio data
     data: Vec<f32>,
     sample_rate: u32,
     channels: usize,
@@ -261,6 +262,7 @@ enum Commands {
     Generate(Generate),
     TimeStretch(TimeStretch),
     PitchShift(PitchShift),
+    FormantPreservingPitchShift(FormantPreservingPitchShift),
 }
 
 /// Generate a sine wave and save it as WAV
@@ -354,6 +356,43 @@ struct PitchShift {
     plot: bool,
 }
 
+/// Apply formant-preserving pitch shift to input
+#[derive(FromArgs)]
+#[argh(subcommand, name = "formant-preserving-pitch-shift")]
+struct FormantPreservingPitchShift {
+    /// input WAV file
+    #[argh(option, default = "\"sine_wave.wav\".to_string()")]
+    input: String,
+
+    /// pitch shift factor (e.g., 2.0 = one octave up, 0.5 = one octave down)
+    #[argh(option, default = "1.0")]
+    shift: f32,
+
+    /// overlap ratio
+    #[argh(option, default = "8")]
+    overlap: u32,
+
+    /// FFT size
+    #[argh(option, default = "4096")]
+    fft_size: usize,
+
+    /// window type: "hann", "sqrt-hann", or "sqrt-blackman"
+    #[argh(option, default = "\"hann\".to_string()")]
+    window: String,
+
+    /// cepstrum cutoff in milliseconds (controls formant preservation, typical range: 1.0-5.0 ms)
+    #[argh(option, default = "2.0")]
+    cepstrum_cutoff_ms: f32,
+
+    /// output WAV file for pitch shifted audio
+    #[argh(option, default = "\"formant_preserved_shifted.wav\".to_string()")]
+    output: String,
+
+    /// save plot comparison SVG
+    #[argh(switch)]
+    plot: bool,
+}
+
 fn main() -> Result<()> {
     let cli: Cli = argh::from_env();
 
@@ -410,12 +449,12 @@ fn main() -> Result<()> {
             params.window_type = window_type;
 
             let mut output_data = vec![];
-            let mut stretcher = MultiTimeStretcher::new(&params, input.channels)?;
+            let mut stretcher = MultiProcessor::<TimeStretcher>::new(&params, input.channels)?;
             start_time = Instant::now();
             for chunk in input.data.chunks((fft_size - 1) * input.channels) {
-                stretcher.process_vec(chunk, &mut output_data);
+                stretcher.process(chunk, &mut output_data);
             }
-            stretcher.finish_vec(&mut output_data);
+            stretcher.finish(&mut output_data);
             println!(
                 "Output generated: {} samples in {}ms",
                 output_data.len(),
@@ -475,12 +514,79 @@ fn main() -> Result<()> {
             params.window_type = window_type;
 
             let mut output_data = vec![];
-            let mut shifter = MultiPitchShifter::new(&params, input.channels)?;
+            let mut shifter = MultiProcessor::<PitchShifter>::new(&params, input.channels)?;
             start_time = Instant::now();
             for chunk in input.data.chunks((fft_size - 1) * input.channels) {
-                shifter.process_vec(chunk, &mut output_data);
+                shifter.process(chunk, &mut output_data);
             }
-            shifter.finish_vec(&mut output_data);
+            shifter.finish(&mut output_data);
+            println!(
+                "Output generated: {} samples in {}ms",
+                output_data.len(),
+                Instant::now().duration_since(start_time).as_millis()
+            );
+
+            save_wav(&output_data, input.sample_rate, input.channels, &output_path)
+                .with_context(|| format!("saving {} failed", output_path))?;
+
+            // Compute dominant frequency on first channel
+            let input_first = input.first_channel();
+            let output_first = if input.channels == 1 {
+                output_data.clone()
+            } else {
+                let num_samples = output_data.len() / input.channels;
+                let mut result = Vec::with_capacity(num_samples);
+                for i in 0..num_samples {
+                    result.push(output_data[i * input.channels]);
+                }
+                result
+            };
+
+            let input_freq = compute_dominant_frequency(&input_first, input.sample_rate as f32);
+            println!("Input dominant frequency (first channel): {:.2} Hz", input_freq);
+            let output_freq = compute_dominant_frequency(&output_first, input.sample_rate as f32);
+            println!("Output dominant frequency (first channel): {:.2} Hz", output_freq);
+
+            if plot {
+                let plot_filename = output_path.replace(".wav", "_plot.svg");
+                save_plot_data_svg(&input_first, &output_first, input.sample_rate, &plot_filename)
+                    .with_context(|| format!("saving plot {} failed", plot_filename))?;
+            }
+        }
+
+        Commands::FormantPreservingPitchShift(FormantPreservingPitchShift {
+            input: input_path,
+            shift,
+            output: output_path,
+            plot,
+            overlap,
+            fft_size,
+            window,
+            cepstrum_cutoff_ms,
+        }) => {
+            let mut start_time = Instant::now();
+            let input = load_file(&input_path).with_context(|| format!("loading {} failed", input_path))?;
+            println!("Loading {} took {}ms", input_path, Instant::now().duration_since(start_time).as_millis());
+
+            println!(
+                "Formant-preserving pitch shifting {}: {} Hz, {} channels, shift: {}, cepstrum cutoff: {} ms",
+                input_path, input.sample_rate, input.channels, shift, cepstrum_cutoff_ms
+            );
+
+            let window_type = parse_window_type(&window)?;
+            let mut params = FormantPreservingPitchShifterParams::new(input.sample_rate, shift);
+            params.overlap = overlap;
+            params.fft_size = fft_size;
+            params.window_type = window_type;
+            params.cepstrum_cutoff_ms = cepstrum_cutoff_ms;
+
+            let mut output_data = vec![];
+            let mut shifter = MultiProcessor::<FormantPreservingPitchShifter>::new(&params, input.channels)?;
+            start_time = Instant::now();
+            for chunk in input.data.chunks((fft_size - 1) * input.channels) {
+                shifter.process(chunk, &mut output_data);
+            }
+            shifter.finish(&mut output_data);
             println!(
                 "Output generated: {} samples in {}ms",
                 output_data.len(),

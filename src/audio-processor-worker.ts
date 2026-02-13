@@ -4,7 +4,9 @@ import * as Comlink from 'comlink';
 
 import initWasmModule, {
     Float32Vec,
+    FormantPreservingPitchShifterParams,
     get_settings,
+    MultiFormantPreservingPitchShifter,
     MultiPitchShifter,
     MultiTimeStretcher,
     PitchShiftParams,
@@ -14,7 +16,7 @@ import type { WorkerApi, WorkerParams } from './audio-processor';
 import { Float32RingBuffer, pushAllRingBuffer } from './sync';
 import type { InterleavedAudio } from './types';
 
-type Processor = MultiPitchShifter | MultiTimeStretcher;
+type Processor = MultiPitchShifter | MultiTimeStretcher | MultiFormantPreservingPitchShifter;
 
 class WorkerImpl implements WorkerApi {
     params: WorkerParams = { processingMode: 'pitch', pitchValue: 1.0 }
@@ -101,6 +103,14 @@ class WorkerImpl implements WorkerApi {
             try {
                 this.processor = new MultiPitchShifter(params, numChannels);
                 console.log(`Created MultiPitchShifter with ${params.to_debug_string()}, numChannels ${numChannels}`);
+            } finally {
+                params.free();
+            }
+        } else if (this.params.processingMode === 'formant-preserving-pitch') {
+            const params = new FormantPreservingPitchShifterParams(sampleRate, this.params.pitchValue);
+            try {
+                this.processor = new MultiFormantPreservingPitchShifter(params, numChannels);
+                console.log(`Created MultiFormantPreservingPitchShifter with ${params.to_debug_string()}, numChannels ${numChannels}`);
             } finally {
                 params.free();
             }

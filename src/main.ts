@@ -7,7 +7,7 @@ import { Recorder } from './recorder';
 import { saveFile, showSaveDialog } from './save-dialog';
 import { Spectrogram } from './spectrogram';
 import { drainRingBuffer, Float32RingBuffer } from './sync';
-import { getAudioLength, getAudioSeconds, type InterleavedAudio } from './types';
+import { getAudioLength, getAudioSeconds, type InterleavedAudio, type ProcessingMode } from './types';
 import { debounce, getById, secondsToString, withButtonsDisabled } from './utils';
 
 const MAX_PITCH_VALUE = 2.0;
@@ -36,7 +36,7 @@ if (!window.crossOriginIsolated) {
 
 // Settings stored locally
 interface AppSettings {
-    processingMode: 'pitch' | 'time';
+    processingMode: ProcessingMode;
     pitchValue: number;
 }
 
@@ -133,6 +133,7 @@ const pitchSlider = getById<HTMLInputElement>('pitch-slider');
 const pitchLabel = getById<HTMLElement>('pitch-label');
 const pitchModeRadio = getById<HTMLInputElement>('pitch-mode');
 const timeModeRadio = getById<HTMLInputElement>('time-mode');
+const formantPitchModeRadio = getById<HTMLInputElement>('formant-pitch-mode');
 const sourceLabel = getById<HTMLElement>('source-label');
 const processingSpinner = getById<HTMLDivElement>('processing-spinner');
 const processingLabel = getById<HTMLDivElement>('processing-label');
@@ -170,6 +171,7 @@ function onAfterSourceAudioDataSet() {
 function applySettingsToUI(settings: AppSettings): void {
     pitchModeRadio.checked = settings.processingMode === 'pitch';
     timeModeRadio.checked = settings.processingMode === 'time';
+    formantPitchModeRadio.checked = settings.processingMode === 'formant-preserving-pitch';
     if (settings.pitchValue > MAX_PITCH_VALUE || settings.pitchValue < MIN_PITCH_VALUE) {
         settings.pitchValue = DEFAULT_PITCH_VALUE;
     }
@@ -374,6 +376,13 @@ function handleTimeModeChange(): void {
     }
 }
 
+function handleFormantModeChange(): void {
+    if (formantPitchModeRadio.checked) {
+        appState.settings.processingMode = 'formant-preserving-pitch';
+        appState.updateSettings();
+    }
+}
+
 function handlePitchSliderInput(): void {
     pitchLabel.textContent = pitchSlider.value + 'x';
     appState.settings.pitchValue = parseFloat(pitchSlider.value);
@@ -402,6 +411,7 @@ loadBtn.addEventListener('click', () => handleLoadClick());
 saveBtn.addEventListener('click', withButtonsDisabled([playBtn, saveBtn], () => handleSaveClick()));
 pitchModeRadio.addEventListener('change', () => handlePitchModeChange());
 timeModeRadio.addEventListener('change', () => handleTimeModeChange());
+formantPitchModeRadio.addEventListener('change', () => handleFormantModeChange());
 pitchSlider.addEventListener('input', () => handlePitchSliderInput());
 fileInput.addEventListener('change', withButtonsDisabled([loadBtn], async () => {
     const file = fileInput.files![0];

@@ -1,3 +1,6 @@
+// Processing mode for audio transformation
+export type ProcessingMode = 'pitch' | 'time' | 'formant-preserving-pitch';
+
 // Multi-channel interleaved audio samples
 export interface InterleavedAudio {
     data: Float32Array,

@@ -1,11 +1,11 @@
 import * as Comlink from 'comlink';
 
 import type { Float32RingBuffer } from './sync';
-import type { InterleavedAudio } from './types';
+import type { InterleavedAudio, ProcessingMode } from './types';
 
 // The following are exported only for audio-modifier-worker.ts
 export interface WorkerParams {
-    processingMode: 'pitch' | 'time';
+    processingMode: ProcessingMode;
     pitchValue: number;
 };
 
@@ -37,7 +37,7 @@ export class AudioProcessor {
     }
 
     // Update processing params. This method may be called even if process() is still running.
-    setParams(processingMode: 'pitch' | 'time', pitchValue: number) {
+    setParams(processingMode: ProcessingMode, pitchValue: number) {
         this.proxy.setParams({
             processingMode: processingMode,
             pitchValue: pitchValue,

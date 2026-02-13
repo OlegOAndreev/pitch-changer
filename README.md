@@ -59,6 +59,7 @@ See also:
   * https://danishsoundcluster.dk/wp-content/uploads/2023/03/Danish_Sound_Vocoder_Report.pdf
   * https://github.com/oramics/dsp-kit/blob/master/docs/phase-vocoder.md
   * https://www.mdpi.com/2076-3417/6/2/57#TSM_Based_on_the_Phase_Vocoder_PVTS
+  * http://recherche.ircam.fr/equipes/analyse-synthese/roebel/paper/trueenv_dafx2005.pdf
 
 ## License
 MIT: https://opensource.org/license/mit

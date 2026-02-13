@@ -16,7 +16,7 @@
 
 <body>
     <div id="content-container" style="visibility: hidden;">
-        <h1>Pitch Changer</h1>
+        <h1>Audio Pitch Changer</h1>
         <div id="big-buttons-row">
             <button id="record-btn" class="big-control-btn control-btn" title="Record">
                 <span id="record-btn-emoji" class="emoji fa-solid fa-microphone"></span>
@@ -37,6 +37,10 @@
             <div class="radio-option">
                 <input type="radio" id="pitch-mode" name="processing-mode" value="pitch" checked>
                 <label for="pitch-mode">Pitch shift</label>
+            </div>
+            <div class="radio-option">
+                <input type="radio" id="formant-pitch-mode" name="processing-mode" value="formant-preserving-pitch">
+                <label for="formant-pitch-mode">Speech pitch shift</label>
             </div>
             <div class="radio-option">
                 <input type="radio" id="time-mode" name="processing-mode" value="time">
