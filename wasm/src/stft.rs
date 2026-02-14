@@ -4,7 +4,7 @@ use realfft::num_complex::Complex;
 use realfft::{ComplexToReal, RealToComplex};
 use std::sync::Arc;
 
-use crate::window::WindowType;
+use crate::window::{WindowType, get_window_squared_sum};
 
 /// STFT state for performing forward and inverse FFT operations.
 ///
@@ -24,6 +24,7 @@ use crate::window::WindowType;
 /// in general things smooth out nicely if your synthesis hop size is not too large. I do not know why =)
 pub(crate) struct Stft {
     fft_size: usize,
+    window_type: WindowType,
     forward_plan: Arc<dyn RealToComplex<f32>>,
     inverse_plan: Arc<dyn ComplexToReal<f32>>,
     window: Vec<f32>,
@@ -57,6 +58,7 @@ impl Stft {
 
         Self {
             fft_size,
+            window_type,
             forward_plan,
             inverse_plan,
             window,
@@ -69,8 +71,9 @@ impl Stft {
         }
     }
 
-    // Apply window, run forward pass, call freq_func on frequencies, run inverse pass, apply window again and return
-    // the resulting series. The returned slice points to internal buffer.
+    /// Apply window, run forward pass, call freq_func on frequencies, run inverse pass, apply window again and return
+    /// the resulting series. The result is not normalized, you should normalize it using  The returned slice points to
+    /// internal buffer.
     pub fn process<F>(&mut self, input: &[f32], mut processor: F) -> &[f32]
     where
         F: FnMut(&[Complex<f32>], &mut [Complex<f32>]),
@@ -95,5 +98,11 @@ impl Stft {
         }
 
         &self.output_buf
+    }
+
+    /// Return normalization factor for STFT output: inverse FFT scaling (1/fft_size) * squared windows sum
+    pub fn get_norm_factor(&self, hop_size: usize) -> f32 {
+        let window_norm = get_window_squared_sum(self.window_type, self.fft_size, hop_size);
+        1.0 / (self.fft_size as f32 * window_norm)
     }
 }

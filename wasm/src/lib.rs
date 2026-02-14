@@ -1,4 +1,4 @@
-mod formant_preserving_pitch_shifter;
+mod envelope_shifter;
 mod histogram;
 mod multi_processor;
 mod phase_gradient_time_stretch;
@@ -10,7 +10,8 @@ mod util;
 mod web;
 mod window;
 
-pub use formant_preserving_pitch_shifter::{FormantPreservingPitchShifter, FormantPreservingPitchShifterParams};
+pub use envelope_shifter::EnvelopeShifter;
+pub use histogram::SpectralHistogram;
 pub use multi_processor::{MonoProcessor, MultiProcessor};
 pub use pitch_shifter::{PitchShiftParams, PitchShifter};
 pub use time_stretcher::{TimeStretchParams, TimeStretcher};

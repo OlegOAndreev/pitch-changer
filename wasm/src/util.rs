@@ -113,6 +113,17 @@ pub fn interleave_samples(input: &[f32], num_channels: usize, output: &mut Vec<f
     }
 }
 
+/// Return linearly interpolated sample at given position.
+pub fn linear_sample(input: &[f32], pos: f32) -> f32 {
+    let index = pos as usize;
+    if index >= input.len() - 1 {
+        input[input.len() - 1]
+    } else {
+        let frac = pos.fract();
+        input[index] * (1.0 - frac) + input[index + 1] * frac
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,5 +230,18 @@ mod tests {
 
             assert_eq!(interleaved, original);
         }
+    }
+
+    #[test]
+    fn test_linear_sample() {
+        let data = [3.0, 4.0, 5.0];
+        // Last element
+        assert_eq!(linear_sample(&data, -1.0), 3.0);
+        assert_eq!(linear_sample(&data, 3.0), 5.0);
+        assert_eq!(linear_sample(&data, 2.0), 5.0);
+        assert_eq!(linear_sample(&data, 1.0), 4.0);
+        assert_eq!(linear_sample(&data, 0.0), 3.0);
+        assert_eq!(linear_sample(&data, 0.2), 3.2);
+        assert_eq!(linear_sample(&data, 1.5), 4.5);
     }
 }

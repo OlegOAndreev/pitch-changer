@@ -7,9 +7,8 @@ use hound::{WavSpec, WavWriter};
 use plotters::prelude::*;
 
 use wasm_main_module::{
-    FormantPreservingPitchShifter, FormantPreservingPitchShifterParams, MultiProcessor,
-    PitchShiftParams, PitchShifter, TimeStretchParams, TimeStretcher, WindowType,
-    compute_dominant_frequency, generate_sine_wave, interleave_samples,
+    EnvelopeShifter, MultiProcessor, PitchShiftParams, PitchShifter, SpectralHistogram, TimeStretchParams,
+    TimeStretcher, WindowType, compute_dominant_frequency, generate_sine_wave, interleave_samples,
 };
 
 fn parse_window_type(s: &str) -> Result<WindowType> {
@@ -144,7 +143,7 @@ fn save_wav(data: &[f32], sample_rate: u32, channels: usize, filename: &str) -> 
     Ok(())
 }
 
-fn save_plot_data_svg(input: &[f32], output: &[f32], sample_rate: u32, filename: &str) -> Result<()> {
+fn save_plot_audio_svg(input: &[f32], output: &[f32], sample_rate: u32, filename: &str) -> Result<()> {
     const INTERVAL_LENGTH: f32 = 0.05;
 
     let min_length = input.len().min(output.len());
@@ -171,12 +170,12 @@ fn save_plot_data_svg(input: &[f32], output: &[f32], sample_rate: u32, filename:
     let (middle_area, bottom_area) = rest_area.split_vertically(600);
 
     let mut top_chart = ChartBuilder::on(&top_area)
-        .caption(format!("Beginning: {:.3}-{:.3} s", interval1_start, interval1_end), ("sans-serif", 40))
+        .caption(format!("Beginning: {:.3}-{:.3} s", interval1_start, interval1_end), ("sans-serif", 20))
         .margin(40)
         .x_label_area_size(40)
         .y_label_area_size(60)
         .build_cartesian_2d(interval1_start..interval1_end, -1.2f32..1.2f32)?;
-    top_chart.configure_mesh().label_style(("sans-serif", 25)).draw()?;
+    top_chart.configure_mesh().label_style(("sans-serif", 20)).draw()?;
     top_chart
         .draw_series(LineSeries::new(
             (from_sample1..to_sample1)
@@ -201,7 +200,7 @@ fn save_plot_data_svg(input: &[f32], output: &[f32], sample_rate: u32, filename:
         .y_label_area_size(60)
         .build_cartesian_2d(interval2_start..interval2_end, -1.2f32..1.2f32)?;
 
-    middle_chart.configure_mesh().label_style(("sans-serif", 25)).draw()?;
+    middle_chart.configure_mesh().label_style(("sans-serif", 20)).draw()?;
     middle_chart
         .draw_series(LineSeries::new(
             (from_sample2..to_sample2)
@@ -226,7 +225,7 @@ fn save_plot_data_svg(input: &[f32], output: &[f32], sample_rate: u32, filename:
         .y_label_area_size(60)
         .build_cartesian_2d(interval3_start..interval3_end, -1.2f32..1.2f32)?;
 
-    bottom_chart.configure_mesh().label_style(("sans-serif", 25)).draw()?;
+    bottom_chart.configure_mesh().label_style(("sans-serif", 20)).draw()?;
     bottom_chart
         .draw_series(LineSeries::new(
             (from_sample3..to_sample3)
@@ -249,6 +248,57 @@ fn save_plot_data_svg(input: &[f32], output: &[f32], sample_rate: u32, filename:
     Ok(())
 }
 
+fn save_spectrum_plot_svg(
+    spectrum: &[f32],
+    envelope: &[f32],
+    sample_rate: u32,
+    fft_size: usize,
+    filename: &str,
+) -> Result<()> {
+    use plotters::prelude::*;
+
+    let num_bins = spectrum.len();
+    let max_freq = sample_rate as f32 / 2.0;
+    let bin_width = max_freq / (num_bins as f32 - 1.0);
+
+    let spectrum_points: Vec<(f32, f32)> = (0..num_bins).map(|i| (i as f32 * bin_width, spectrum[i])).collect();
+    let envelope_points: Vec<(f32, f32)> = (0..envelope.len()).map(|i| (i as f32 * bin_width, envelope[i])).collect();
+
+    let max_magnitude = spectrum.iter().chain(envelope.iter()).copied().fold(0.0f32, f32::max).max(1e-1).min(1000.0);
+
+    let root = SVGBackend::new(filename, (1200, 800)).into_drawing_area();
+    root.fill(&WHITE)?;
+
+    let mut chart = ChartBuilder::on(&root)
+        .caption(format!("Spectrum (FFT size: {}, Sample rate: {} Hz)", fft_size, sample_rate), ("sans-serif", 20))
+        .margin(40)
+        .x_label_area_size(40)
+        .y_label_area_size(60)
+        .build_cartesian_2d(0.0..max_freq, 0.0..max_magnitude * 1.1)?;
+
+    chart
+        .configure_mesh()
+        .x_desc("Frequency (Hz)")
+        .y_desc("Magnitude")
+        .label_style(("sans-serif", 15))
+        .draw()?;
+
+    chart.draw_series(LineSeries::new(spectrum_points.clone(), &BLUE))?.label("Spectrum");
+    chart
+        .draw_series(LineSeries::new(envelope_points.clone(), &RED))?
+        .label("Spectral Envelope");
+
+    chart
+        .configure_series_labels()
+        .background_style(&WHITE.mix(0.8))
+        .border_style(&BLACK)
+        .draw()?;
+
+    root.present()?;
+    println!("Spectrum plot SVG saved to: {}", filename);
+    Ok(())
+}
+
 #[derive(FromArgs)]
 /// Pitch shift CLI tool
 struct Cli {
@@ -262,7 +312,7 @@ enum Commands {
     Generate(Generate),
     TimeStretch(TimeStretch),
     PitchShift(PitchShift),
-    FormantPreservingPitchShift(FormantPreservingPitchShift),
+    ShowSpectrum(ShowSpectrum),
 }
 
 /// Generate a sine wave and save it as WAV
@@ -294,7 +344,7 @@ struct Generate {
 #[derive(FromArgs)]
 #[argh(subcommand, name = "time-stretch")]
 struct TimeStretch {
-    /// input WAV file
+    /// input audio file
     #[argh(option, default = "\"sine_wave.wav\".to_string()")]
     input: String,
 
@@ -327,7 +377,7 @@ struct TimeStretch {
 #[derive(FromArgs)]
 #[argh(subcommand, name = "pitch-shift")]
 struct PitchShift {
-    /// input WAV file
+    /// input audio file
     #[argh(option, default = "\"sine_wave.wav\".to_string()")]
     input: String,
 
@@ -351,46 +401,38 @@ struct PitchShift {
     #[argh(option, default = "\"shifted.wav\".to_string()")]
     output: String,
 
+    /// cepstrum cutoff, either 0.0 to disable formant preservation or somewhere in 0.5-5.0 for preserving formants
+    #[argh(option, default = "0.0")]
+    quefrency_cutoff: f32,
+
     /// save plot comparison SVG
     #[argh(switch)]
     plot: bool,
 }
 
-/// Apply formant-preserving pitch shift to input
+/// Show spectrum analysis of audio file
 #[derive(FromArgs)]
-#[argh(subcommand, name = "formant-preserving-pitch-shift")]
-struct FormantPreservingPitchShift {
-    /// input WAV file
+#[argh(subcommand, name = "show-spectrum")]
+struct ShowSpectrum {
+    /// input audio file
     #[argh(option, default = "\"sine_wave.wav\".to_string()")]
     input: String,
 
-    /// pitch shift factor (e.g., 2.0 = one octave up, 0.5 = one octave down)
-    #[argh(option, default = "1.0")]
-    shift: f32,
-
-    /// overlap ratio
-    #[argh(option, default = "8")]
-    overlap: u32,
+    /// offset in seconds
+    #[argh(option, default = "5.0")]
+    offset: f32,
 
     /// FFT size
     #[argh(option, default = "4096")]
     fft_size: usize,
 
-    /// window type: "hann", "sqrt-hann", or "sqrt-blackman"
-    #[argh(option, default = "\"hann\".to_string()")]
-    window: String,
+    /// cepstrum cutoff (quefrency)
+    #[argh(option, default = "0.0")]
+    quefrency_cutoff: f32,
 
-    /// cepstrum cutoff in milliseconds (controls formant preservation, typical range: 1.0-5.0 ms)
-    #[argh(option, default = "2.0")]
-    cepstrum_cutoff_ms: f32,
-
-    /// output WAV file for pitch shifted audio
-    #[argh(option, default = "\"formant_preserved_shifted.wav\".to_string()")]
+    /// output SVG file for spectrum plot
+    #[argh(option, default = "\"spectrum.svg\".to_string()")]
     output: String,
-
-    /// save plot comparison SVG
-    #[argh(switch)]
-    plot: bool,
 }
 
 fn main() -> Result<()> {
@@ -484,7 +526,7 @@ fn main() -> Result<()> {
 
             if plot {
                 let plot_filename = output_path.replace(".wav", "_plot.svg");
-                save_plot_data_svg(&input_first, &output_first, input.sample_rate, &plot_filename)
+                save_plot_audio_svg(&input_first, &output_first, input.sample_rate, &plot_filename)
                     .with_context(|| format!("saving plot {} failed", plot_filename))?;
             }
         }
@@ -497,14 +539,15 @@ fn main() -> Result<()> {
             overlap,
             fft_size,
             window,
+            quefrency_cutoff,
         }) => {
             let mut start_time = Instant::now();
             let input = load_file(&input_path).with_context(|| format!("loading {} failed", input_path))?;
             println!("Loading {} took {}ms", input_path, Instant::now().duration_since(start_time).as_millis());
 
             println!(
-                "Pitch shifting {}: {} Hz, {} channels, shift: {}",
-                input_path, input.sample_rate, input.channels, shift
+                "Pitch shifting {}: {} Hz, {} channels, shift: {}, quefrency cutoff: {}",
+                input_path, input.sample_rate, input.channels, shift, quefrency_cutoff
             );
 
             let window_type = parse_window_type(&window)?;
@@ -512,6 +555,7 @@ fn main() -> Result<()> {
             params.overlap = overlap;
             params.fft_size = fft_size;
             params.window_type = window_type;
+            params.quefrency_cutoff = quefrency_cutoff;
 
             let mut output_data = vec![];
             let mut shifter = MultiProcessor::<PitchShifter>::new(&params, input.channels)?;
@@ -549,76 +593,54 @@ fn main() -> Result<()> {
 
             if plot {
                 let plot_filename = output_path.replace(".wav", "_plot.svg");
-                save_plot_data_svg(&input_first, &output_first, input.sample_rate, &plot_filename)
+                save_plot_audio_svg(&input_first, &output_first, input.sample_rate, &plot_filename)
                     .with_context(|| format!("saving plot {} failed", plot_filename))?;
             }
         }
 
-        Commands::FormantPreservingPitchShift(FormantPreservingPitchShift {
+        Commands::ShowSpectrum(ShowSpectrum {
             input: input_path,
-            shift,
-            output: output_path,
-            plot,
-            overlap,
+            offset,
             fft_size,
-            window,
-            cepstrum_cutoff_ms,
+            quefrency_cutoff,
+            output: output_path,
         }) => {
-            let mut start_time = Instant::now();
+            let start_time = Instant::now();
             let input = load_file(&input_path).with_context(|| format!("loading {} failed", input_path))?;
             println!("Loading {} took {}ms", input_path, Instant::now().duration_since(start_time).as_millis());
 
             println!(
-                "Formant-preserving pitch shifting {}: {} Hz, {} channels, shift: {}, cepstrum cutoff: {} ms",
-                input_path, input.sample_rate, input.channels, shift, cepstrum_cutoff_ms
+                "Showing spectrum of {}: offset {}s, FFT size {}, quefrency cutoff {}",
+                input_path, offset, fft_size, quefrency_cutoff
             );
 
-            let window_type = parse_window_type(&window)?;
-            let mut params = FormantPreservingPitchShifterParams::new(input.sample_rate, shift);
-            params.overlap = overlap;
-            params.fft_size = fft_size;
-            params.window_type = window_type;
-            params.cepstrum_cutoff_ms = cepstrum_cutoff_ms;
+            // Calculate start sample index
+            let start_sample = (offset * input.sample_rate as f32) as usize * input.channels;
+            let samples_needed = fft_size * input.channels;
+            let end_sample = start_sample + samples_needed;
 
-            let mut output_data = vec![];
-            let mut shifter = MultiProcessor::<FormantPreservingPitchShifter>::new(&params, input.channels)?;
-            start_time = Instant::now();
-            for chunk in input.data.chunks((fft_size - 1) * input.channels) {
-                shifter.process(chunk, &mut output_data);
+            if end_sample > input.data.len() {
+                bail!(
+                    "Not enough audio data: need {} samples ({} per channel) starting at sample {}, but file has only {} samples",
+                    samples_needed,
+                    fft_size,
+                    start_sample,
+                    input.data.len()
+                );
             }
-            shifter.finish(&mut output_data);
-            println!(
-                "Output generated: {} samples in {}ms",
-                output_data.len(),
-                Instant::now().duration_since(start_time).as_millis()
-            );
 
-            save_wav(&output_data, input.sample_rate, input.channels, &output_path)
-                .with_context(|| format!("saving {} failed", output_path))?;
+            let audio_slice = &input.data[start_sample..end_sample];
+            let mut histogram = SpectralHistogram::new(fft_size);
+            let mut spectrum = vec![];
+            histogram.compute_vec(audio_slice, input.channels, &mut spectrum);
 
-            // Compute dominant frequency on first channel
-            let input_first = input.first_channel();
-            let output_first = if input.channels == 1 {
-                output_data.clone()
-            } else {
-                let num_samples = output_data.len() / input.channels;
-                let mut result = Vec::with_capacity(num_samples);
-                for i in 0..num_samples {
-                    result.push(output_data[i * input.channels]);
-                }
-                result
-            };
+            let mut envelope = vec![];
+            let cepstrum_cutoff_samples = (quefrency_cutoff * input.sample_rate as f32 / 1000.0) as usize;
+            let mut envelope_shifter = EnvelopeShifter::new(spectrum.len(), cepstrum_cutoff_samples, 1.0);
+            envelope_shifter.compute_envelope(&spectrum, &mut envelope);
 
-            let input_freq = compute_dominant_frequency(&input_first, input.sample_rate as f32);
-            println!("Input dominant frequency (first channel): {:.2} Hz", input_freq);
-            let output_freq = compute_dominant_frequency(&output_first, input.sample_rate as f32);
-            println!("Output dominant frequency (first channel): {:.2} Hz", output_freq);
-
-            if plot {
-                let plot_filename = output_path.replace(".wav", "_plot.svg");
-                save_plot_data_svg(&input_first, &output_first, input.sample_rate, &plot_filename)
-                    .with_context(|| format!("saving plot {} failed", plot_filename))?;
-            }
+            save_spectrum_plot_svg(&spectrum, &envelope, input.sample_rate, fft_size, &output_path)
+                .with_context(|| format!("saving spectrum plot {} failed", output_path))?;
         }
     }
 

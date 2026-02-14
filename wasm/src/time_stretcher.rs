@@ -89,8 +89,7 @@ impl TimeStretcher {
 
     /// Do one iteration of stft
     fn do_stft(&mut self) {
-        use crate::window::get_window_squared_sum;
-
+        let norm_factor = self.stft.get_norm_factor(self.syn_hop_size);
         let output = self.stft.process(&self.input_buf, |ana_freq, syn_freq| {
             // syn_freq.copy_from_slice(ana_freq);
             self.phase_gradient_vocoder
@@ -100,18 +99,13 @@ impl TimeStretcher {
             syn_freq[0].im = 0.0;
             syn_freq[syn_freq.len() - 1].im = 0.0;
         });
-        // Normalization factor: inverse FFT scaling (1/fft_size) * squared windows sum * time stretch factor
-        // The last factor is based on the fact that synthesis windows have different overlap contained
-        let window_norm = get_window_squared_sum(self.params.window_type, self.params.fft_size, self.ana_hop_size);
-        let norm = self.params.time_stretch / (self.params.fft_size as f32 * window_norm);
-        // let norm = 0.5 / (self.params.fft_size as f32 * window_norm);
         for k in 0..self.params.fft_size {
-            self.output_accum_buf[k] += output[k] * norm;
+            self.output_accum_buf[k] += output[k] * norm_factor;
         }
     }
 
     /// Append next part of output accum buf to result and shift the buffers.
-    fn append_output_and_shift(&mut self, output: &mut Vec<f32>) {
+    fn output_and_shift(&mut self, output: &mut Vec<f32>) {
         output.extend_from_slice(&self.output_accum_buf[..self.syn_hop_size]);
         self.output_accum_buf.drain(0..self.syn_hop_size);
         self.output_accum_buf.resize(self.params.fft_size, 0.0);
@@ -149,7 +143,8 @@ impl MonoProcessor for TimeStretcher {
     }
 
     fn process(&mut self, input: &[f32], output: &mut Vec<f32>) {
-        let output_capacity = input.len() / self.ana_hop_size * self.syn_hop_size;
+        // This is an approximation
+        let output_capacity = (input.len()) / self.ana_hop_size * self.syn_hop_size;
         output.reserve(output_capacity);
         let mut input_pos = 0;
         while input_pos < input.len() {
@@ -161,7 +156,7 @@ impl MonoProcessor for TimeStretcher {
 
             if self.input_buf.len() == self.params.fft_size {
                 self.do_stft();
-                self.append_output_and_shift(output);
+                self.output_and_shift(output);
             }
         }
     }
@@ -172,7 +167,7 @@ impl MonoProcessor for TimeStretcher {
         // stored in tail_window.
         //
         // This is especially important for large stretches where syn_hop_size > ana_hop_size leads to rapid amplitude
-        // changes and noise.
+        // changes and pops/cracks.
         //
         // Another way to solve this problem is simply appending the whole output_accum_buf into result on final
         // iteration, but this makes testing more annoying =)
@@ -189,7 +184,7 @@ impl MonoProcessor for TimeStretcher {
             for k in 0..self.syn_hop_size {
                 self.output_accum_buf[k] *= self.tail_window[tail_window_offset + k];
             }
-            self.append_output_and_shift(output);
+            self.output_and_shift(output);
         }
 
         self.reset();
