@@ -57,8 +57,8 @@ impl SpectralHistogram {
             .process_with_scratch(&mut self.input_buf, &mut self.output_buf, &mut self.scratch_buf)
             .expect("failed forward STFT pass");
         output.resize(self.output_buf.len(), 0.0);
-        for (o, freq) in output.iter_mut().zip(&self.output_buf) {
-            *o = freq.norm();
+        for k in 0..output.len() {
+            output[k] = self.output_buf[k].norm();
         }
     }
 }

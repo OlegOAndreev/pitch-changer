@@ -26,3 +26,8 @@ rand = "0.9"
 symphonia = { version = "0.5", features = ["aac", "isomp4", "mp3"] }
 # Disabled by default for better build times
 # debug = true
+
+[lints.clippy]
+# Reading .iter().zip() chains is considerably harder for me, while the resulting code is the same if we bound the
+# iteration upper bound.
+needless-range-loop = "allow"

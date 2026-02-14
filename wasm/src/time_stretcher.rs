@@ -2,11 +2,11 @@ use wasm_bindgen::prelude::*;
 
 use anyhow::{Result, bail};
 
-use crate::WindowType;
+use crate::multi_processor::{MonoProcessor, MultiProcessor};
 use crate::phase_gradient_time_stretch::PhaseGradientTimeStretch;
 use crate::stft::Stft;
 use crate::web::{Float32Vec, WrapAnyhowError};
-use crate::{MonoProcessor, MultiProcessor};
+use crate::window::WindowType;
 
 /// Parameters for audio time stretching.
 #[derive(Debug, Clone, Copy)]
@@ -105,8 +105,8 @@ impl TimeStretcher {
         let window_norm = get_window_squared_sum(self.params.window_type, self.params.fft_size, self.ana_hop_size);
         let norm = self.params.time_stretch / (self.params.fft_size as f32 * window_norm);
         // let norm = 0.5 / (self.params.fft_size as f32 * window_norm);
-        for (a, o) in self.output_accum_buf.iter_mut().zip(output) {
-            *a += *o * norm;
+        for k in 0..self.params.fft_size {
+            self.output_accum_buf[k] += output[k] * norm;
         }
     }
 
@@ -186,11 +186,8 @@ impl MonoProcessor for TimeStretcher {
 
             let tail_window_offset = i * self.syn_hop_size;
             // After the last iteration do windowing first.
-            for (a, w) in self.output_accum_buf[..self.syn_hop_size]
-                .iter_mut()
-                .zip(&self.tail_window[tail_window_offset..])
-            {
-                *a *= *w;
+            for k in 0..self.syn_hop_size {
+                self.output_accum_buf[k] *= self.tail_window[tail_window_offset + k];
             }
             self.append_output_and_shift(output);
         }
@@ -245,8 +242,7 @@ impl MultiTimeStretcher {
 
 #[cfg(test)]
 mod tests {
-    use crate::generate_sine_wave;
-    use crate::util::{compute_dominant_frequency, compute_magnitude};
+    use crate::util::{compute_dominant_frequency, compute_magnitude, generate_sine_wave};
 
     use super::*;
     use rand::Rng;
@@ -416,12 +412,9 @@ mod tests {
                         // Skip transient at start and end, compare the middle
                         let offset = fft_size * 2;
                         let middle_len = (input.len() - offset * 2).min(output.len() - offset * 2);
-                        let input_slice = &input[offset..offset + middle_len];
-                        let output_slice = &output[offset..offset + middle_len];
-
                         let mut max_diff = 0.0f32;
-                        for (i, o) in input_slice.iter().zip(output_slice) {
-                            let diff = (i - o).abs();
+                        for k in 0..middle_len {
+                            let diff = (input[k + offset] - output[k + offset]).abs();
                             if diff > max_diff {
                                 max_diff = diff;
                             }

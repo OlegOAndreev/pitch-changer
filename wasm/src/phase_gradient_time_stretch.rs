@@ -51,7 +51,7 @@ pub(crate) struct PhaseGradientTimeStretch {
 
 impl PhaseGradientTimeStretch {
     /// Create a new phase gradient time stretcher with given FFT size.
-    pub(crate) fn new(fft_size: usize) -> Self {
+    pub fn new(fft_size: usize) -> Self {
         let num_bins = fft_size / 2 + 1;
 
         let prev_magnitudes = vec![0.0; num_bins];
@@ -82,7 +82,7 @@ impl PhaseGradientTimeStretch {
     }
 
     /// Process a single STFT frame.
-    pub(crate) fn process(
+    pub fn process(
         &mut self,
         ana_freq: &[Complex<f32>],
         ana_hop_size: usize,
@@ -102,7 +102,6 @@ impl PhaseGradientTimeStretch {
 
         // Find maximum magnitude for thresholding
         let mut max_magn = 0.0f32;
-        #[allow(clippy::needless_range_loop)]
         for k in 0..freq_size {
             let magn = ana_freq[k].norm();
             self.magnitudes[k] = magn;
@@ -117,7 +116,6 @@ impl PhaseGradientTimeStretch {
 
         // Number of false values in self.phase_assigned
         let mut num_phase_unassigned = 0;
-        #[allow(clippy::needless_range_loop)]
         for k in 0..freq_size {
             // Optimization: do not compute phase for frequencies below the min_magn threshold.
             if self.magnitudes[k] > min_magn {
@@ -197,7 +195,6 @@ impl PhaseGradientTimeStretch {
         }
 
         // Convert phase/magnitude back to complex frequency domain
-        #[allow(clippy::needless_range_loop)]
         for k in 0..freq_size {
             // Do the normalize_phase here so that the prev_syn_phases does not become too large, reducing the floating
             // point error.

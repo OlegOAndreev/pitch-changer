@@ -10,8 +10,6 @@ pub struct StreamingResampler {
     resampler: Async<f32>,
     // Buffer for leftover input samples that do not form a full chunk
     previous_chunk: Vec<f32>,
-    // // See Fft::output_delay()
-    // should_delay_output: bool,
 }
 
 // Rubato streaming interface is really really horrible. Thanks to Deepseek and Resampler::process_all_into_buffer
@@ -149,8 +147,7 @@ impl StreamingResampler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::generate_sine_wave;
-    use crate::{compute_dominant_frequency, compute_magnitude};
+    use crate::util::{compute_dominant_frequency, compute_magnitude, generate_sine_wave};
     use anyhow::Result;
 
     fn resample_all_small_chunks(resampler: &mut StreamingResampler, input: &[f32]) -> Vec<f32> {

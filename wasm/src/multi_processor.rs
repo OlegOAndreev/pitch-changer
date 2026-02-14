@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 
-use crate::{deinterleave_samples, interleave_samples};
+use crate::util::{deinterleave_samples, interleave_samples};
 
 /// Internal trait used for MultiProcessor.
 pub trait MonoProcessor : Sized {

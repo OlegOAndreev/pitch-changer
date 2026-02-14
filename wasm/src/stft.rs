@@ -22,7 +22,7 @@ use crate::window::WindowType;
 ///
 /// When you do synthesis with different hop size compared to analysis, you break constant overlap-add property, but
 /// in general things smooth out nicely if your synthesis hop size is not too large. I do not know why =)
-pub struct Stft {
+pub(crate) struct Stft {
     fft_size: usize,
     forward_plan: Arc<dyn RealToComplex<f32>>,
     inverse_plan: Arc<dyn ComplexToReal<f32>>,
@@ -77,8 +77,9 @@ impl Stft {
     {
         assert_eq!(input.len(), self.fft_size);
         self.input_buf.copy_from_slice(input);
-        for (s, w) in self.input_buf.iter_mut().zip(&self.window) {
-            *s *= w;
+
+        for k in 0..self.fft_size {
+            self.input_buf[k] = input[k] * self.window[k];
         }
         self.forward_plan
             .process_with_scratch(&mut self.input_buf, &mut self.input_freq_buf, &mut self.scratch_forward)
@@ -89,8 +90,8 @@ impl Stft {
         self.inverse_plan
             .process_with_scratch(&mut self.output_freq_buf, &mut self.output_buf, &mut self.scratch_inverse)
             .expect("failed inverse STFT pass");
-        for (s, w) in self.output_buf.iter_mut().zip(&self.window) {
-            *s *= w;
+        for k in 0..self.fft_size {
+            self.output_buf[k] *= self.window[k];
         }
 
         &self.output_buf
