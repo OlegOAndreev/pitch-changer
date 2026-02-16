@@ -49,6 +49,7 @@ class AppState {
     sourceAudio: InterleavedAudio | null = null;
     processor: AudioProcessor = new AudioProcessor();
     spectrogram: Spectrogram | null = null;
+    performanceRatio: number | null = null;
 
     // Audio player and recorder are lazy initialized because they affect the browser (and OS) UI
     private audioContext: AudioContext | null = null;
@@ -329,6 +330,7 @@ async function processAllAudio(): Promise<InterleavedAudio> {
 
     const deltaTime = performance.now() - startTime;
     console.log(`Process all audio, got ${data.length} samples in ${deltaTime}ms`);
+    appState.performanceRatio = (data.length * 1000.0) / (appState.sourceAudio!.sampleRate * appState.sourceAudio!.numChannels * deltaTime);
     return {
         data,
         sampleRate: appState.sourceAudio!.sampleRate,
@@ -397,6 +399,11 @@ async function handleDebugPanelClick() {
             info += `\n\nWASM settings: ${get_settings()}\n\nWASM memory: ${wasm.memory.buffer.byteLength}`;
         } catch (error) {
             info += `\n\nWASM error: ${error}`;
+        }
+        if (appState.performanceRatio) {
+            info += `\n\nPerformance-to-realtime ratio: ${appState.performanceRatio.toFixed(1)}`;
+        } else {
+            info += `\n\nPerformance-to-realtime ratio: save audio file to determine`;
         }
         debugInfo.textContent = info;
         debugPanel.style.display = 'flex';
