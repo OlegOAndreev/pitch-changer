@@ -79,8 +79,6 @@ impl Stft {
         F: FnMut(&[Complex<f32>], &mut [Complex<f32>]),
     {
         assert_eq!(input.len(), self.fft_size);
-        self.input_buf.copy_from_slice(input);
-
         for i in 0..self.fft_size {
             self.input_buf[i] = input[i] * self.window[i];
         }
@@ -104,5 +102,137 @@ impl Stft {
     pub fn get_norm_factor(&self, hop_size: usize) -> f32 {
         let window_norm = get_window_squared_sum(self.window_type, self.fft_size, hop_size);
         1.0 / (self.fft_size as f32 * window_norm)
+    }
+}
+
+/// Buffer for accumulating results of STFT. Implements overlap-add accumulation: windows of length `fft_size` are added
+/// at offset `pos`, and after each addition `hop_size` samples can be output from the beginning of the buffer while
+/// shifting the remaining content left.
+pub(crate) struct StftAccumBuf {
+    buffer: Vec<f32>,
+    pos: usize,
+}
+
+impl StftAccumBuf {
+    /// Create a new accumulation buffer.
+    pub(crate) fn new(fft_size: usize) -> Self {
+        Self { buffer: vec![0.0; fft_size], pos: 0 }
+    }
+
+    /// Add input multiplied by factor to the accumulation buffer.
+    pub(crate) fn add(&mut self, input: &[f32], factor: f32) {
+        assert_eq!(input.len(), self.buffer.len());
+        let remaining = self.buffer.len() - self.pos;
+        for i in 0..remaining {
+            self.buffer[self.pos + i] += input[i] * factor;
+        }
+        for i in remaining..input.len() {
+            self.buffer[i - remaining] += input[i] * factor;
+        }
+    }
+
+    /// Multiply the next `n` samples from the current position by window.
+    pub(crate) fn multiply_next(&mut self, window: &[f32]) {
+        assert!(window.len() <= self.buffer.len());
+        let first_part = (self.buffer.len() - self.pos).min(window.len());
+        for i in 0..first_part {
+            self.buffer[self.pos + i] *= window[i];
+        }
+        for i in first_part..window.len() {
+            self.buffer[i - first_part] *= window[i];
+        }
+    }
+
+    /// Output `hop_size` samples from the current position in the buffer, shift the buffer by hop_size and zero new
+    /// part.
+    pub(crate) fn output_next(&mut self, hop_size: usize, output: &mut Vec<f32>) {
+        // Output from pos to end of buffer
+        let first_part = (self.buffer.len() - self.pos).min(hop_size);
+        output.extend_from_slice(&self.buffer[self.pos..self.pos + first_part]);
+        self.buffer[self.pos..self.pos + first_part].fill(0.0);
+        let remaining = hop_size - first_part;
+        if remaining > 0 {
+            output.extend_from_slice(&self.buffer[0..remaining]);
+            self.buffer[0..remaining].fill(0.0);
+        }
+        self.pos = (self.pos + hop_size) % self.buffer.len();
+    }
+
+    /// Clear the buffer and reset position to zero.
+    pub(crate) fn reset(&mut self) {
+        self.buffer.fill(0.0);
+        self.pos = 0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StftAccumBuf;
+
+    #[test]
+    fn test_stft_accum_buf_multiple_outputs() {
+        let fft_size = 6;
+        let mut accum = StftAccumBuf::new(fft_size);
+
+        let window_a = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+        let window_b = [2.0, 2.0, 2.0, 2.0, 2.0, 2.0];
+        let window_c = [3.0, 3.0, 3.0, 3.0, 3.0, 3.0];
+        let window_d = [4.0, 4.0, 4.0, 4.0, 4.0, 4.0];
+
+        accum.add(&window_a, 2.0);
+        let mut output = Vec::new();
+        accum.output_next(2, &mut output);
+        assert_eq!(output, &[2.0, 2.0]);
+
+        accum.add(&window_b, 3.0);
+        accum.output_next(2, &mut output);
+        assert_eq!(output, &[2.0, 2.0, 8.0, 8.0]);
+
+        accum.add(&window_c, 5.0);
+        accum.output_next(2, &mut output);
+        assert_eq!(output, &[2.0, 2.0, 8.0, 8.0, 23.0, 23.0]);
+
+        accum.add(&window_d, 1.0);
+        accum.output_next(3, &mut output);
+        assert_eq!(output, &[2.0, 2.0, 8.0, 8.0, 23.0, 23.0, 25.0, 25.0, 19.0]);
+
+        accum.output_next(fft_size, &mut output);
+        assert_eq!(output, &[2.0, 2.0, 8.0, 8.0, 23.0, 23.0, 25.0, 25.0, 19.0, 19.0, 4.0, 4.0, 0.0, 0.0, 0.0]);
+
+        accum.output_next(fft_size, &mut output);
+        assert_eq!(
+            output,
+            &[
+                2.0, 2.0, 8.0, 8.0, 23.0, 23.0, 25.0, 25.0, 19.0, 19.0, 4.0, 4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0
+            ]
+        );
+    }
+
+    #[test]
+    fn test_stft_accum_buf_multiply_next() {
+        let fft_size = 8;
+        let mut accum = StftAccumBuf::new(fft_size);
+        for i in 0..fft_size {
+            accum.buffer[i] = (i + 1) as f32;
+        }
+        accum.pos = 0;
+
+        let window = [2.0, 3.0, 4.0, 5.0];
+        accum.multiply_next(&window);
+
+        assert_eq!(accum.buffer, &[2.0, 6.0, 12.0, 20.0, 5.0, 6.0, 7.0, 8.0]);
+        assert_eq!(accum.pos, 0);
+
+        let mut accum2 = StftAccumBuf::new(fft_size);
+        for i in 0..fft_size {
+            accum2.buffer[i] = (i + 1) as f32;
+        }
+        accum2.pos = 6;
+
+        let window2 = [0.5, 2.0, 3.0, 4.0];
+        accum2.multiply_next(&window2);
+        assert_eq!(accum2.buffer, &[3.0, 8.0, 3.0, 4.0, 5.0, 6.0, 3.5, 16.0]);
+        assert_eq!(accum2.pos, 6);
     }
 }

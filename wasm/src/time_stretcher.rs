@@ -3,8 +3,9 @@ use wasm_bindgen::prelude::*;
 use anyhow::{Result, bail};
 
 use crate::multi_processor::{MonoProcessor, MultiProcessor};
+use crate::peak_corrector::PeakCorrector;
 use crate::phase_gradient_time_stretch::PhaseGradientTimeStretch;
-use crate::stft::Stft;
+use crate::stft::{Stft, StftAccumBuf};
 use crate::web::{Float32Vec, WrapAnyhowError};
 use crate::window::WindowType;
 
@@ -22,6 +23,10 @@ pub struct TimeStretchParams {
     pub overlap: u32,
     /// Window type to use for STFT
     pub window_type: WindowType,
+    /// Peak correction block size
+    pub peak_correction_block_size: usize,
+    /// Peak correction recovery rate per block
+    pub peak_correction_recovery_rate: f32,
 }
 
 #[wasm_bindgen]
@@ -29,7 +34,15 @@ impl TimeStretchParams {
     #[wasm_bindgen(constructor)]
     /// Create new time stretch parameters with default FFT size, overlap and window.
     pub fn new(sample_rate: u32, time_stretch: f32) -> Self {
-        Self { time_stretch, sample_rate, fft_size: 4096, overlap: 8, window_type: WindowType::Hann }
+        Self {
+            time_stretch,
+            sample_rate,
+            fft_size: 4096,
+            overlap: 8,
+            window_type: WindowType::Hann,
+            peak_correction_block_size: 256,
+            peak_correction_recovery_rate: 0.01,
+        }
     }
 
     #[wasm_bindgen]
@@ -57,7 +70,7 @@ pub struct TimeStretcher {
     // smoothed by windows of STFT. There is no particular good way to work around this given that syn_hop_size !=
     // ana_hop_size. See also finish() for reverse problem: smoothing of the final part.
     input_buf: Vec<f32>,
-    output_accum_buf: Vec<f32>,
+    output_accum_buf: StftAccumBuf,
 }
 
 impl TimeStretcher {
@@ -99,16 +112,12 @@ impl TimeStretcher {
             syn_freq[0].im = 0.0;
             syn_freq[syn_freq.len() - 1].im = 0.0;
         });
-        for i in 0..self.params.fft_size {
-            self.output_accum_buf[i] += output[i] * norm_factor;
-        }
+        self.output_accum_buf.add(output, norm_factor);
     }
 
     /// Append next part of output accum buf to result and shift the buffers.
     fn output_and_shift(&mut self, output: &mut Vec<f32>) {
-        output.extend_from_slice(&self.output_accum_buf[..self.syn_hop_size]);
-        self.output_accum_buf.drain(0..self.syn_hop_size);
-        self.output_accum_buf.resize(self.params.fft_size, 0.0);
+        self.output_accum_buf.output_next(self.syn_hop_size, output);
         self.input_buf.drain(0..self.ana_hop_size);
     }
 }
@@ -128,7 +137,7 @@ impl MonoProcessor for TimeStretcher {
         let tail_len = params.fft_size / ana_hop_size * syn_hop_size;
         let tail_window = generate_tail_window(params.window_type, tail_len);
         let input_buf = Vec::with_capacity(params.fft_size);
-        let output_accum_buf = vec![0.0f32; params.fft_size];
+        let output_accum_buf = StftAccumBuf::new(params.fft_size);
 
         Ok(Self {
             params: *params,
@@ -147,6 +156,8 @@ impl MonoProcessor for TimeStretcher {
         let output_capacity = (input.len()) / self.ana_hop_size * self.syn_hop_size;
         output.reserve(output_capacity);
         let mut input_pos = 0;
+        // Note: we could allow do_stft process input directly without copying into self.input_buf, but this complicates
+        // the code without getting much performance benefits, compared to all the heavy processing.
         while input_pos < input.len() {
             let needed = self.params.fft_size - self.input_buf.len();
             let available = input.len() - input_pos;
@@ -180,10 +191,9 @@ impl MonoProcessor for TimeStretcher {
             self.do_stft();
 
             let tail_window_offset = i * self.syn_hop_size;
+            let tail_window_slice = &self.tail_window[tail_window_offset..tail_window_offset + self.syn_hop_size];
             // After the last iteration do windowing first.
-            for i in 0..self.syn_hop_size {
-                self.output_accum_buf[i] *= self.tail_window[tail_window_offset + i];
-            }
+            self.output_accum_buf.multiply_next(tail_window_slice);
             self.output_and_shift(output);
         }
 
@@ -193,13 +203,16 @@ impl MonoProcessor for TimeStretcher {
     fn reset(&mut self) {
         self.phase_gradient_vocoder.reset();
         self.input_buf.clear();
-        self.output_accum_buf.fill(0.0);
+        self.output_accum_buf.reset();
     }
 }
 
-/// Multi-channel time stretcher that processes interleaved audio data.
+/// Multi-channel time stretcher that processes interleaved audio data with optional automatic peak correction.
 #[wasm_bindgen]
-pub struct MultiTimeStretcher(MultiProcessor<TimeStretcher>);
+pub struct MultiTimeStretcher {
+    inner: MultiProcessor<TimeStretcher>,
+    correction: PeakCorrector,
+}
 
 #[wasm_bindgen]
 impl MultiTimeStretcher {
@@ -207,7 +220,12 @@ impl MultiTimeStretcher {
     /// Create a new multi-channel time stretcher for given number of channels.
     pub fn new(params: &TimeStretchParams, num_channels: usize) -> std::result::Result<Self, WrapAnyhowError> {
         let inner = MultiProcessor::<TimeStretcher>::new(params, num_channels).map_err(WrapAnyhowError)?;
-        Ok(Self(inner))
+
+        let correction =
+            PeakCorrector::new(params.peak_correction_block_size, params.peak_correction_recovery_rate, num_channels)
+                .map_err(WrapAnyhowError)?;
+
+        Ok(Self { inner, correction })
     }
 
     /// Process a chunk of interleaved audio samples through the time stretcher. Output is NOT cleared.
@@ -216,7 +234,7 @@ impl MultiTimeStretcher {
     /// samples.
     #[wasm_bindgen]
     pub fn process(&mut self, input: &Float32Vec, output: &mut Float32Vec) {
-        self.0.process(&input.0, &mut output.0);
+        self.process_vec(&input.0, &mut output.0);
     }
 
     /// Finish processing any remaining audio data in the internal buffers. This method must be called after all input
@@ -225,13 +243,30 @@ impl MultiTimeStretcher {
     /// Note: after calling `finish()`, the time stretcher is reset and ready to process new audio data.
     #[wasm_bindgen]
     pub fn finish(&mut self, output: &mut Float32Vec) {
-        self.0.finish(&mut output.0);
+        self.finish_vec(&mut output.0);
     }
 
     /// Reset all internal time stretchers.
     #[wasm_bindgen]
     pub fn reset(&mut self) {
-        self.0.reset();
+        self.inner.reset();
+        self.correction.reset();
+    }
+}
+
+impl MultiTimeStretcher {
+    pub fn process_vec(&mut self, input: &[f32], output: &mut Vec<f32>) {
+        let mut inner_output = Float32Vec::new(0);
+        self.inner.process(input, &mut inner_output.0);
+        self.correction.process(&inner_output.0, output);
+    }
+
+    pub fn finish_vec(&mut self, output: &mut Vec<f32>) {
+        let mut inner_output = Float32Vec::new(0);
+        self.inner.finish(&mut inner_output.0);
+        self.correction.process(&inner_output.0, output);
+        self.correction.finish(output);
+        self.reset();
     }
 }
 

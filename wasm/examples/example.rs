@@ -7,8 +7,8 @@ use hound::{WavSpec, WavWriter};
 use plotters::prelude::*;
 
 use wasm_main_module::{
-    EnvelopeShifter, MultiProcessor, PitchShiftParams, PitchShifter, SpectralHistogram, TimeStretchParams,
-    TimeStretcher, WindowType, compute_dominant_frequency, generate_sine_wave, interleave_samples,
+    EnvelopeShifter, MultiPitchShifter, MultiTimeStretcher, PitchShiftParams, SpectralHistogram, TimeStretchParams,
+    WindowType, compute_dominant_frequency, generate_sine_wave, interleave_samples,
 };
 
 fn parse_window_type(s: &str) -> Result<WindowType> {
@@ -136,7 +136,7 @@ fn save_wav(data: &[f32], sample_rate: u32, channels: usize, filename: &str) -> 
 
     let mut writer = WavWriter::create(filename, spec)?;
     for (i, &sample) in data.iter().enumerate() {
-        if sample.abs() > 1.0 {
+        if sample.abs() > 1.01 {
             println!("Oh no: sample {} has value {}", i, sample);
         }
         writer.write_sample(sample)?;
@@ -267,7 +267,18 @@ fn save_spectrum_plot_svg(
     let spectrum_points: Vec<(f32, f32)> = (0..num_bins).map(|i| (i as f32 * bin_width, spectrum[i])).collect();
     let envelope_points: Vec<(f32, f32)> = (0..envelope.len()).map(|i| (i as f32 * bin_width, envelope[i])).collect();
 
-    let max_magnitude = spectrum.iter().chain(envelope.iter()).copied().fold(0.0f32, f32::max).max(1e-1).min(1000.0);
+    let mut max_magnitude = 0.0;
+    for &s in spectrum {
+        if s > max_magnitude {
+            max_magnitude = s;
+        }
+    }
+    for &e in envelope {
+        if e > max_magnitude {
+            max_magnitude = e;
+        }
+    }
+    max_magnitude = max_magnitude.max(1000.0);
 
     let root = SVGBackend::new(filename, (1200, 800)).into_drawing_area();
     root.fill(&WHITE)?;
@@ -494,12 +505,12 @@ fn main() -> Result<()> {
             params.window_type = window_type;
 
             let mut output_data = vec![];
-            let mut stretcher = MultiProcessor::<TimeStretcher>::new(&params, input.channels)?;
+            let mut stretcher = MultiTimeStretcher::new(&params, input.channels)?;
             start_time = Instant::now();
             for chunk in input.data.chunks((fft_size - 1) * input.channels) {
-                stretcher.process(chunk, &mut output_data);
+                stretcher.process_vec(chunk, &mut output_data);
             }
-            stretcher.finish(&mut output_data);
+            stretcher.finish_vec(&mut output_data);
             println!(
                 "Output generated: {} samples in {}ms",
                 output_data.len(),
@@ -561,12 +572,12 @@ fn main() -> Result<()> {
             params.quefrency_cutoff = quefrency_cutoff;
 
             let mut output_data = vec![];
-            let mut shifter = MultiProcessor::<PitchShifter>::new(&params, input.channels)?;
+            let mut shifter = MultiPitchShifter::new(&params, input.channels)?;
             start_time = Instant::now();
             for chunk in input.data.chunks((fft_size - 1) * input.channels) {
-                shifter.process(chunk, &mut output_data);
+                shifter.process_vec(chunk, &mut output_data);
             }
-            shifter.finish(&mut output_data);
+            shifter.finish_vec(&mut output_data);
             println!(
                 "Output generated: {} samples in {}ms",
                 output_data.len(),

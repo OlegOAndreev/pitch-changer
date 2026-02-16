@@ -9,7 +9,7 @@ use crate::web::WrapAnyhowError;
 pub struct StreamingResampler {
     resampler: Async<f32>,
     // Buffer for leftover input samples that do not form a full chunk
-    previous_chunk: Vec<f32>,
+    previous_input: Vec<f32>,
 }
 
 // Rubato streaming interface is really really horrible. Thanks to Deepseek and Resampler::process_all_into_buffer
@@ -31,9 +31,9 @@ impl StreamingResampler {
         )
         .map_err(|e| WrapAnyhowError(anyhow::anyhow!("Failed to create resampler: {:?}", e)))?;
 
-        let previous_chunk = Vec::with_capacity(resampler.input_frames_next());
+        let previous_input = Vec::with_capacity(resampler.input_frames_next());
 
-        Ok(Self { resampler, previous_chunk })
+        Ok(Self { resampler, previous_input })
     }
 
     /// Resample part of the input audio. The remainder will be buffered and used during next `resample()` or `finish()`
@@ -50,26 +50,26 @@ impl StreamingResampler {
         let input_chunk_size = self.resampler.input_frames_next();
         let output_chunk_size = self.resampler.output_frames_max();
 
-        let output_capacity = (self.previous_chunk.len() + input.len()) / input_chunk_size * output_chunk_size;
+        let output_capacity = (self.previous_input.len() + input.len()) / input_chunk_size * output_chunk_size;
         output.reserve(output_capacity);
 
         let mut input_pos = 0;
 
         // If previous chunk is not empty, fill it and process the full chunk.
-        if !self.previous_chunk.is_empty() {
+        if !self.previous_input.is_empty() {
             assert!(
-                self.previous_chunk.len() < input_chunk_size,
+                self.previous_input.len() < input_chunk_size,
                 "self.previous_chunk.len() = {}, input_chunk_size = {}",
-                self.previous_chunk.len(),
+                self.previous_input.len(),
                 input_chunk_size
             );
-            let to_copy = input_chunk_size - self.previous_chunk.len();
+            let to_copy = input_chunk_size - self.previous_input.len();
             if input.len() < to_copy {
-                self.previous_chunk.extend_from_slice(input);
+                self.previous_input.extend_from_slice(input);
                 return;
             }
 
-            self.previous_chunk.extend_from_slice(&input[..to_copy]);
+            self.previous_input.extend_from_slice(&input[..to_copy]);
             self.resample_previous_chunk(output);
             input_pos += to_copy;
         }
@@ -81,12 +81,12 @@ impl StreamingResampler {
         }
 
         // Store the remainder in the previous_chunk
-        self.previous_chunk.clear();
-        self.previous_chunk.extend_from_slice(&input[input_pos..]);
+        self.previous_input.clear();
+        self.previous_input.extend_from_slice(&input[input_pos..]);
         assert!(
-            self.previous_chunk.len() < input_chunk_size,
+            self.previous_input.len() < input_chunk_size,
             "self.previous_chunk.len() = {}, input_chunk_size = {}",
-            self.previous_chunk.len(),
+            self.previous_input.len(),
             input_chunk_size
         );
     }
@@ -95,7 +95,7 @@ impl StreamingResampler {
     ///
     /// Note: after calling `finish()`, the resampler is reset and ready to process new audio data.
     pub fn finish(&mut self, output: &mut Vec<f32>) {
-        if self.previous_chunk.is_empty() {
+        if self.previous_input.is_empty() {
             return;
         }
         self.resample_previous_chunk(output);
@@ -106,7 +106,7 @@ impl StreamingResampler {
     /// Reset the resampler to its initial state, clearing any internal buffers.
     pub fn reset(&mut self) {
         self.resampler.reset();
-        self.previous_chunk.clear();
+        self.previous_input.clear();
     }
 
     fn resample_chunk(&mut self, input: &[f32], output: &mut Vec<f32>) {
@@ -135,10 +135,11 @@ impl StreamingResampler {
 
     fn resample_previous_chunk(&mut self, output: &mut Vec<f32>) {
         // This is an annoying dance around Rust borrowck: temporarily move the previous_chunk into local var and move
-        // local var back after processing.
-        let mut previous_chunk = mem::take(&mut self.previous_chunk);
+        // local var back after processing. The alternative would be creating a RefCell, but I do not like how
+        // cumbersome it is.
+        let mut previous_chunk = mem::take(&mut self.previous_input);
         self.resample_chunk(&previous_chunk, output);
-        mem::swap(&mut self.previous_chunk, &mut previous_chunk);
+        mem::swap(&mut self.previous_input, &mut previous_chunk);
         // Sanity check that nothing was added to self.previous_chunk during resample_chunk.
         assert!(previous_chunk.is_empty());
     }

@@ -4,8 +4,9 @@ use anyhow::{Result, bail};
 
 use crate::envelope_shifter::EnvelopeShifter;
 use crate::multi_processor::{MonoProcessor, MultiProcessor};
+use crate::peak_corrector::PeakCorrector;
 use crate::resampler::StreamingResampler;
-use crate::stft::Stft;
+use crate::stft::{Stft, StftAccumBuf};
 use crate::time_stretcher::{TimeStretchParams, TimeStretcher};
 use crate::web::{Float32Vec, WrapAnyhowError};
 use crate::window::WindowType;
@@ -30,6 +31,10 @@ pub struct PitchShiftParams {
     ///
     /// If the default value of 0.0 is used, no formant preservation is applied.
     pub quefrency_cutoff: f32,
+    /// Peak correction block size
+    pub peak_correction_block_size: usize,
+    /// Peak correction recovery rate per block
+    pub peak_correction_recovery_rate: f32,
 }
 
 #[wasm_bindgen]
@@ -45,6 +50,8 @@ impl PitchShiftParams {
             overlap: stretch_params.overlap,
             window_type: stretch_params.window_type,
             quefrency_cutoff: 0.0,
+            peak_correction_block_size: 256,
+            peak_correction_recovery_rate: 0.01,
         }
     }
 
@@ -73,7 +80,7 @@ pub struct PitchShifter {
     // we have a single hop size.
     stretched_buf: Vec<f32>,
     shifted_buf: Vec<f32>,
-    output_accum_buf: Vec<f32>,
+    output_accum_buf: StftAccumBuf,
 }
 
 impl PitchShifter {
@@ -94,9 +101,7 @@ impl PitchShifter {
         while shifted_pos + self.envelope_fft_size < self.shifted_buf.len() {
             // Do one STFT iteration.
             self.do_stft(shifted_pos);
-            output.extend_from_slice(&self.output_accum_buf[..self.envelope_hop_size]);
-            self.output_accum_buf.drain(0..self.envelope_hop_size);
-            self.output_accum_buf.resize(self.envelope_fft_size, 0.0);
+            self.output_accum_buf.output_next(self.envelope_hop_size, output);
 
             shifted_pos += self.envelope_hop_size;
         }
@@ -110,7 +115,7 @@ impl PitchShifter {
         let remainder = self.shifted_buf.len();
         self.shifted_buf.resize(self.envelope_fft_size, 0.0);
         self.do_stft(0);
-        output.extend_from_slice(&self.output_accum_buf[..remainder]);
+        self.output_accum_buf.output_next(remainder, output);
     }
 
     fn do_stft(&mut self, shifted_buf_pos: usize) {
@@ -120,10 +125,7 @@ impl PitchShifter {
             syn_freq.copy_from_slice(ana_freq);
             self.envelope_shifter.shift_envelope(syn_freq);
         });
-
-        for i in 0..self.envelope_fft_size {
-            self.output_accum_buf[i] += stft_output[i] * norm_factor;
-        }
+        self.output_accum_buf.add(stft_output, norm_factor);
     }
 }
 
@@ -162,7 +164,7 @@ impl MonoProcessor for PitchShifter {
             envelope_shifter,
             stretched_buf: vec![],
             shifted_buf: vec![],
-            output_accum_buf: vec![0.0; envelope_fft_size],
+            output_accum_buf: StftAccumBuf::new(envelope_fft_size),
         })
     }
 
@@ -196,13 +198,16 @@ impl MonoProcessor for PitchShifter {
         self.resampler.reset();
         self.stretched_buf.clear();
         self.shifted_buf.clear();
-        self.output_accum_buf.fill(0.0);
+        self.output_accum_buf.reset();
     }
 }
 
-/// Multi-channel pitch shifter that processes interleaved audio data.
+/// Multi-channel pitch shifter that processes interleaved audio data with optional automatic peak correction.
 #[wasm_bindgen]
-pub struct MultiPitchShifter(MultiProcessor<PitchShifter>);
+pub struct MultiPitchShifter {
+    inner: MultiProcessor<PitchShifter>,
+    correction: PeakCorrector,
+}
 
 #[wasm_bindgen]
 impl MultiPitchShifter {
@@ -210,31 +215,53 @@ impl MultiPitchShifter {
     /// Create a new multi-channel pitch shifter for given number of channels.
     pub fn new(params: &PitchShiftParams, num_channels: usize) -> std::result::Result<Self, WrapAnyhowError> {
         let inner = MultiProcessor::<PitchShifter>::new(params, num_channels).map_err(WrapAnyhowError)?;
-        Ok(Self(inner))
+
+        let correction =
+            PeakCorrector::new(params.peak_correction_block_size, params.peak_correction_recovery_rate, num_channels)
+                .map_err(WrapAnyhowError)?;
+
+        Ok(Self { inner, correction })
     }
 
-    /// Process a chunk of interleaved audio samples through the time stretcher. Output is NOT cleared.
-    ///
-    /// Note: you need to call `finish()` to receive the last output chunks after you call `process()` for all input
-    /// samples.
+    /// Process a chunk of interleaved audio samples through the pitch shifter with optional peak correction.
     #[wasm_bindgen]
     pub fn process(&mut self, input: &Float32Vec, output: &mut Float32Vec) {
-        self.0.process(&input.0, &mut output.0);
+        let mut inner_output = Float32Vec::new(0);
+        self.inner.process(&input.0, &mut inner_output.0);
+        self.correction.process(&inner_output.0, &mut output.0);
     }
 
-    /// Finish processing any remaining audio data in the internal buffers. This method must be called after all input
-    /// has been processed via `process()`. Output is NOT cleared.
-    ///
-    /// Note: after calling `finish()`, the time stretcher is reset and ready to process new audio data.
+    /// Finish processing any remaining audio data.
     #[wasm_bindgen]
     pub fn finish(&mut self, output: &mut Float32Vec) {
-        self.0.finish(&mut output.0);
+        let mut inner_output = Float32Vec::new(0);
+        self.inner.finish(&mut inner_output.0);
+        self.correction.process(&inner_output.0, &mut output.0);
+        self.correction.finish(&mut output.0);
+        self.reset();
     }
 
-    /// Reset all internal time stretchers.
+    /// Reset all internal state.
     #[wasm_bindgen]
     pub fn reset(&mut self) {
-        self.0.reset();
+        self.inner.reset();
+        self.correction.reset();
+    }
+}
+
+impl MultiPitchShifter {
+    pub fn process_vec(&mut self, input: &[f32], output: &mut Vec<f32>) {
+        let mut inner_output = Float32Vec::new(0);
+        self.inner.process(&input, &mut inner_output.0);
+        self.correction.process(&inner_output.0, output);
+    }
+
+    pub fn finish_vec(&mut self, output: &mut Vec<f32>) {
+        let mut inner_output = Float32Vec::new(0);
+        self.inner.finish(&mut inner_output.0);
+        self.correction.process(&inner_output.0, output);
+        self.correction.finish(output);
+        self.reset();
     }
 }
 
