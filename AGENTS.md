@@ -20,6 +20,9 @@
 ## TypeScript rules
 * We use SharedArrayBuffer for synchronization with workers and audio worklets
 
+## Rust rules
+* Prefer for loops to iterators: they are more readable and usually optimize into the same code as iterators now
+
 ## Audio
 * WebAudio produces and accepts all audio in deinterleaved (planar) formats, one Float32Array per channel.
 * Internally all data is interleaved for passing around:

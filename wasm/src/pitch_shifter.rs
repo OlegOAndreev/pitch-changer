@@ -114,7 +114,7 @@ impl PitchShifter {
     }
 
     fn do_stft(&mut self, shifted_buf_pos: usize) {
-        let norm_factor = self.envelope_stft.get_norm_factor(self.envelope_hop_size) * 0.5;
+        let norm_factor = self.envelope_stft.get_norm_factor(self.envelope_hop_size);
         let input = &self.shifted_buf[shifted_buf_pos..shifted_buf_pos + self.envelope_fft_size];
         let stft_output = self.envelope_stft.process(input, |ana_freq, syn_freq| {
             syn_freq.copy_from_slice(ana_freq);
