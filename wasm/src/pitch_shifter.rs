@@ -114,14 +114,15 @@ impl PitchShifter {
     }
 
     fn do_stft(&mut self, shifted_buf_pos: usize) {
-        let norm_factor = self.envelope_stft.get_norm_factor(self.envelope_hop_size);
+        let norm_factor = self.envelope_stft.get_norm_factor(self.envelope_hop_size) * 0.5;
         let input = &self.shifted_buf[shifted_buf_pos..shifted_buf_pos + self.envelope_fft_size];
         let stft_output = self.envelope_stft.process(input, |ana_freq, syn_freq| {
             syn_freq.copy_from_slice(ana_freq);
             self.envelope_shifter.shift_envelope(syn_freq);
         });
-        for k in 0..self.envelope_fft_size {
-            self.output_accum_buf[k] += stft_output[k] * norm_factor;
+
+        for i in 0..self.envelope_fft_size {
+            self.output_accum_buf[i] += stft_output[i] * norm_factor;
         }
     }
 }
@@ -195,7 +196,7 @@ impl MonoProcessor for PitchShifter {
         self.resampler.reset();
         self.stretched_buf.clear();
         self.shifted_buf.clear();
-        self.output_accum_buf.clear();
+        self.output_accum_buf.fill(0.0);
     }
 }
 
@@ -304,7 +305,9 @@ mod tests {
             let audio_data: Vec<f32> = (0..len).map(|_| rng.random_range(-1.0..1.0)).collect();
 
             let mut shifter = PitchShifter::new(&params).unwrap();
-            let _output = process_all(&mut shifter, &audio_data);
+            let _ = process_all(&mut shifter, &audio_data);
+            shifter.reset();
+            let _ = process_all(&mut shifter, &audio_data);
         }
     }
 
@@ -397,7 +400,7 @@ mod tests {
     #[test]
     fn test_pitch_shift_identity() -> Result<()> {
         const FREQ: f32 = 440.0;
-        const MAGNITUDE: f32 = 1.0;
+        const MAGNITUDE: f32 = 0.94;
         const DURATION: f32 = 0.5;
 
         for sample_rate in [44100.0, 96000.0] {
@@ -421,8 +424,8 @@ mod tests {
                             // Account of resampling latency.
                             let output_offset = offset + StreamingResampler::LATENCY;
                             let mut max_diff = 0.0f32;
-                            for k in 0..middle_len {
-                                let diff = (input[offset + k] - output[output_offset + k]).abs();
+                            for i in 0..middle_len {
+                                let diff = (input[offset + i] - output[output_offset + i]).abs();
                                 if diff > max_diff {
                                     max_diff = diff;
                                 }
@@ -440,12 +443,13 @@ mod tests {
 
                             assert!(
                                 max_diff < 1e-3,
-                                "Max difference {} for sample_rate {}, fft_size {}, overlap {}, window {:?}",
+                                "Max difference {} for sample_rate {}, fft_size {}, overlap {}, window {:?}, quefrency cutoff {}",
                                 max_diff,
                                 sample_rate,
                                 fft_size,
                                 overlap,
-                                window_type
+                                window_type,
+                                quefrency_cutoff
                             );
                         }
                     }

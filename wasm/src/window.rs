@@ -122,8 +122,8 @@ mod tests {
                 // For each position within one hop, sum squared values across all overlapping windows
                 for pos in 0..hop_size {
                     let mut sum = 0.0;
-                    for k in 0..overlap {
-                        let idx = k * hop_size + pos;
+                    for i in 0..overlap {
+                        let idx = i * hop_size + pos;
                         sum += window[idx] * window[idx];
                     }
                     assert!(
@@ -152,15 +152,15 @@ mod tests {
         for size in [256, 512, 1024] {
             let full_window = generate_window(window_type, size * 2);
             let half_window = generate_tail_window(window_type, size);
-            for k in 0..size {
-                let actual = half_window[k];
-                let expected = full_window[k + size];
+            for i in 0..size {
+                let actual = half_window[i];
+                let expected = full_window[i + size];
                 assert!(
                     (actual - expected).abs() < 1e-6,
                     "window_type={:?}, size={}, k={}: actual={}, expected={}",
                     window_type,
                     size,
-                    k,
+                    i,
                     actual,
                     expected
                 );

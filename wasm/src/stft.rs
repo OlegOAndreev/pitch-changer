@@ -81,8 +81,8 @@ impl Stft {
         assert_eq!(input.len(), self.fft_size);
         self.input_buf.copy_from_slice(input);
 
-        for k in 0..self.fft_size {
-            self.input_buf[k] = input[k] * self.window[k];
+        for i in 0..self.fft_size {
+            self.input_buf[i] = input[i] * self.window[i];
         }
         self.forward_plan
             .process_with_scratch(&mut self.input_buf, &mut self.input_freq_buf, &mut self.scratch_forward)
@@ -93,8 +93,8 @@ impl Stft {
         self.inverse_plan
             .process_with_scratch(&mut self.output_freq_buf, &mut self.output_buf, &mut self.scratch_inverse)
             .expect("failed inverse STFT pass");
-        for k in 0..self.fft_size {
-            self.output_buf[k] *= self.window[k];
+        for i in 0..self.fft_size {
+            self.output_buf[i] *= self.window[i];
         }
 
         &self.output_buf

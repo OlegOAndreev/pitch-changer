@@ -135,7 +135,10 @@ fn save_wav(data: &[f32], sample_rate: u32, channels: usize, filename: &str) -> 
     };
 
     let mut writer = WavWriter::create(filename, spec)?;
-    for &sample in data {
+    for (i, &sample) in data.iter().enumerate() {
+        if sample.abs() > 1.0 {
+            println!("Oh no: sample {} has value {}", i, sample);
+        }
         writer.write_sample(sample)?;
     }
     writer.finalize()?;

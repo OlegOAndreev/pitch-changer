@@ -99,8 +99,8 @@ impl TimeStretcher {
             syn_freq[0].im = 0.0;
             syn_freq[syn_freq.len() - 1].im = 0.0;
         });
-        for k in 0..self.params.fft_size {
-            self.output_accum_buf[k] += output[k] * norm_factor;
+        for i in 0..self.params.fft_size {
+            self.output_accum_buf[i] += output[i] * norm_factor;
         }
     }
 
@@ -181,8 +181,8 @@ impl MonoProcessor for TimeStretcher {
 
             let tail_window_offset = i * self.syn_hop_size;
             // After the last iteration do windowing first.
-            for k in 0..self.syn_hop_size {
-                self.output_accum_buf[k] *= self.tail_window[tail_window_offset + k];
+            for i in 0..self.syn_hop_size {
+                self.output_accum_buf[i] *= self.tail_window[tail_window_offset + i];
             }
             self.output_and_shift(output);
         }
@@ -294,7 +294,9 @@ mod tests {
             let audio_data: Vec<f32> = (0..len).map(|_| rng.random_range(-1.0..1.0)).collect();
 
             let mut stretcher = TimeStretcher::new(&params).unwrap();
-            let _output = process_all(&mut stretcher, &audio_data);
+            let _ = process_all(&mut stretcher, &audio_data);
+            stretcher.reset();
+            let _ = process_all(&mut stretcher, &audio_data);
         }
     }
 
@@ -408,8 +410,8 @@ mod tests {
                         let offset = fft_size * 2;
                         let middle_len = (input.len() - offset * 2).min(output.len() - offset * 2);
                         let mut max_diff = 0.0f32;
-                        for k in 0..middle_len {
-                            let diff = (input[k + offset] - output[k + offset]).abs();
+                        for i in 0..middle_len {
+                            let diff = (input[i + offset] - output[i + offset]).abs();
                             if diff > max_diff {
                                 max_diff = diff;
                             }

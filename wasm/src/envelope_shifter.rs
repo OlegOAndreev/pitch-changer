@@ -10,7 +10,7 @@ use crate::util::linear_sample;
 ///   output_magnitude[i] = magnitude[i] * spectral_envelope[i * shift_ratio] / spectral_envelope[i]
 pub struct EnvelopeShifter {
     num_bins: usize,
-    cepstrum_cutoff_samples: usize,
+    cepstrum_cutoff_bins: usize,
     shift_ratio: f32,
     forward_plan: Arc<dyn RealToComplex<f32>>,
     inverse_plan: Arc<dyn ComplexToReal<f32>>,
@@ -23,7 +23,7 @@ pub struct EnvelopeShifter {
 }
 
 impl EnvelopeShifter {
-    pub fn new(num_bins: usize, cepstrum_cutoff_samples: usize, shift_ratio: f32) -> Self {
+    pub fn new(num_bins: usize, cepstrum_cutoff_bins: usize, shift_ratio: f32) -> Self {
         use realfft::RealFftPlanner;
 
         // We use num_bins - 1 because we do not touch the DC anyway and num_bins-1 is very likely to be a power-of-two
@@ -40,7 +40,7 @@ impl EnvelopeShifter {
 
         Self {
             num_bins,
-            cepstrum_cutoff_samples,
+            cepstrum_cutoff_bins,
             shift_ratio,
             forward_plan,
             inverse_plan,
@@ -58,10 +58,11 @@ impl EnvelopeShifter {
         for k in 1..self.num_bins {
             self.magnitudes_buf[k - 1] = freq[k].norm();
         }
+
         self.compute_envelope_impl();
 
         // magnitudes_buf now contains the spectral envelope. We need to shift this envelope down by shift_ratio:
-        // shifted_envelope[k] ~= envelope[k * pitch_shift],
+        // shifted_envelope[k] ~= envelope[k * pitch_shift]
         for k in 1..self.num_bins {
             let cur_envelope = self.magnitudes_buf[k - 1];
             let shifted_envelope = linear_sample(&self.magnitudes_buf, (k - 1) as f32 * self.shift_ratio);
@@ -98,7 +99,7 @@ impl EnvelopeShifter {
                 .expect("failed forward STFT pass");
 
             // Do filtering
-            for k in self.cepstrum_cutoff_samples..self.cepstrum_buf.len() {
+            for k in self.cepstrum_cutoff_bins..self.cepstrum_buf.len() {
                 self.cepstrum_buf[k] = Complex::ZERO;
             }
 
@@ -111,11 +112,11 @@ impl EnvelopeShifter {
             }
         }
 
-        // Make the upper part of envelope constant (see www.diva-portal.org/smash/get/diva2%3A1381398/FULLTEXT01.pdf)
         for k in 0..self.num_bins - 1 {
             self.magnitudes_buf[k] = (self.new_magnitudes_buf[k] * norm).exp2();
         }
 
+        // Make the upper part of envelope constant (see www.diva-portal.org/smash/get/diva2%3A1381398/FULLTEXT01.pdf)
         let upper_bin = self.num_bins * 3 / 4;
         for k in upper_bin..self.num_bins - 1 {
             self.magnitudes_buf[k] = self.magnitudes_buf[upper_bin];
