@@ -62,8 +62,8 @@ impl EnvelopeShifter {
         self.compute_envelope_impl();
 
         // magnitudes_buf now contains the spectral envelope. We need to shift this envelope down by shift_ratio:
-        // shifted_envelope[k] ~= envelope[k * pitch_shift]
-        for k in 1..self.num_bins {
+        // shifted_envelope[k] ~= envelope[k * pitch_shift]. Do not touch the upper bin as well.
+        for k in 1..self.num_bins - 1 {
             let cur_envelope = self.magnitudes_buf[k - 1];
             let shifted_envelope = linear_sample(&self.magnitudes_buf, (k - 1) as f32 * self.shift_ratio);
             freq[k] *= shifted_envelope / cur_envelope;
