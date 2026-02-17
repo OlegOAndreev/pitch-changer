@@ -109,6 +109,13 @@ impl StreamingResampler {
         self.previous_input.clear();
     }
 
+    /// Update the resampling ratio.
+    pub fn set_ratio(&mut self, sample_rate_ratio: f32) {
+        self.resampler
+            .set_resample_ratio(sample_rate_ratio as f64, true)
+            .expect("Failed to change resampling ratio");
+    }
+
     fn resample_chunk(&mut self, input: &[f32], output: &mut Vec<f32>) {
         let input_chunk_size = self.resampler.input_frames_next();
         let output_chunk_size = self.resampler.output_frames_next();

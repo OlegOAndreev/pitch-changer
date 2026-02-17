@@ -80,6 +80,12 @@ impl EnvelopeShifter {
         output.extend_from_slice(&self.magnitudes_buf);
     }
 
+    /// Update the pitch shift ratio.
+    pub fn set_params(&mut self, cepstrum_cutoff_bins: usize, shift_ratio: f32) {
+        self.cepstrum_cutoff_bins = cepstrum_cutoff_bins;
+        self.shift_ratio = shift_ratio;
+    }
+
     // Assume that magnitudes_buf contains current magnitudes and update it to contain the envelope.
     fn compute_envelope_impl(&mut self) {
         const EPSILON: f32 = 1e-6;

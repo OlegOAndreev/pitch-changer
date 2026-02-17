@@ -12,13 +12,14 @@ import initWasmModule, {
 } from '../wasm/build/wasm_main_module';
 import type { WorkerApi, WorkerParams } from './audio-processor';
 import { Float32RingBuffer, pushAllRingBuffer } from './sync';
-import type { InterleavedAudio } from './types';
+import type { InterleavedAudio, ProcessingMode } from './types';
 
 type Processor = MultiPitchShifter | MultiTimeStretcher;
 
 class WorkerImpl implements WorkerApi {
     params: WorkerParams = { processingMode: 'pitch', pitchValue: 1.0 }
     paramsDirty: boolean = false;
+    currentProcessorMode: ProcessingMode | null = null;
     processor: Processor | null = null;
     processorSampleRate: number | null = null;
     processorNumChannels: number | null = null;
@@ -87,9 +88,16 @@ class WorkerImpl implements WorkerApi {
     }
 
     private getProcessor(sampleRate: number, numChannels: number): Processor {
-        if (this.processor && !this.paramsDirty
-            && this.processorSampleRate == sampleRate && this.processorNumChannels == numChannels) {
-            return this.processor;
+        if (this.processor && this.processorSampleRate == sampleRate && this.processorNumChannels == numChannels) {
+            if (!this.paramsDirty) {
+                return this.processor;
+            }
+            // Do not recreate processor if only the pitch changed.
+            if (this.currentProcessorMode === this.params.processingMode) {
+                console.log(`Setting new pitch ${this.params.pitchValue} for processor`);
+                this.processor.set_param_value(this.params.pitchValue);
+                return this.processor;
+            }
         }
 
         console.log('Recreating processor with params', this.params, 'numChannels', numChannels);

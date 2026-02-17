@@ -66,6 +66,7 @@ impl PitchShiftParams {
 /// has the ~same length as the input.
 #[wasm_bindgen]
 pub struct PitchShifter {
+    params: PitchShiftParams,
     time_stretcher: TimeStretcher,
     resampler: StreamingResampler,
 
@@ -155,6 +156,7 @@ impl MonoProcessor for PitchShifter {
         let envelope_shifter = EnvelopeShifter::new(num_bins, cepstrum_cutoff_samples, params.pitch_shift);
 
         Ok(Self {
+            params: *params,
             time_stretcher,
             resampler,
             envelope_shift_enabled,
@@ -199,6 +201,15 @@ impl MonoProcessor for PitchShifter {
         self.stretched_buf.clear();
         self.shifted_buf.clear();
         self.output_accum_buf.reset();
+    }
+
+    fn set_param_value(&mut self, value: f32) {
+        self.params.pitch_shift = value;
+        self.time_stretcher.set_param_value(value);
+        self.resampler.set_ratio(1.0 / self.params.pitch_shift);
+        let cepstrum_cutoff_samples = (self.params.quefrency_cutoff * self.params.sample_rate as f32
+            / (1000.0 * self.params.pitch_shift)) as usize;
+        self.envelope_shifter.set_params(cepstrum_cutoff_samples, self.params.pitch_shift);
     }
 }
 
@@ -246,6 +257,12 @@ impl MultiPitchShifter {
     pub fn reset(&mut self) {
         self.inner.reset();
         self.correction.reset();
+    }
+
+    /// Set the pitch shift factor for all internal processors.
+    #[wasm_bindgen]
+    pub fn set_param_value(&mut self, value: f32) {
+        self.inner.set_param_value(value);
     }
 }
 

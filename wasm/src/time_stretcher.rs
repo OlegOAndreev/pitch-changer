@@ -205,6 +205,14 @@ impl MonoProcessor for TimeStretcher {
         self.input_buf.clear();
         self.output_accum_buf.reset();
     }
+
+    fn set_param_value(&mut self, value: f32) {
+        use crate::window::generate_tail_window;
+        self.params.time_stretch = value;
+        self.syn_hop_size = (self.ana_hop_size as f32 * value) as usize;
+        let tail_len = self.params.fft_size / self.ana_hop_size * self.syn_hop_size;
+        self.tail_window = generate_tail_window(self.params.window_type, tail_len);
+    }
 }
 
 /// Multi-channel time stretcher that processes interleaved audio data with optional automatic peak correction.
@@ -251,6 +259,12 @@ impl MultiTimeStretcher {
     pub fn reset(&mut self) {
         self.inner.reset();
         self.correction.reset();
+    }
+
+    /// Update the time stretch factor.
+    #[wasm_bindgen]
+    pub fn set_param_value(&mut self, value: f32) {
+        self.inner.set_param_value(value);
     }
 }
 

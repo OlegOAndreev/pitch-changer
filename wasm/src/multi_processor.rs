@@ -22,6 +22,9 @@ pub trait MonoProcessor : Sized {
 
     /// Reset the processor to its initial state.
     fn reset(&mut self);
+
+    /// This is a horrible hack: this sets "the Parameter" value for the most important processor parameter, I guess...
+    fn set_param_value(&mut self, value: f32);
 }
 
 /// Wrapper for mono audio processors which de-interleaves the audio and then calls separate processors per channel.
@@ -93,6 +96,13 @@ impl<P: MonoProcessor> MultiProcessor<P> {
             processor.reset();
         }
     }
+
+    /// Set parameter value for all processors.
+    pub fn set_param_value(&mut self, value: f32) {
+        for processor in &mut self.processors {
+            processor.set_param_value(value);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -123,6 +133,10 @@ mod tests {
 
         fn reset(&mut self) {
             // No state to reset
+        }
+
+        fn set_param_value(&mut self, value: f32) {
+            self.factor = value;
         }
     }
 
@@ -195,5 +209,25 @@ mod tests {
         let factor = 1.0;
         let result = MultiProcessor::<MultiplyProcessor>::new(&factor, 0);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_multiply_processor_set_param_value() {
+        let factor = 2.0;
+        let mut mp = MultiProcessor::<MultiplyProcessor>::new(&factor, 1).unwrap();
+        
+        let input = vec![1.0, 2.0, 3.0];
+        let mut output = Vec::new();
+        mp.process(&input, &mut output);
+        assert_eq!(output, vec![2.0, 4.0, 6.0]);
+        
+        // Change parameter
+        mp.set_param_value(3.0);
+        
+        // Process new input with new parameter
+        let input2 = vec![1.0, 2.0];
+        let mut output2 = Vec::new();
+        mp.process(&input2, &mut output2);
+        assert_eq!(output2, vec![3.0, 6.0]);
     }
 }
