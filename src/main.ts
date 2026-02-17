@@ -438,21 +438,8 @@ async function handleBenchmarkClick() {
 
 async function handleCopyDebugClick() {
     const text = debugInfo.textContent;
-    if (!text) {
-        console.warn('No debug info to copy');
-        return;
-    }
     try {
         await navigator.clipboard.writeText(text);
-        // Provide visual feedback (optional)
-        const originalTitle = copyDebugBtn.title;
-        copyDebugBtn.title = 'Copied!';
-        copyDebugBtn.classList.add('copied');
-        setTimeout(() => {
-            copyDebugBtn.title = originalTitle;
-            copyDebugBtn.classList.remove('copied');
-        }, 2000);
-        console.log('Debug info copied to clipboard');
     } catch (error) {
         console.error('Failed to copy debug info:', error);
         alert('Failed to copy to clipboard: ' + error);
