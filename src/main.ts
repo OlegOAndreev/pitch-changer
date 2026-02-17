@@ -146,6 +146,7 @@ const spectrogramCanvas = getById<HTMLCanvasElement>('spectrogram-canvas');
 const debugToggleBtn = getById<HTMLButtonElement>('debug-toggle-btn');
 const debugPanel = getById<HTMLDivElement>('debug-panel');
 const debugInfo = getById<HTMLSpanElement>('debug-info');
+const copyDebugBtn = getById<HTMLButtonElement>('copy-debug-btn');
 const benchmarkBtn = getById<HTMLButtonElement>('benchmark-btn');
 
 // Reset all buttons to default state
@@ -403,7 +404,7 @@ async function handleDebugPanelClick() {
         }
         // Add benchmark results if available
         if (appState.benchmarkTimes) {
-            info += `\n\nBenchmark (performance-to-realtime):`;
+            info += `\n\nBenchmark (processing-to-realtime):`;
             const { 'time': timeStretch, pitch, 'formant-preserving-pitch': formantPitch } = appState.benchmarkTimes;
             info += `\n  time-stretch: ${timeStretch.toFixed(2)}`;
             info += `\n  pitch: ${pitch.toFixed(2)}`;
@@ -435,6 +436,29 @@ async function handleBenchmarkClick() {
     }
 }
 
+async function handleCopyDebugClick() {
+    const text = debugInfo.textContent;
+    if (!text) {
+        console.warn('No debug info to copy');
+        return;
+    }
+    try {
+        await navigator.clipboard.writeText(text);
+        // Provide visual feedback (optional)
+        const originalTitle = copyDebugBtn.title;
+        copyDebugBtn.title = 'Copied!';
+        copyDebugBtn.classList.add('copied');
+        setTimeout(() => {
+            copyDebugBtn.title = originalTitle;
+            copyDebugBtn.classList.remove('copied');
+        }, 2000);
+        console.log('Debug info copied to clipboard');
+    } catch (error) {
+        console.error('Failed to copy debug info:', error);
+        alert('Failed to copy to clipboard: ' + error);
+    }
+}
+
 recordBtn.addEventListener('click', () => handleRecordClick());
 playBtn.addEventListener('click', () => handlePlayClick());
 loadBtn.addEventListener('click', () => handleLoadClick());
@@ -451,6 +475,6 @@ fileInput.addEventListener('change', withButtonsDisabled([loadBtn], async () => 
     await handleFileInputChange(file);
 }));
 debugToggleBtn.addEventListener('click', () => handleDebugPanelClick());
+copyDebugBtn.addEventListener('click', () => handleCopyDebugClick());
 benchmarkBtn.addEventListener('click', () => handleBenchmarkClick());
-debugPanel.addEventListener('click', () => navigator.clipboard.writeText(debugInfo.textContent));
-debugInfo.addEventListener('click', () => navigator.clipboard.writeText(debugInfo.textContent));
+debugInfo.addEventListener('click', () => handleDebugPanelClick());

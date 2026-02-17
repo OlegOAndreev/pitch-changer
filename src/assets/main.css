@@ -279,7 +279,7 @@ h1 {
     right: 20px;
     width: 36px;
     height: 36px;
-    border-radius: 25%;
+    border-radius: 12px;
     background-color: rgba(0, 0, 0, 0.2);
     border: 1px solid rgba(0, 0, 0, 0.3);
     color: #000;
@@ -296,7 +296,7 @@ h1 {
     position: fixed;
     bottom: 70px;
     right: 20px;
-    width: 400px;
+    width: 350px;
     max-height: 500px;
     background-color: white;
     border: 1px solid #ccc;
@@ -305,6 +305,33 @@ h1 {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+}
+
+#copy-debug-btn {
+    position: absolute;
+    bottom: 36px;
+    right: 8px;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    border: none;
+    background-color: rgba(0, 0, 0, 0.05);
+    color: #555;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 1;
+}
+
+#copy-debug-btn:hover {
+    opacity: 1;
+    background-color: rgba(0, 0, 0, 0.1);
+}
+
+#copy-debug-btn i {
+    font-size: 12px;
 }
 
 #benchmark-btn {
@@ -316,6 +343,7 @@ h1 {
 
 #debug-info {
     padding: 16px;
+    /* padding: 36px 16px 16px; */
     font-size: 13px;
     overflow-y: auto;
     flex-grow: 1;
