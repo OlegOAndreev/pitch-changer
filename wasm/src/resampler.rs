@@ -24,7 +24,7 @@ impl StreamingResampler {
         let resampler = Async::<f32>::new_poly(
             sample_rate_ratio as f64,
             1.0,
-            rubato::PolynomialDegree::Quintic,
+            rubato::PolynomialDegree::Cubic,
             512,
             1,
             rubato::FixedAsync::Input,
