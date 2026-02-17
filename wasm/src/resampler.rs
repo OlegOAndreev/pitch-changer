@@ -16,7 +16,7 @@ pub struct StreamingResampler {
 // giving inspiration on how to actually use it.
 impl StreamingResampler {
     #[allow(unused)]
-    pub const LATENCY: usize = 2;
+    pub const LATENCY: usize = 1;
 
     /// Create a new resampler with the given sample rate ratio. The ratio is output sample rate / input sample rate.
     pub fn new(sample_rate_ratio: f32) -> std::result::Result<Self, WrapAnyhowError> {
