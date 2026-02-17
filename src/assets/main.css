@@ -307,6 +307,13 @@ h1 {
     overflow: hidden;
 }
 
+#benchmark-btn {
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    margin: 8px;
+}
+
 #debug-info {
     padding: 16px;
     font-size: 13px;

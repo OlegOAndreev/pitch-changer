@@ -9,6 +9,7 @@ import { Spectrogram } from './spectrogram';
 import { drainRingBuffer, Float32RingBuffer } from './sync';
 import { getAudioLength, getAudioSeconds, type InterleavedAudio, type ProcessingMode } from './types';
 import { debounce, getById, secondsToString, withButtonsDisabled } from './utils';
+import { runBenchmark, type BenchmarkResults } from './benchmark';
 
 const MAX_PITCH_VALUE = 2.0;
 const MIN_PITCH_VALUE = 0.5;
@@ -49,7 +50,7 @@ class AppState {
     sourceAudio: InterleavedAudio | null = null;
     processor: AudioProcessor = new AudioProcessor();
     spectrogram: Spectrogram | null = null;
-    performanceRatio: number | null = null;
+    benchmarkTimes: BenchmarkResults | null = null;
 
     // Audio player and recorder are lazy initialized because they affect the browser (and OS) UI
     private audioContext: AudioContext | null = null;
@@ -145,6 +146,7 @@ const spectrogramCanvas = getById<HTMLCanvasElement>('spectrogram-canvas');
 const debugToggleBtn = getById<HTMLButtonElement>('debug-toggle-btn');
 const debugPanel = getById<HTMLDivElement>('debug-panel');
 const debugInfo = getById<HTMLSpanElement>('debug-info');
+const benchmarkBtn = getById<HTMLButtonElement>('benchmark-btn');
 
 // Reset all buttons to default state
 async function onBeforeSourceAudioDataSet() {
@@ -330,7 +332,6 @@ async function processAllAudio(): Promise<InterleavedAudio> {
 
     const deltaTime = performance.now() - startTime;
     console.log(`Process all audio, got ${data.length} samples in ${deltaTime}ms`);
-    appState.performanceRatio = (data.length * 1000.0) / (appState.sourceAudio!.sampleRate * appState.sourceAudio!.numChannels * deltaTime);
     return {
         data,
         sampleRate: appState.sourceAudio!.sampleRate,
@@ -400,15 +401,37 @@ async function handleDebugPanelClick() {
         } catch (error) {
             info += `\n\nWASM error: ${error}`;
         }
-        if (appState.performanceRatio) {
-            info += `\n\nPerformance-to-realtime ratio: ${appState.performanceRatio.toFixed(1)}`;
-        } else {
-            info += `\n\nPerformance-to-realtime ratio: save audio file to determine`;
+        // Add benchmark results if available
+        if (appState.benchmarkTimes) {
+            info += `\n\nBenchmark (performance-to-realtime):`;
+            const { 'time': timeStretch, pitch, 'formant-preserving-pitch': formantPitch } = appState.benchmarkTimes;
+            info += `\n  time-stretch: ${timeStretch.toFixed(2)}`;
+            info += `\n  pitch: ${pitch.toFixed(2)}`;
+            info += `\n  formant-preserving-pitch: ${formantPitch.toFixed(2)}`;
         }
         debugInfo.textContent = info;
         debugPanel.style.display = 'flex';
     } else {
         debugPanel.style.display = 'none';
+    }
+}
+
+async function handleBenchmarkClick() {
+    const sampleRate = appState.getAudioContext().sampleRate;
+    const numChannels = 2;
+    const durationSeconds = 30;
+    const pitchValue = 1.25;
+
+    try {
+        const results = await runBenchmark(sampleRate, numChannels, durationSeconds, pitchValue);
+        appState.benchmarkTimes = results;
+        // Refresh the debug panel in the simplest way =)
+        handleDebugPanelClick();
+        handleDebugPanelClick();
+        console.log('Benchmark completed:', results);
+    } catch (error) {
+        console.error('Benchmark failed:', error);
+        alert(`Benchmark failed: ${error}`);
     }
 }
 
@@ -428,5 +451,6 @@ fileInput.addEventListener('change', withButtonsDisabled([loadBtn], async () => 
     await handleFileInputChange(file);
 }));
 debugToggleBtn.addEventListener('click', () => handleDebugPanelClick());
+benchmarkBtn.addEventListener('click', () => handleBenchmarkClick());
 debugPanel.addEventListener('click', () => navigator.clipboard.writeText(debugInfo.textContent));
 debugInfo.addEventListener('click', () => navigator.clipboard.writeText(debugInfo.textContent));
