@@ -91,3 +91,10 @@ export function secondsToString(sec: number): string {
         return `${seconds}s`;
     }
 }
+
+// Return a promise which resolves in delay milliseconds.
+export async function sleep(delay: number): Promise<void> {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    setTimeout(() => resolve(), delay);
+    return promise;
+} 

@@ -8,7 +8,7 @@ import { saveFile, showSaveDialog } from './save-dialog';
 import { Spectrogram } from './spectrogram';
 import { drainRingBuffer, Float32RingBuffer } from './sync';
 import { getAudioLength, getAudioSeconds, type InterleavedAudio, type ProcessingMode } from './types';
-import { debounce, getById, secondsToString, withButtonsDisabled } from './utils';
+import { debounce, getById, secondsToString, sleep, withButtonsDisabled } from './utils';
 import { runBenchmark, type BenchmarkResults } from './benchmark';
 
 const MAX_PITCH_VALUE = 2.0;
@@ -423,8 +423,13 @@ async function handleBenchmarkClick() {
     const durationSeconds = 30;
     const pitchValue = 1.25;
 
+    const origText = benchmarkBtn.textContent;
+    benchmarkBtn.disabled = true;
+    benchmarkBtn.textContent = origText + " (running...)";
+    // This is a hacky way to force button change the content/disable status while still blocking the main thread.
+    await sleep(0);
     try {
-        const results = await runBenchmark(sampleRate, numChannels, durationSeconds, pitchValue);
+        const results = runBenchmark(sampleRate, numChannels, durationSeconds, pitchValue);
         appState.benchmarkTimes = results;
         // Refresh the debug panel in the simplest way =)
         handleDebugPanelClick();
@@ -433,6 +438,9 @@ async function handleBenchmarkClick() {
     } catch (error) {
         console.error('Benchmark failed:', error);
         alert(`Benchmark failed: ${error}`);
+    } finally {
+        benchmarkBtn.disabled = false;
+        benchmarkBtn.textContent = origText;
     }
 }
 
