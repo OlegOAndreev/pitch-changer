@@ -1,5 +1,6 @@
 use std::collections::BinaryHeap;
 use std::f32::consts::PI;
+use std::mem;
 
 use realfft::num_complex::Complex;
 
@@ -202,8 +203,8 @@ impl PhaseGradientTimeStretch {
             syn_freq[k] = Complex::from_polar(self.magnitudes[k], self.prev_syn_phases[k]);
         }
         // Save previous analysis data for next frame
-        self.prev_magnitudes.copy_from_slice(&self.magnitudes);
-        self.prev_ana_phases.copy_from_slice(&self.ana_phases);
+        mem::swap(&mut self.prev_magnitudes, &mut self.magnitudes);
+        mem::swap(&mut self.prev_ana_phases, &mut self.ana_phases);
     }
 
     // Find the next HeapElem with max magnited from prev_max_heap and max_heap, return true if it was from
