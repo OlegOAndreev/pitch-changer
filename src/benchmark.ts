@@ -72,12 +72,12 @@ function processAudio(input: InterleavedAudio, processingMode: ProcessingMode, p
     }
 }
 
-export async function runBenchmark(
+export function runBenchmark(
     sampleRate: number,
     numChannels: number,
     durationSeconds: number,
     pitchValue: number
-): Promise<BenchmarkResults> {
+): BenchmarkResults {
     const samplesPerChannel = sampleRate * durationSeconds;
     const noiseData = generateNoise(samplesPerChannel, numChannels);
     const input: InterleavedAudio = {
