@@ -13,7 +13,7 @@ import { runBenchmark, type BenchmarkResults } from './benchmark';
 
 const MAX_PITCH_VALUE = 2.0;
 const MIN_PITCH_VALUE = 0.5;
-const PITCH_VALUE_STEP = 0.125;
+const PITCH_VALUE_STEP = 0.05;
 const DEFAULT_PITCH_VALUE = 1.25;
 const DEFAULT_PROCESSING_MODE = 'pitch';
 
@@ -185,9 +185,9 @@ function applySettingsToUI(settings: AppSettings): void {
     pitchSlider.value = settings.pitchValue.toString();
     pitchLabel.textContent = settings.pitchValue + 'x';
     const pitchSliderMarkers = getById<HTMLDataListElement>('pitch-slider-markers');
-    for (let v = MIN_PITCH_VALUE; v <= MAX_PITCH_VALUE; v += PITCH_VALUE_STEP) {
+    for (let v = MIN_PITCH_VALUE; v <= MAX_PITCH_VALUE + 1e-3; v += PITCH_VALUE_STEP) {
         const node = new Option();
-        node.value = v.toString();
+        node.value = v.toFixed(3).toString();
         pitchSliderMarkers.appendChild(node);
     }
 
