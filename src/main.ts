@@ -133,6 +133,8 @@ const loadBtn = getById<HTMLButtonElement>('load-btn');
 const saveBtn = getById<HTMLButtonElement>('save-btn');
 const pitchSlider = getById<HTMLInputElement>('pitch-slider');
 const pitchLabel = getById<HTMLElement>('pitch-label');
+const minPitchScaleLabel = getById<HTMLElement>('min-pitch-scale');
+const maxPitchScaleLabel = getById<HTMLElement>('max-pitch-scale');
 const pitchModeRadio = getById<HTMLInputElement>('pitch-mode');
 const timeModeRadio = getById<HTMLInputElement>('time-mode');
 const formantPitchModeRadio = getById<HTMLInputElement>('formant-pitch-mode');
@@ -184,12 +186,8 @@ function applySettingsToUI(settings: AppSettings): void {
     pitchSlider.step = PITCH_VALUE_STEP.toString();
     pitchSlider.value = settings.pitchValue.toString();
     pitchLabel.textContent = settings.pitchValue + 'x';
-    const pitchSliderMarkers = getById<HTMLDataListElement>('pitch-slider-markers');
-    for (let v = MIN_PITCH_VALUE; v <= MAX_PITCH_VALUE + 1e-3; v += PITCH_VALUE_STEP) {
-        const node = new Option();
-        node.value = v.toFixed(3).toString();
-        pitchSliderMarkers.appendChild(node);
-    }
+    minPitchScaleLabel.textContent = MIN_PITCH_VALUE + 'x';
+    maxPitchScaleLabel.textContent = MAX_PITCH_VALUE + 'x';
 
     // Show the content container after settings are applied
     contentContainer.style.visibility = 'visible';

@@ -33,29 +33,28 @@
                 <span class="emoji fa-solid fa-download"></span><br>Save
             </button>
         </div>
-        <div id="mode-row">
-            <div class="radio-option">
-                <input type="radio" id="pitch-mode" name="processing-mode" value="pitch" checked>
-                <label for="pitch-mode">Pitch shift</label>
-            </div>
-            <div class="radio-option">
-                <input type="radio" id="formant-pitch-mode" name="processing-mode" value="formant-preserving-pitch">
-                <label for="formant-pitch-mode">Speech pitch shift</label>
-            </div>
-            <div class="radio-option">
-                <input type="radio" id="time-mode" name="processing-mode" value="time">
-                <label for="time-mode">Time stretch</label>
-            </div>
-        </div>
         <div id="slider-row">
             <div id="pitch-label"></div>
             <div id="slider-container">
-                <input type="range" id="pitch-slider" list="pitch-slider-markers">
-                <datalist id="pitch-slider-markers"></datalist>
+                <input type="range" id="pitch-slider">
                 <div id="slider-labels">
                     <span id="min-pitch-scale"></span>
                     <span id="max-pitch-scale"></span>
                 </div>
+            </div>
+        </div>
+        <div id="mode-row">
+            <div class="radio-option">
+                <input type="radio" id="pitch-mode" name="processing-mode" value="pitch" checked>
+                <label for="pitch-mode">Pitch Shift</label>
+            </div>
+            <div class="radio-option">
+                <input type="radio" id="formant-pitch-mode" name="processing-mode" value="formant-preserving-pitch">
+                <label for="formant-pitch-mode">Speech Pitch Shift</label>
+            </div>
+            <div class="radio-option">
+                <input type="radio" id="time-mode" name="processing-mode" value="time">
+                <label for="time-mode">Time Stretch</label>
             </div>
         </div>
         <div id="message-row">
