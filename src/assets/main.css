@@ -220,6 +220,10 @@ h1 {
     border: 2px solid white;
 }
 
+#pitch-slider:hover::-webkit-slider-thumb {
+    background: #039be5;
+}
+
 #pitch-slider::-moz-range-thumb {
     width: 20px;
     height: 20px;
@@ -227,6 +231,10 @@ h1 {
     background: #0277bd;
     cursor: pointer;
     border: 2px solid white;
+}
+
+#pitch-slider:hover::-moz-range-thumb {
+    background: #039be5;
 }
 
 #pitch-label {
