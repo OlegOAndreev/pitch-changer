@@ -27,6 +27,7 @@
 
 ## Rust rules
 
+- Use vec![] instead of Vec::new
 - Prefer for loops to iterators: they are more readable and usually optimize into the same code as iterators now
 
 ## Audio

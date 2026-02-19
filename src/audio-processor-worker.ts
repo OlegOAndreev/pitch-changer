@@ -6,22 +6,19 @@ import initWasmModule, {
     Float32Vec,
     get_settings,
     MultiPitchShifter,
-    MultiTimeStretcher,
     PitchShiftParams,
-    TimeStretchParams
 } from '../wasm/build/wasm_main_module';
 import type { WorkerApi, WorkerParams } from './audio-processor';
 import { Float32RingBuffer, pushAllRingBuffer } from './sync';
 import type { InterleavedAudio, ProcessingMode } from './types';
 
-type Processor = MultiPitchShifter | MultiTimeStretcher;
+type Processor = MultiPitchShifter;
 
 class WorkerImpl implements WorkerApi {
-    params: WorkerParams = { processingMode: 'pitch', pitchValue: 1.0 }
+    params: WorkerParams = { processingMode: 'pitch', pitchValue: 1.0 };
     paramsDirty: boolean = false;
     currentProcessorMode: ProcessingMode | null = null;
     processor: Processor | null = null;
-    processorSampleRate: number | null = null;
     processorNumChannels: number | null = null;
     wasmMemory: WebAssembly.Memory | null = null;
 
@@ -44,6 +41,7 @@ class WorkerImpl implements WorkerApi {
         const output = new Float32RingBuffer(outputSab);
         const chunkSize = output.capacity / 4;
 
+        this.paramsDirty = true;
         // Clean the state if previous process() was aborted.
         this.getProcessor(input.sampleRate, input.numChannels).reset();
 
@@ -57,9 +55,8 @@ class WorkerImpl implements WorkerApi {
                 inputVec.set(input.data.subarray(inputPos, inputPos + nextChunkSize));
                 inputPos += nextChunkSize;
 
-                const processor = this.getProcessor(input.sampleRate, input.numChannels);
                 processedVec.clear();
-                processor.process(inputVec, processedVec);
+                this.getProcessor(input.sampleRate, input.numChannels).process(inputVec, processedVec);
                 // Copy processedVec: if WASM memory gets resized during pushAllRingBuffer, we will get an error with
                 // detached ArrayBuffer.
                 const processedArr = new Float32Array(processedVec.array);
@@ -72,9 +69,8 @@ class WorkerImpl implements WorkerApi {
             }
 
             // Finish processing (get remaining data from processor)
-            const processor = this.getProcessor(input.sampleRate, input.numChannels);
             processedVec.clear();
-            processor.finish(processedVec);
+            this.getProcessor(input.sampleRate, input.numChannels).finish(processedVec);
             const processedArr = new Float32Array(processedVec.array);
             // console.debug(`Processing final chunk num channels ${input.numChannels} with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}`);
             await pushAllRingBuffer(processedArr, output);
@@ -88,55 +84,47 @@ class WorkerImpl implements WorkerApi {
     }
 
     private getProcessor(sampleRate: number, numChannels: number): Processor {
-        if (this.processor && this.processorSampleRate == sampleRate && this.processorNumChannels == numChannels) {
-            if (!this.paramsDirty) {
-                return this.processor;
-            }
-            // Do not recreate processor if only the pitch changed.
-            if (this.currentProcessorMode === this.params.processingMode) {
-                console.log(`Setting new pitch ${this.params.pitchValue} for processor`);
-                this.processor.set_param_value(this.params.pitchValue);
-                return this.processor;
-            }
+        if (this.processor && this.processorNumChannels == numChannels && !this.paramsDirty) {
+            return this.processor;
         }
 
-        console.log('Recreating processor with params', this.params, 'numChannels', numChannels);
-        if (this.processor) {
-            this.processor.free();
+        let timeStretch;
+        let pitchShift;
+        switch (this.params.processingMode) {
+            case 'formant-preserving-pitch':
+            case 'pitch':
+                timeStretch = 1.0;
+                pitchShift = this.params.pitchValue;
+                break;
+            case 'time':
+                timeStretch = this.params.pitchValue;
+                pitchShift = 1.0;
+                break;
         }
-        if (this.params.processingMode === 'pitch') {
-            const params = new PitchShiftParams(sampleRate, this.params.pitchValue);
-            try {
+        const params = new PitchShiftParams(sampleRate, pitchShift, timeStretch);
+        try {
+            if (this.params.processingMode === 'formant-preserving-pitch') {
+                params.quefrency_cutoff = 1.0;
+            }
+
+            if (this.processor && this.processorNumChannels === numChannels) {
+                console.log(`Updating processor parameters to ${params.to_debug_string()}`);
+                this.processor.update_params(params);
+            } else {
+                console.log(`Creating new processor with parameters to ${params.to_debug_string()}`);
+                if (this.processor) {
+                    this.processor.free();
+                }
                 this.processor = new MultiPitchShifter(params, numChannels);
-                console.log(`Created MultiPitchShifter with ${params.to_debug_string()}, numChannels ${numChannels}`);
-            } finally {
-                params.free();
             }
-        } else if (this.params.processingMode === 'formant-preserving-pitch') {
-            const params = new PitchShiftParams(sampleRate, this.params.pitchValue);
-            // This is a good enough default for speech.
-            params.quefrency_cutoff = 1.0;
-            try {
-                this.processor = new MultiPitchShifter(params, numChannels);
-                console.log(`Created MultiPitchShifter with ${params.to_debug_string()}, numChannels ${numChannels}`);
-            } finally {
-                params.free();
-            }
-        } else {
-            const params = new TimeStretchParams(sampleRate, this.params.pitchValue);
-            try {
-                this.processor = new MultiTimeStretcher(params, numChannels);
-                console.log(`Created MultiTimeStretcher with ${params.to_debug_string()}, numChannels ${numChannels}`);
-            } finally {
-                params.free();
-            }
+        } finally {
+            params.free();
         }
-        this.paramsDirty = false;
-        this.processorSampleRate = sampleRate;
         this.processorNumChannels = numChannels;
+        this.paramsDirty = false;
+
         return this.processor!;
     }
 }
-
 
 Comlink.expose(new WorkerImpl());

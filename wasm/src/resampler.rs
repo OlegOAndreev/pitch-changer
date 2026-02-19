@@ -8,6 +8,7 @@ use crate::web::WrapAnyhowError;
 /// A resampler that uses rubato's FFT-based resampling with buffering for arbitrary input chunks.
 pub struct StreamingResampler {
     resampler: Async<f32>,
+    sample_rate_ratio: f32,
     // Buffer for leftover input samples that do not form a full chunk
     previous_input: Vec<f32>,
 }
@@ -33,7 +34,7 @@ impl StreamingResampler {
 
         let previous_input = Vec::with_capacity(resampler.input_frames_next());
 
-        Ok(Self { resampler, previous_input })
+        Ok(Self { resampler, sample_rate_ratio, previous_input })
     }
 
     /// Resample part of the input audio. The remainder will be buffered and used during next `resample()` or `finish()`
@@ -106,11 +107,16 @@ impl StreamingResampler {
     /// Reset the resampler to its initial state, clearing any internal buffers.
     pub fn reset(&mut self) {
         self.resampler.reset();
+        // Reset resets sample ratio to original.
+        self.resampler
+            .set_resample_ratio(self.sample_rate_ratio as f64, false)
+            .expect("Failed to change resampling ratio");
         self.previous_input.clear();
     }
 
     /// Update the resampling ratio.
     pub fn set_ratio(&mut self, sample_rate_ratio: f32) {
+        self.sample_rate_ratio = sample_rate_ratio;
         self.resampler
             .set_resample_ratio(sample_rate_ratio as f64, true)
             .expect("Failed to change resampling ratio");

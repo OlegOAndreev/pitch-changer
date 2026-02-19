@@ -1,16 +1,10 @@
-import {
-    Float32Vec,
-    MultiPitchShifter,
-    MultiTimeStretcher,
-    PitchShiftParams,
-    TimeStretchParams
-} from '../wasm/build/wasm_main_module';
+import { Float32Vec, MultiPitchShifter, PitchShiftParams } from '../wasm/build/wasm_main_module';
 import type { InterleavedAudio, ProcessingMode } from './types';
 
 export interface BenchmarkResults {
-    'time': number;
-    'pitch': number;
+    pitch: number;
     'formant-preserving-pitch': number;
+    time: number;
 }
 
 // Generate random noise with uniform distribution between -1 and 1
@@ -27,24 +21,25 @@ function generateNoise(samplesPerChannel: number, numChannels: number): Float32A
 function processAudio(input: InterleavedAudio, processingMode: ProcessingMode, pitchValue: number) {
     const sampleRate = input.sampleRate;
     const numChannels = input.numChannels;
-    let processor: MultiPitchShifter | MultiTimeStretcher;
-    if (processingMode === 'pitch' || processingMode === 'formant-preserving-pitch') {
-        const params = new PitchShiftParams(sampleRate, pitchValue);
-        if (processingMode === 'formant-preserving-pitch') {
-            params.quefrency_cutoff = 1.0;
-        }
-        try {
-            processor = new MultiPitchShifter(params, numChannels);
-        } finally {
-            params.free();
-        }
-    } else {
-        const params = new TimeStretchParams(sampleRate, pitchValue);
-        try {
-            processor = new MultiTimeStretcher(params, numChannels);
-        } finally {
-            params.free();
-        }
+    let processor: MultiPitchShifter;
+
+    // Calculate parameters based on processing mode
+    let pitchShift = pitchValue;
+    let timeStretch = 1.0;
+    if (processingMode === 'time') {
+        // For time stretch mode, use pitchValue as time_stretch and keep pitch at 1.0
+        pitchShift = 1.0;
+        timeStretch = pitchValue;
+    }
+
+    const params = new PitchShiftParams(sampleRate, pitchShift, timeStretch);
+    if (processingMode === 'formant-preserving-pitch') {
+        params.quefrency_cutoff = 1.0;
+    }
+    try {
+        processor = new MultiPitchShifter(params, numChannels);
+    } finally {
+        params.free();
     }
 
     try {
@@ -76,17 +71,17 @@ export function runBenchmark(
     sampleRate: number,
     numChannels: number,
     durationSeconds: number,
-    pitchValue: number
+    pitchValue: number,
 ): BenchmarkResults {
     const samplesPerChannel = sampleRate * durationSeconds;
     const noiseData = generateNoise(samplesPerChannel, numChannels);
     const input: InterleavedAudio = {
         data: noiseData,
         sampleRate,
-        numChannels
+        numChannels,
     };
 
-    const modes: ProcessingMode[] = ['time', 'pitch', 'formant-preserving-pitch'];
+    const modes: ProcessingMode[] = ['pitch', 'formant-preserving-pitch', 'time'];
     const results: Partial<BenchmarkResults> = {};
 
     for (const mode of modes) {
@@ -95,7 +90,7 @@ export function runBenchmark(
         const endTime = performance.now();
         const processingTimeMs = endTime - startTime;
 
-        const ratio = durationSeconds * 1000 / processingTimeMs;
+        const ratio = (durationSeconds * 1000) / processingTimeMs;
         results[mode as keyof BenchmarkResults] = ratio;
     }
 

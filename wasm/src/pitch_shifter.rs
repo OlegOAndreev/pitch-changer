@@ -175,14 +175,19 @@ impl PitchShifter {
         self.output_accum_buf.reset();
     }
 
-    fn update_params(&mut self, params: &PitchShiftParams) {
+    fn update_params(&mut self, params: &PitchShiftParams) -> Result<()> {
+        Self::validate_params(params)?;
+
         self.params = *params;
         let time_stretch_params = self.params.to_time_stretch();
         self.time_stretcher.update_params(&time_stretch_params);
         self.resampler.set_ratio(1.0 / params.pitch_shift);
+        self.envelope_shift_enabled = params.quefrency_cutoff != 0.0;
         let cepstrum_cutoff_samples =
             (params.quefrency_cutoff * params.sample_rate as f32 / (1000.0 * params.pitch_shift)) as usize;
         self.envelope_shifter.set_params(cepstrum_cutoff_samples, params.pitch_shift);
+
+        Ok(())
     }
 
     fn validate_params(params: &PitchShiftParams) -> Result<()> {
@@ -299,10 +304,11 @@ impl MultiPitchShifter {
 
     /// Update parameters.
     #[wasm_bindgen]
-    pub fn update_params(&mut self, params: &PitchShiftParams) {
+    pub fn update_params(&mut self, params: &PitchShiftParams) -> std::result::Result<(), WrapAnyhowError> {
         for processor in &mut self.processors {
-            processor.update_params(params);
+            processor.update_params(params).map_err(WrapAnyhowError)?;
         }
+        Ok(())
     }
 }
 
