@@ -188,7 +188,7 @@ mod tests {
     #[test]
     fn test_deinterleave_samples() {
         let input_mono = vec![1.0, 2.0, 3.0, 4.0];
-        let mut output = Vec::new();
+        let mut output = vec![];
         deinterleave_samples(&input_mono, 1, &mut output);
         assert_eq!(output, vec![1.0, 2.0, 3.0, 4.0]);
 
@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn test_interleave_samples() {
         let input_mono = vec![1.0, 2.0, 3.0, 4.0];
-        let mut output = Vec::new();
+        let mut output = vec![];
         interleave_samples(&input_mono, 1, &mut output);
         assert_eq!(output, vec![1.0, 2.0, 3.0, 4.0]);
 
@@ -221,11 +221,11 @@ mod tests {
             let original: Vec<f32> = (0..total_samples).map(|i| i as f32).collect();
 
             // Deinterleave
-            let mut deinterleaved = Vec::new();
+            let mut deinterleaved = vec![];
             deinterleave_samples(&original, num_channels, &mut deinterleaved);
 
             // Interleave back
-            let mut interleaved = Vec::new();
+            let mut interleaved = vec![];
             interleave_samples(&deinterleaved, num_channels, &mut interleaved);
 
             assert_eq!(interleaved, original);

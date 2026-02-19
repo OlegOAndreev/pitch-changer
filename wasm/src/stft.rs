@@ -180,7 +180,7 @@ mod tests {
         let window_d = [4.0, 4.0, 4.0, 4.0, 4.0, 4.0];
 
         accum.add(&window_a, 2.0);
-        let mut output = Vec::new();
+        let mut output = vec![];
         accum.output_next(2, &mut output);
         assert_eq!(output, &[2.0, 2.0]);
 

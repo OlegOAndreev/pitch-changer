@@ -70,7 +70,7 @@ fn load_file(filename: &str) -> Result<AudioContents> {
         .make(&track.codec_params, &symphonia::core::codecs::DecoderOptions::default())
         .context("unsupported codec")?;
 
-    let mut data = Vec::new();
+    let mut data = vec![];
     let mut sample_rate = 0;
     let mut channels = 0;
 
@@ -428,7 +428,7 @@ fn main() -> Result<()> {
                 "Generating sine wave: {} Hz, {} samples/sec, {} seconds, {} channels",
                 frequency, sample_rate, duration, channels
             );
-            let mut sine_wave = Vec::new();
+            let mut sine_wave = vec![];
             for ch in 0..channels {
                 // Generate same frequency for all channels (could be modified)
                 let channel_data = generate_sine_wave(frequency, sample_rate, 1.0, duration);

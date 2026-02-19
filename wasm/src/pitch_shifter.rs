@@ -587,7 +587,7 @@ mod tests {
         const TIME_STRETCH: f32 = 1.4;
 
         let test_frequencies = [250.0, 440.0, 880.0];
-        let num_channels = 3;
+        let num_channels = test_frequencies.len();
 
         let mut planar_data = vec![];
 
@@ -606,22 +606,24 @@ mod tests {
 
         let mut shifter = MultiPitchShifter::new(&params, num_channels)?;
 
-        let mut output_data = Vec::new();
+        let mut output_data = vec![];
         shifter.process_vec(&input_data, &mut output_data);
         shifter.finish_vec(&mut output_data);
+
+        let mut deinterleaved = vec![];
+        deinterleave_samples(&output_data, num_channels, &mut deinterleaved);
 
         let output_samples_per_channel = output_data.len() / num_channels;
 
         for (ch, &input_freq) in test_frequencies.iter().enumerate() {
-            let mut channel_output = Vec::with_capacity(output_samples_per_channel);
-            for i in 0..output_samples_per_channel {
-                channel_output.push(output_data[i * num_channels + ch]);
-            }
+            let channel_output = &deinterleaved[output_samples_per_channel * ch..output_samples_per_channel * (ch + 1)];
 
             let output_freq = compute_dominant_frequency(&channel_output, SAMPLE_RATE);
             let expected_freq = input_freq * PITCH_SHIFT;
             let bin_width = SAMPLE_RATE / FFT_SIZE as f32;
             let tolerance = bin_width * 2.0;
+
+            let expected_output_len = (planar_data.len() as f32 * TIME_STRETCH) as usize / num_channels;
 
             println!(
                 "Channel {}: Input {} Hz, Output {:.2} Hz, Expected {:.2} Hz, Tolerance {:.2} Hz",
@@ -636,6 +638,12 @@ mod tests {
                 output_freq,
                 input_freq,
                 PITCH_SHIFT
+            );
+            assert!(
+                output_samples_per_channel.abs_diff(expected_output_len) < expected_output_len / 20,
+                "expected output length {}, got {}",
+                expected_output_len,
+                output_samples_per_channel,
             );
         }
 

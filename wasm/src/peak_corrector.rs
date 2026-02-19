@@ -153,7 +153,7 @@ mod tests {
         let mut corrector = PeakCorrector::new(256, 0.01, 1).unwrap();
 
         let input = generate_sine_wave(440.0, 44100.0, 0.5, 1.0);
-        let mut output = Vec::new();
+        let mut output = vec![];
         for chunk in input.chunks(3) {
             corrector.process(chunk, &mut output);
         }
@@ -169,7 +169,7 @@ mod tests {
         // Create input that clips (peak = 1.5)
         let input = generate_sine_wave(44100.0, 440.0, 1.5, 1.0);
 
-        let mut output = Vec::new();
+        let mut output = vec![];
         for chunk in input.chunks(3) {
             corrector.process(chunk, &mut output);
         }
@@ -189,7 +189,7 @@ mod tests {
         let mut interleaved = vec![];
         interleave_samples(&input, 2, &mut interleaved);
 
-        let mut output = Vec::new();
+        let mut output = vec![];
         for chunk in interleaved.chunks(3) {
             corrector.process(chunk, &mut output);
         }
@@ -205,7 +205,7 @@ mod tests {
         // The input consists of 1 second of clipping and 1 second of not clipping.
         let mut clipping_input = generate_sine_wave(440.0, 44100.0, 1.5, 1.0);
         clipping_input.extend_from_slice(&generate_sine_wave(440.0, 44100.0, 1.0, 1.0));
-        let mut output = Vec::new();
+        let mut output = vec![];
         corrector.process(&clipping_input, &mut output);
         corrector.finish(&mut output);
         // Gain should have recovered
