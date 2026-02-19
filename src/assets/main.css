@@ -156,7 +156,7 @@ h1 {
     position: relative;
 }
 
-#mode-row .radio-option input[type="radio"] {
+#mode-row .radio-option input[type='radio'] {
     opacity: 0;
     width: 0;
     height: 0;
@@ -177,7 +177,7 @@ h1 {
     background-color: #f0f1f2;
 }
 
-#mode-row .radio-option input[type="radio"]:checked+label {
+#mode-row .radio-option input[type='radio']:checked + label {
     border: 2px solid #0288d1;
     box-shadow: 0 0 2px 0 #0288d1;
 }
@@ -279,7 +279,7 @@ h1 {
     font-size: 14px;
 }
 
-.dialog input[type="text"] {
+.dialog input[type='text'] {
     width: 100%;
     padding: 6px;
     margin-top: 8px;

@@ -1,7 +1,6 @@
 <!doctype html>
 <html lang="en">
-
-<head>
+  <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0" />
     <title>Audio Pitch Changer</title>
@@ -12,87 +11,86 @@
     <!-- This file should not be bundled -->
     <script src="coi-serviceworker.min.js" data-external></script>
     <script type="module" src="/src/main.ts"></script>
-</head>
+  </head>
 
-<body>
-    <div id="content-container" style="visibility: hidden;">
-        <h1>Audio Pitch Changer</h1>
-        <div id="big-buttons-row">
-            <button id="record-btn" class="big-control-btn control-btn" title="Record">
-                <span id="record-btn-emoji" class="emoji fa-solid fa-microphone"></span>
-            </button>
-            <button id="play-btn" class="big-control-btn control-btn" title="Play" disabled="true">
-                <span id="play-btn-emoji" class="emoji fa-solid fa-play"></span>
-            </button>
+  <body>
+    <div id="content-container" style="visibility: hidden">
+      <h1>Audio Pitch Changer</h1>
+      <div id="big-buttons-row">
+        <button id="record-btn" class="big-control-btn control-btn" title="Record">
+          <span id="record-btn-emoji" class="emoji fa-solid fa-microphone"></span>
+        </button>
+        <button id="play-btn" class="big-control-btn control-btn" title="Play" disabled="true">
+          <span id="play-btn-emoji" class="emoji fa-solid fa-play"></span>
+        </button>
+      </div>
+      <div id="small-buttons-row">
+        <button id="load-btn" class="small-control-btn control-btn" title="Load">
+          <span class="emoji fa-solid fa-upload"></span><br />Load
+        </button>
+        <button id="save-btn" class="small-control-btn control-btn" title="Save" disabled="true">
+          <span class="emoji fa-solid fa-download"></span><br />Save
+        </button>
+      </div>
+      <div id="slider-row">
+        <div id="pitch-label"></div>
+        <div id="slider-container">
+          <input type="range" id="pitch-slider" />
+          <div id="slider-labels">
+            <span id="min-pitch-scale"></span>
+            <span id="max-pitch-scale"></span>
+          </div>
         </div>
-        <div id="small-buttons-row">
-            <button id="load-btn" class="small-control-btn control-btn" title="Load">
-                <span class="emoji fa-solid fa-upload"></span><br>Load
-            </button>
-            <button id="save-btn" class="small-control-btn control-btn" title="Save" disabled="true">
-                <span class="emoji fa-solid fa-download"></span><br>Save
-            </button>
+      </div>
+      <div id="mode-row">
+        <div class="radio-option">
+          <input type="radio" id="pitch-mode" name="processing-mode" value="pitch" checked />
+          <label for="pitch-mode">Pitch Shift</label>
         </div>
-        <div id="slider-row">
-            <div id="pitch-label"></div>
-            <div id="slider-container">
-                <input type="range" id="pitch-slider">
-                <div id="slider-labels">
-                    <span id="min-pitch-scale"></span>
-                    <span id="max-pitch-scale"></span>
-                </div>
-            </div>
+        <div class="radio-option">
+          <input type="radio" id="formant-pitch-mode" name="processing-mode" value="formant-preserving-pitch" />
+          <label for="formant-pitch-mode">Speech Pitch Shift</label>
         </div>
-        <div id="mode-row">
-            <div class="radio-option">
-                <input type="radio" id="pitch-mode" name="processing-mode" value="pitch" checked>
-                <label for="pitch-mode">Pitch Shift</label>
-            </div>
-            <div class="radio-option">
-                <input type="radio" id="formant-pitch-mode" name="processing-mode" value="formant-preserving-pitch">
-                <label for="formant-pitch-mode">Speech Pitch Shift</label>
-            </div>
-            <div class="radio-option">
-                <input type="radio" id="time-mode" name="processing-mode" value="time">
-                <label for="time-mode">Time Stretch</label>
-            </div>
+        <div class="radio-option">
+          <input type="radio" id="time-mode" name="processing-mode" value="time" />
+          <label for="time-mode">Time Stretch</label>
         </div>
-        <div id="message-row">
-            <div id="source-label"></div>
-            <div id="processing-indicator" class="processing-indicator">
-                <span id="processing-spinner" class="spinner" style="display: none;"></span>
-                <span id="processing-label"></span>
-            </div>
+      </div>
+      <div id="message-row">
+        <div id="source-label"></div>
+        <div id="processing-indicator" class="processing-indicator">
+          <span id="processing-spinner" class="spinner" style="display: none"></span>
+          <span id="processing-label"></span>
         </div>
-        <canvas id="spectrogram-canvas"></canvas>
+      </div>
+      <canvas id="spectrogram-canvas"></canvas>
     </div>
 
-    <input type="file" id="file-input" accept="audio/*" style="display: none">
+    <input type="file" id="file-input" accept="audio/*" style="display: none" />
 
     <!-- Save filename dialog, used on non-Chrome browsers as workaround for showSaveFilePicker -->
-    <div id="save-dialog-overlay" class="dialog-overlay" style="display: none;">
-        <div class="dialog">
-            <label for="save-filename-input">Filename:</label>
-            <input type="text" id="save-filename-input" value="scaled.mp3">
-            <div class="dialog-buttons">
-                <button id="save-dialog-cancel-btn" class="dialog-btn control-btn">Cancel</button>
-                <button id="save-dialog-ok-btn" class="dialog-btn control-btn">OK</button>
-            </div>
+    <div id="save-dialog-overlay" class="dialog-overlay" style="display: none">
+      <div class="dialog">
+        <label for="save-filename-input">Filename:</label>
+        <input type="text" id="save-filename-input" value="scaled.mp3" />
+        <div class="dialog-buttons">
+          <button id="save-dialog-cancel-btn" class="dialog-btn control-btn">Cancel</button>
+          <button id="save-dialog-ok-btn" class="dialog-btn control-btn">OK</button>
         </div>
+      </div>
     </div>
-    <a id="save-dialog-link" style="display: none;"></a>
+    <a id="save-dialog-link" style="display: none"></a>
 
     <!-- Debug panel -->
-    <div id="debug-panel" class="debug-panel" style="display: none;">
-        <div id="debug-info"></div>
-        <button id="copy-debug-btn" title="Copy debug info to clipboard">
-            <i class="fa-regular fa-copy"></i>
-        </button>
-        <button id="benchmark-btn" class="debug-btn control-btn" title="Run benchmark">Run benchmark</button>
+    <div id="debug-panel" class="debug-panel" style="display: none">
+      <div id="debug-info"></div>
+      <button id="copy-debug-btn" title="Copy debug info to clipboard">
+        <i class="fa-regular fa-copy"></i>
+      </button>
+      <button id="benchmark-btn" class="debug-btn control-btn" title="Run benchmark">Run benchmark</button>
     </div>
     <button id="debug-toggle-btn" title="Debug info">
-        <i class="fa-solid fa-bug"></i>
+      <i class="fa-solid fa-bug"></i>
     </button>
-</body>
-
+  </body>
 </html>
