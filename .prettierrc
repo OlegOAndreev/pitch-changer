@@ -1,0 +1,10 @@
+printWidth: 120
+singleQuote: true
+tabWidth: 4
+overrides:
+  - files: "*.html"
+    options:
+      tabWidth: 2
+  - files: "*.json"
+    options:
+      tabWidth: 2

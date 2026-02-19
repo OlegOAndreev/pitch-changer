@@ -7,8 +7,8 @@ use hound::{WavSpec, WavWriter};
 use plotters::prelude::*;
 
 use wasm_main_module::{
-    EnvelopeShifter, MultiPitchShifter, MultiTimeStretcher, PitchShiftParams, SpectralHistogram, TimeStretchParams,
-    WindowType, compute_dominant_frequency, generate_sine_wave, interleave_samples,
+    EnvelopeShifter, MultiPitchShifter, PitchShiftParams, SpectralHistogram, WindowType, compute_dominant_frequency,
+    generate_sine_wave, interleave_samples,
 };
 
 fn parse_window_type(s: &str) -> Result<WindowType> {
@@ -324,7 +324,6 @@ struct Cli {
 #[argh(subcommand)]
 enum Commands {
     Generate(Generate),
-    TimeStretch(TimeStretch),
     PitchShift(PitchShift),
     ShowSpectrum(ShowSpectrum),
 }
@@ -354,39 +353,6 @@ struct Generate {
     output: String,
 }
 
-/// Apply time stretch to input
-#[derive(FromArgs)]
-#[argh(subcommand, name = "time-stretch")]
-struct TimeStretch {
-    /// input audio file
-    #[argh(option, default = "\"sine_wave.wav\".to_string()")]
-    input: String,
-
-    /// time stretch factor (e.g., 2.0 = twice as long, 0.5 = half length)
-    #[argh(option, default = "1.0")]
-    stretch: f32,
-
-    /// overlap ratio
-    #[argh(option, default = "8")]
-    overlap: u32,
-
-    /// FFT size
-    #[argh(option, default = "4096")]
-    fft_size: usize,
-
-    /// window type: "hann", "sqrt-hann", or "sqrt-blackman"
-    #[argh(option, default = "\"hann\".to_string()")]
-    window: String,
-
-    /// output WAV file for stretched audio
-    #[argh(option, default = "\"stretched.wav\".to_string()")]
-    output: String,
-
-    /// save plot comparison SVG
-    #[argh(switch)]
-    plot: bool,
-}
-
 /// Apply pitch shift to input
 #[derive(FromArgs)]
 #[argh(subcommand, name = "pitch-shift")]
@@ -398,6 +364,10 @@ struct PitchShift {
     /// pitch shift factor (e.g., 2.0 = one octave up, 0.5 = one octave down)
     #[argh(option, default = "1.0")]
     shift: f32,
+
+    /// time stretch factor (e.g., 2.0 = twice as long, 0.5 = half length)
+    #[argh(option, default = "1.0")]
+    stretch: f32,
 
     /// overlap ratio
     #[argh(option, default = "8")]
@@ -480,74 +450,10 @@ fn main() -> Result<()> {
             save_wav(&interleaved_sine, sample_rate as u32, channels, &output)?;
         }
 
-        Commands::TimeStretch(TimeStretch {
-            input: input_path,
-            stretch,
-            output: output_path,
-            plot,
-            overlap,
-            fft_size,
-            window,
-        }) => {
-            let mut start_time = Instant::now();
-            let input = load_file(&input_path).with_context(|| format!("loading {} failed", input_path))?;
-            println!("Loading {} took {}ms", input_path, Instant::now().duration_since(start_time).as_millis());
-
-            println!(
-                "Time stretching {}: {} Hz, {} channels, stretch: {}",
-                input_path, input.sample_rate, input.channels, stretch
-            );
-
-            let window_type = parse_window_type(&window)?;
-            let mut params = TimeStretchParams::new(input.sample_rate, stretch);
-            params.overlap = overlap;
-            params.fft_size = fft_size;
-            params.window_type = window_type;
-
-            let mut output_data = vec![];
-            let mut stretcher = MultiTimeStretcher::new(&params, input.channels)?;
-            start_time = Instant::now();
-            for chunk in input.data.chunks((fft_size - 1) * input.channels) {
-                stretcher.process_vec(chunk, &mut output_data);
-            }
-            stretcher.finish_vec(&mut output_data);
-            println!(
-                "Output generated: {} samples in {}ms",
-                output_data.len(),
-                Instant::now().duration_since(start_time).as_millis()
-            );
-
-            save_wav(&output_data, input.sample_rate, input.channels, &output_path)
-                .with_context(|| format!("saving {} failed", output_path))?;
-
-            // Compute dominant frequency on first channel
-            let input_first = input.first_channel();
-            let output_first = if input.channels == 1 {
-                output_data.clone()
-            } else {
-                let num_samples = output_data.len() / input.channels;
-                let mut result = Vec::with_capacity(num_samples);
-                for i in 0..num_samples {
-                    result.push(output_data[i * input.channels]);
-                }
-                result
-            };
-
-            let input_freq = compute_dominant_frequency(&input_first, input.sample_rate as f32);
-            println!("Input dominant frequency (first channel): {:.2} Hz", input_freq);
-            let output_freq = compute_dominant_frequency(&output_first, input.sample_rate as f32);
-            println!("Output dominant frequency (first channel): {:.2} Hz", output_freq);
-
-            if plot {
-                let plot_filename = output_path.replace(".wav", "_plot.svg");
-                save_plot_audio_svg(&input_first, &output_first, input.sample_rate, &plot_filename)
-                    .with_context(|| format!("saving plot {} failed", plot_filename))?;
-            }
-        }
-
         Commands::PitchShift(PitchShift {
             input: input_path,
             shift,
+            stretch,
             output: output_path,
             plot,
             overlap,
@@ -565,7 +471,7 @@ fn main() -> Result<()> {
             );
 
             let window_type = parse_window_type(&window)?;
-            let mut params = PitchShiftParams::new(input.sample_rate, shift);
+            let mut params = PitchShiftParams::new(input.sample_rate, shift, stretch);
             params.overlap = overlap;
             params.fft_size = fft_size;
             params.window_type = window_type;
