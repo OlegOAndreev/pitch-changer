@@ -3,7 +3,7 @@ use wasm_bindgen::prelude::*;
 use std::f32::consts::PI;
 
 /// Window for STFT.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[wasm_bindgen]
 pub enum WindowType {
     Hann,
@@ -44,7 +44,7 @@ pub fn generate_window(window_type: WindowType, size: usize) -> Vec<f32> {
 
 /// Generate the half window of given type and size, that is generate_tail_window(size) ==
 /// generate_window(size * 2)[size..].
-pub fn generate_tail_window(window_type: WindowType, size: usize) -> Vec<f32>  {
+pub fn generate_tail_window(window_type: WindowType, size: usize) -> Vec<f32> {
     let mut window = vec![0.0; size];
 
     match window_type {

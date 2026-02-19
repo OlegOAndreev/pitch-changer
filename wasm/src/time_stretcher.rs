@@ -1,59 +1,31 @@
-use wasm_bindgen::prelude::*;
-
 use anyhow::{Result, bail};
 
-use crate::multi_processor::{MonoProcessor, MultiProcessor};
-use crate::peak_corrector::PeakCorrector;
 use crate::phase_gradient_time_stretch::PhaseGradientTimeStretch;
 use crate::stft::{Stft, StftAccumBuf};
-use crate::web::{Float32Vec, WrapAnyhowError};
 use crate::window::WindowType;
 
 /// Parameters for audio time stretching.
 #[derive(Debug, Clone, Copy)]
-#[wasm_bindgen]
 pub struct TimeStretchParams {
     /// Time stretch factor (e.g., 2.0 = twice as long, 0.5 = half length)
     pub time_stretch: f32,
-    /// Sample rate in Hz
-    pub sample_rate: u32,
     /// FFT window size in samples
     pub fft_size: usize,
     /// Overlap factor (number of windows overlapping one point, must be power of two)
     pub overlap: u32,
     /// Window type to use for STFT
     pub window_type: WindowType,
-    /// Peak correction block size
-    pub peak_correction_block_size: usize,
-    /// Peak correction recovery rate per block
-    pub peak_correction_recovery_rate: f32,
 }
 
-#[wasm_bindgen]
 impl TimeStretchParams {
-    #[wasm_bindgen(constructor)]
     /// Create new time stretch parameters with default FFT size, overlap and window.
-    pub fn new(sample_rate: u32, time_stretch: f32) -> Self {
-        Self {
-            time_stretch,
-            sample_rate,
-            fft_size: 4096,
-            overlap: 8,
-            window_type: WindowType::Hann,
-            peak_correction_block_size: 256,
-            peak_correction_recovery_rate: 0.01,
-        }
-    }
-
-    #[wasm_bindgen]
-    /// Return a debug string representation of the parameters.
-    pub fn to_debug_string(&self) -> String {
-        format!("{:?}", self)
+    pub(crate) fn new(time_stretch: f32) -> Self {
+        Self { time_stretch, fft_size: 4096, overlap: 8, window_type: WindowType::Hann }
     }
 }
 
 /// TimeStretcher stretches the mono audio by time_stretch factor.
-pub struct TimeStretcher {
+pub(crate) struct TimeStretcher {
     params: TimeStretchParams,
     ana_hop_size: usize,
     syn_hop_size: usize,
@@ -74,13 +46,112 @@ pub struct TimeStretcher {
 }
 
 impl TimeStretcher {
+    pub(crate) fn new(params: &TimeStretchParams) -> Result<Self> {
+        use crate::window::generate_tail_window;
+
+        Self::validate_params(params)?;
+
+        let ana_hop_size = params.fft_size / params.overlap as usize;
+        let syn_hop_size = (ana_hop_size as f32 * params.time_stretch) as usize;
+        let stft = Stft::new(params.fft_size, params.window_type);
+        let phase_gradient_vocoder = PhaseGradientTimeStretch::new(params.fft_size);
+        let tail_len = params.fft_size / ana_hop_size * syn_hop_size;
+        let tail_window = generate_tail_window(params.window_type, tail_len);
+        let input_buf = Vec::with_capacity(params.fft_size);
+        let output_accum_buf = StftAccumBuf::new(params.fft_size);
+
+        Ok(Self {
+            params: *params,
+            ana_hop_size,
+            syn_hop_size,
+            stft,
+            phase_gradient_vocoder,
+            tail_window,
+            input_buf,
+            output_accum_buf,
+        })
+    }
+
+    pub(crate) fn process(&mut self, input: &[f32], output: &mut Vec<f32>) {
+        // This is an approximation
+        let output_capacity = (input.len()) / self.ana_hop_size * self.syn_hop_size;
+        output.reserve(output_capacity);
+        let mut input_pos = 0;
+        // Note: we could allow do_stft process input directly without copying into self.input_buf, but this complicates
+        // the code without getting much performance benefits, compared to all the heavy processing.
+        while input_pos < input.len() {
+            let needed = self.params.fft_size - self.input_buf.len();
+            let available = input.len() - input_pos;
+            let n = available.min(needed);
+            self.input_buf.extend_from_slice(&input[input_pos..input_pos + n]);
+            input_pos += n;
+
+            if self.input_buf.len() == self.params.fft_size {
+                self.do_stft();
+                self.output_and_shift(output);
+            }
+        }
+    }
+
+    pub(crate) fn finish(&mut self, output: &mut Vec<f32>) {
+        // We want to process all data remaining in input_buf, which is done by running stft fft_size/ana_hop_size times
+        // and padding with zeros after each iteration. We want to fade out this tail to zero by applying half-window
+        // stored in tail_window.
+        //
+        // This is especially important for large stretches where syn_hop_size > ana_hop_size leads to rapid amplitude
+        // changes and pops/cracks.
+        //
+        // Another way to solve this problem is simply appending the whole output_accum_buf into result on final
+        // iteration, but this makes testing more annoying =)
+        let output_capacity = (self.params.fft_size / self.ana_hop_size) * self.syn_hop_size;
+        output.reserve(output_capacity);
+
+        let iters = self.params.fft_size / self.ana_hop_size;
+        for i in 0..iters {
+            self.input_buf.resize(self.params.fft_size, 0.0);
+            self.do_stft();
+
+            let tail_window_offset = i * self.syn_hop_size;
+            let tail_window_slice = &self.tail_window[tail_window_offset..tail_window_offset + self.syn_hop_size];
+            // After the last iteration do windowing first.
+            self.output_accum_buf.multiply_next(tail_window_slice);
+            self.output_and_shift(output);
+        }
+
+        self.reset();
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.phase_gradient_vocoder.reset();
+        self.input_buf.clear();
+        self.output_accum_buf.reset();
+    }
+
+    pub(crate) fn update_params(&mut self, params: &TimeStretchParams) {
+        use crate::window::generate_tail_window;
+
+        // Always update fields which do not contain the data. We want to be able to dynamically change the
+        // shift/stretch factor without clearing the data.
+        self.ana_hop_size = params.fft_size / params.overlap as usize;
+        self.syn_hop_size = (self.ana_hop_size as f32 * params.time_stretch) as usize;
+        let tail_len = params.fft_size / self.ana_hop_size * self.syn_hop_size;
+        self.tail_window = generate_tail_window(params.window_type, tail_len);
+
+        // Regenerate the following only if rarely changed parameters do change.
+        if self.params.fft_size != params.fft_size || self.params.window_type != params.window_type {
+            self.stft = Stft::new(params.fft_size, params.window_type);
+            self.phase_gradient_vocoder = PhaseGradientTimeStretch::new(params.fft_size);
+            self.input_buf = Vec::with_capacity(params.fft_size);
+            self.output_accum_buf = StftAccumBuf::new(params.fft_size);
+        }
+
+        self.params = *params;
+    }
+
     /// Validate parameters.
     fn validate_params(params: &TimeStretchParams) -> Result<()> {
         if params.time_stretch < 0.5 || params.time_stretch > 2.0 {
             bail!("Time stretching factor cannot be lower than 0.5 or higher than 2");
-        }
-        if params.time_stretch > params.overlap as f32 / 3.0 {
-            bail!("Time stretching factor cannot be bigger than overlap/3");
         }
         if params.fft_size.next_power_of_two() != params.fft_size {
             bail!("FFT size must be power of two");
@@ -119,168 +190,6 @@ impl TimeStretcher {
     fn output_and_shift(&mut self, output: &mut Vec<f32>) {
         self.output_accum_buf.output_next(self.syn_hop_size, output);
         self.input_buf.drain(0..self.ana_hop_size);
-    }
-}
-
-impl MonoProcessor for TimeStretcher {
-    type Params = TimeStretchParams;
-
-    fn new(params: &TimeStretchParams) -> Result<Self> {
-        use crate::window::generate_tail_window;
-
-        Self::validate_params(params)?;
-
-        let ana_hop_size = params.fft_size / params.overlap as usize;
-        let syn_hop_size = (ana_hop_size as f32 * params.time_stretch) as usize;
-        let stft = Stft::new(params.fft_size, params.window_type);
-        let phase_gradient_vocoder = PhaseGradientTimeStretch::new(params.fft_size);
-        let tail_len = params.fft_size / ana_hop_size * syn_hop_size;
-        let tail_window = generate_tail_window(params.window_type, tail_len);
-        let input_buf = Vec::with_capacity(params.fft_size);
-        let output_accum_buf = StftAccumBuf::new(params.fft_size);
-
-        Ok(Self {
-            params: *params,
-            ana_hop_size,
-            syn_hop_size,
-            stft,
-            phase_gradient_vocoder,
-            tail_window,
-            input_buf,
-            output_accum_buf,
-        })
-    }
-
-    fn process(&mut self, input: &[f32], output: &mut Vec<f32>) {
-        // This is an approximation
-        let output_capacity = (input.len()) / self.ana_hop_size * self.syn_hop_size;
-        output.reserve(output_capacity);
-        let mut input_pos = 0;
-        // Note: we could allow do_stft process input directly without copying into self.input_buf, but this complicates
-        // the code without getting much performance benefits, compared to all the heavy processing.
-        while input_pos < input.len() {
-            let needed = self.params.fft_size - self.input_buf.len();
-            let available = input.len() - input_pos;
-            let n = available.min(needed);
-            self.input_buf.extend_from_slice(&input[input_pos..input_pos + n]);
-            input_pos += n;
-
-            if self.input_buf.len() == self.params.fft_size {
-                self.do_stft();
-                self.output_and_shift(output);
-            }
-        }
-    }
-
-    fn finish(&mut self, output: &mut Vec<f32>) {
-        // We want to process all data remaining in input_buf, which is done by running stft fft_size/ana_hop_size times
-        // and padding with zeros after each iteration. We want to fade out this tail to zero by applying half-window
-        // stored in tail_window.
-        //
-        // This is especially important for large stretches where syn_hop_size > ana_hop_size leads to rapid amplitude
-        // changes and pops/cracks.
-        //
-        // Another way to solve this problem is simply appending the whole output_accum_buf into result on final
-        // iteration, but this makes testing more annoying =)
-        let output_capacity = (self.params.fft_size / self.ana_hop_size) * self.syn_hop_size;
-        output.reserve(output_capacity);
-
-        let iters = self.params.fft_size / self.ana_hop_size;
-        for i in 0..iters {
-            self.input_buf.resize(self.params.fft_size, 0.0);
-            self.do_stft();
-
-            let tail_window_offset = i * self.syn_hop_size;
-            let tail_window_slice = &self.tail_window[tail_window_offset..tail_window_offset + self.syn_hop_size];
-            // After the last iteration do windowing first.
-            self.output_accum_buf.multiply_next(tail_window_slice);
-            self.output_and_shift(output);
-        }
-
-        self.reset();
-    }
-
-    fn reset(&mut self) {
-        self.phase_gradient_vocoder.reset();
-        self.input_buf.clear();
-        self.output_accum_buf.reset();
-    }
-
-    fn set_param_value(&mut self, value: f32) {
-        use crate::window::generate_tail_window;
-        self.params.time_stretch = value;
-        self.syn_hop_size = (self.ana_hop_size as f32 * value) as usize;
-        let tail_len = self.params.fft_size / self.ana_hop_size * self.syn_hop_size;
-        self.tail_window = generate_tail_window(self.params.window_type, tail_len);
-    }
-}
-
-/// Multi-channel time stretcher that processes interleaved audio data with optional automatic peak correction.
-#[wasm_bindgen]
-pub struct MultiTimeStretcher {
-    inner: MultiProcessor<TimeStretcher>,
-    correction: PeakCorrector,
-}
-
-#[wasm_bindgen]
-impl MultiTimeStretcher {
-    #[wasm_bindgen(constructor)]
-    /// Create a new multi-channel time stretcher for given number of channels.
-    pub fn new(params: &TimeStretchParams, num_channels: usize) -> std::result::Result<Self, WrapAnyhowError> {
-        let inner = MultiProcessor::<TimeStretcher>::new(params, num_channels).map_err(WrapAnyhowError)?;
-
-        let correction =
-            PeakCorrector::new(params.peak_correction_block_size, params.peak_correction_recovery_rate, num_channels)
-                .map_err(WrapAnyhowError)?;
-
-        Ok(Self { inner, correction })
-    }
-
-    /// Process a chunk of interleaved audio samples through the time stretcher. Output is NOT cleared.
-    ///
-    /// Note: you need to call `finish()` to receive the last output chunks after you call `process()` for all input
-    /// samples.
-    #[wasm_bindgen]
-    pub fn process(&mut self, input: &Float32Vec, output: &mut Float32Vec) {
-        self.process_vec(&input.0, &mut output.0);
-    }
-
-    /// Finish processing any remaining audio data in the internal buffers. This method must be called after all input
-    /// has been processed via `process()`. Output is NOT cleared.
-    ///
-    /// Note: after calling `finish()`, the time stretcher is reset and ready to process new audio data.
-    #[wasm_bindgen]
-    pub fn finish(&mut self, output: &mut Float32Vec) {
-        self.finish_vec(&mut output.0);
-    }
-
-    /// Reset all internal time stretchers.
-    #[wasm_bindgen]
-    pub fn reset(&mut self) {
-        self.inner.reset();
-        self.correction.reset();
-    }
-
-    /// Update the time stretch factor.
-    #[wasm_bindgen]
-    pub fn set_param_value(&mut self, value: f32) {
-        self.inner.set_param_value(value);
-    }
-}
-
-impl MultiTimeStretcher {
-    pub fn process_vec(&mut self, input: &[f32], output: &mut Vec<f32>) {
-        let mut inner_output = Float32Vec::new(0);
-        self.inner.process(input, &mut inner_output.0);
-        self.correction.process(&inner_output.0, output);
-    }
-
-    pub fn finish_vec(&mut self, output: &mut Vec<f32>) {
-        let mut inner_output = Float32Vec::new(0);
-        self.inner.finish(&mut inner_output.0);
-        self.correction.process(&inner_output.0, output);
-        self.correction.finish(output);
-        self.reset();
     }
 }
 
@@ -332,10 +241,9 @@ mod tests {
         const ITERATIONS: usize = 100;
 
         for _ in 0..ITERATIONS {
-            let sample_rate = rng.random_range(10000..=100000);
             let time_stretch = rng.random_range(0.5..1.2);
             let fft_size = 1 << rng.random_range(9..=12); // 2^9=512, 2^12=4096
-            let mut params = TimeStretchParams::new(sample_rate, time_stretch);
+            let mut params = TimeStretchParams::new(time_stretch);
             params.fft_size = fft_size;
             params.overlap = 1 << rng.random_range(2..=5); // 2^2=4, 2^5=32
 
@@ -362,9 +270,10 @@ mod tests {
                             for time_stretch in [0.5, 0.75, 1.0, 1.25, 1.5, 2.0] {
                                 let input = generate_sine_wave(input_freq, sample_rate, MAGNITUDE, DURATION);
 
-                                let mut params = TimeStretchParams::new(sample_rate as u32, time_stretch);
+                                let mut params = TimeStretchParams::new(time_stretch);
                                 params.fft_size = fft_size;
                                 params.overlap = overlap;
+                                params.window_type = window_type;
                                 let mut stretcher = TimeStretcher::new(&params).unwrap();
                                 let output = process_all(&mut stretcher, &input);
 
@@ -448,7 +357,7 @@ mod tests {
                     for window_type in [WindowType::Hann, WindowType::SqrtBlackman, WindowType::SqrtHann] {
                         let input = generate_sine_wave(FREQ, sample_rate, MAGNITUDE, DURATION);
 
-                        let mut params = TimeStretchParams::new(sample_rate as u32, 1.0);
+                        let mut params = TimeStretchParams::new(1.0);
                         params.fft_size = fft_size;
                         params.overlap = overlap;
                         params.window_type = window_type;

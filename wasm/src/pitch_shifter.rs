@@ -3,11 +3,11 @@ use wasm_bindgen::prelude::*;
 use anyhow::{Result, bail};
 
 use crate::envelope_shifter::EnvelopeShifter;
-use crate::multi_processor::{MonoProcessor, MultiProcessor};
 use crate::peak_corrector::PeakCorrector;
 use crate::resampler::StreamingResampler;
 use crate::stft::{Stft, StftAccumBuf};
 use crate::time_stretcher::{TimeStretchParams, TimeStretcher};
+use crate::util::{deinterleave_samples, interleave_samples};
 use crate::web::{Float32Vec, WrapAnyhowError};
 use crate::window::WindowType;
 
@@ -17,6 +17,8 @@ use crate::window::WindowType;
 pub struct PitchShiftParams {
     /// Pitch shift factor (e.g., 2.0 = one octave up, 0.5 = one octave down)
     pub pitch_shift: f32,
+    /// Time stretch factor (e.g., 2.0 = twice as long, 0.5 = half length)
+    pub time_stretch: f32,
     /// Sample rate in Hz
     pub sample_rate: u32,
     /// FFT window size in samples
@@ -41,10 +43,11 @@ pub struct PitchShiftParams {
 impl PitchShiftParams {
     #[wasm_bindgen(constructor)]
     /// Create new pitch shift parameters with default FFT size, overlap, and window.
-    pub fn new(sample_rate: u32, pitch_shift: f32) -> Self {
-        let stretch_params = TimeStretchParams::new(sample_rate, 1.0);
+    pub fn new(sample_rate: u32, pitch_shift: f32, time_stretch: f32) -> Self {
+        let stretch_params = TimeStretchParams::new(1.0);
         Self {
             pitch_shift,
+            time_stretch,
             sample_rate,
             fft_size: stretch_params.fft_size,
             overlap: stretch_params.overlap,
@@ -62,9 +65,20 @@ impl PitchShiftParams {
     }
 }
 
+impl PitchShiftParams {
+    fn to_time_stretch(&self) -> TimeStretchParams {
+        let effective_time_stretch = self.pitch_shift * self.time_stretch;
+        TimeStretchParams {
+            time_stretch: effective_time_stretch,
+            fft_size: self.fft_size,
+            overlap: self.overlap,
+            window_type: self.window_type,
+        }
+    }
+}
+
 /// PitchShifter stretches the mono audio time by pitch_shift factor and then resamples the rate back so that the output
 /// has the ~same length as the input.
-#[wasm_bindgen]
 pub struct PitchShifter {
     params: PitchShiftParams,
     time_stretcher: TimeStretcher,
@@ -85,9 +99,103 @@ pub struct PitchShifter {
 }
 
 impl PitchShifter {
+    fn new(params: &PitchShiftParams) -> Result<Self> {
+        Self::validate_params(params)?;
+
+        let time_stretch_params = params.to_time_stretch();
+        let time_stretcher = TimeStretcher::new(&time_stretch_params)?;
+
+        let resampler = StreamingResampler::new(1.0 / params.pitch_shift)?;
+
+        let envelope_shift_enabled = params.quefrency_cutoff != 0.0;
+        let envelope_fft_size = params.fft_size;
+        let envelope_hop_size = envelope_fft_size / params.overlap as usize;
+        let envelope_stft = Stft::new(envelope_fft_size, params.window_type);
+        let num_bins = envelope_fft_size / 2 + 1;
+        // We normalize the quefrency cutoff by pitch shift because we analyze the pitch shifted spectrum.
+        let cepstrum_cutoff_samples =
+            (params.quefrency_cutoff * params.sample_rate as f32 / (1000.0 * params.pitch_shift)) as usize;
+        let envelope_shifter = EnvelopeShifter::new(num_bins, cepstrum_cutoff_samples, params.pitch_shift);
+
+        Ok(Self {
+            params: *params,
+            time_stretcher,
+            resampler,
+            envelope_shift_enabled,
+            envelope_fft_size,
+            envelope_hop_size,
+            envelope_stft,
+            envelope_shifter,
+            stretched_buf: vec![],
+            shifted_buf: vec![],
+            output_accum_buf: StftAccumBuf::new(envelope_fft_size),
+        })
+    }
+
+    fn process(&mut self, input: &[f32], output: &mut Vec<f32>) {
+        if self.params.pitch_shift == 1.0 {
+            self.time_stretcher.process(input, output);
+            return;
+        }
+
+        self.stretched_buf.clear();
+        self.time_stretcher.process(input, &mut self.stretched_buf);
+        if self.envelope_shift_enabled {
+            self.resampler.resample(&self.stretched_buf, &mut self.shifted_buf);
+            self.do_envelope_processing(output);
+        } else {
+            self.resampler.resample(&self.stretched_buf, output);
+        }
+    }
+
+    fn finish(&mut self, output: &mut Vec<f32>) {
+        if self.params.pitch_shift == 1.0 {
+            self.time_stretcher.finish(output);
+            return;
+        }
+
+        self.stretched_buf.clear();
+        self.time_stretcher.finish(&mut self.stretched_buf);
+        if self.envelope_shift_enabled {
+            self.resampler.resample(&self.stretched_buf, &mut self.shifted_buf);
+            self.resampler.finish(&mut self.shifted_buf);
+            self.finish_envelope_processing(output);
+        } else {
+            self.resampler.resample(&self.stretched_buf, output);
+            self.resampler.finish(output);
+        }
+        self.reset();
+    }
+
+    fn reset(&mut self) {
+        self.time_stretcher.reset();
+        self.resampler.reset();
+        self.stretched_buf.clear();
+        self.shifted_buf.clear();
+        self.output_accum_buf.reset();
+    }
+
+    fn update_params(&mut self, params: &PitchShiftParams) {
+        self.params = *params;
+        let time_stretch_params = self.params.to_time_stretch();
+        self.time_stretcher.update_params(&time_stretch_params);
+        self.resampler.set_ratio(1.0 / params.pitch_shift);
+        let cepstrum_cutoff_samples =
+            (params.quefrency_cutoff * params.sample_rate as f32 / (1000.0 * params.pitch_shift)) as usize;
+        self.envelope_shifter.set_params(cepstrum_cutoff_samples, params.pitch_shift);
+    }
+
     fn validate_params(params: &PitchShiftParams) -> Result<()> {
         if params.pitch_shift < 0.25 || params.pitch_shift > 4.0 {
             bail!("Pitch shifting factor cannot be lower than 0.25 or higher than 4");
+        }
+        // Validate that effective time stretch is within TimeStretcher's valid range
+        let effective_time_stretch = params.pitch_shift * params.time_stretch;
+        if effective_time_stretch < 0.5 || effective_time_stretch > 2.0 {
+            bail!(
+                "Effective time stretch (pitch_shift * time_stretch = {}) must be between 0.5 and 2.0",
+                effective_time_stretch
+            );
         }
         // Most of the parameter validation will be done by TimeStretcher.
         Ok(())
@@ -95,6 +203,7 @@ impl PitchShifter {
 
     fn do_envelope_processing(&mut self, output: &mut Vec<f32>) {
         assert!(self.envelope_shift_enabled);
+
         let output_capacity = self.shifted_buf.len() / self.envelope_hop_size * self.envelope_hop_size;
         output.reserve(output_capacity);
 
@@ -130,94 +239,16 @@ impl PitchShifter {
     }
 }
 
-impl MonoProcessor for PitchShifter {
-    type Params = PitchShiftParams;
-
-    fn new(params: &PitchShiftParams) -> Result<Self> {
-        Self::validate_params(params)?;
-
-        let mut time_stretch_params = TimeStretchParams::new(params.sample_rate, params.pitch_shift);
-        time_stretch_params.fft_size = params.fft_size;
-        time_stretch_params.overlap = params.overlap;
-        time_stretch_params.window_type = params.window_type;
-
-        let time_stretcher = TimeStretcher::new(&time_stretch_params)?;
-
-        let resampler = StreamingResampler::new(1.0 / params.pitch_shift)?;
-
-        let envelope_shift_enabled = params.quefrency_cutoff != 0.0;
-        let envelope_fft_size = params.fft_size;
-        let envelope_hop_size = envelope_fft_size / params.overlap as usize;
-        let envelope_stft = Stft::new(envelope_fft_size, params.window_type);
-        let num_bins = envelope_fft_size / 2 + 1;
-        // We normalize the quefrency cutoff by pitch shift because we analyze the pitch shifted spectrum.
-        let cepstrum_cutoff_samples =
-            (params.quefrency_cutoff * params.sample_rate as f32 / (1000.0 * params.pitch_shift)) as usize;
-        let envelope_shifter = EnvelopeShifter::new(num_bins, cepstrum_cutoff_samples, params.pitch_shift);
-
-        Ok(Self {
-            params: *params,
-            time_stretcher,
-            resampler,
-            envelope_shift_enabled,
-            envelope_fft_size,
-            envelope_hop_size,
-            envelope_stft,
-            envelope_shifter,
-            stretched_buf: vec![],
-            shifted_buf: vec![],
-            output_accum_buf: StftAccumBuf::new(envelope_fft_size),
-        })
-    }
-
-    fn process(&mut self, input: &[f32], output: &mut Vec<f32>) {
-        self.stretched_buf.clear();
-        self.time_stretcher.process(input, &mut self.stretched_buf);
-        if self.envelope_shift_enabled {
-            self.resampler.resample(&self.stretched_buf, &mut self.shifted_buf);
-            self.do_envelope_processing(output);
-        } else {
-            self.resampler.resample(&self.stretched_buf, output);
-        }
-    }
-
-    fn finish(&mut self, output: &mut Vec<f32>) {
-        self.stretched_buf.clear();
-        self.time_stretcher.finish(&mut self.stretched_buf);
-        if self.envelope_shift_enabled {
-            self.resampler.resample(&self.stretched_buf, &mut self.shifted_buf);
-            self.resampler.finish(&mut self.shifted_buf);
-            self.finish_envelope_processing(output);
-        } else {
-            self.resampler.resample(&self.stretched_buf, output);
-            self.resampler.finish(output);
-        }
-        self.reset();
-    }
-
-    fn reset(&mut self) {
-        self.time_stretcher.reset();
-        self.resampler.reset();
-        self.stretched_buf.clear();
-        self.shifted_buf.clear();
-        self.output_accum_buf.reset();
-    }
-
-    fn set_param_value(&mut self, value: f32) {
-        self.params.pitch_shift = value;
-        self.time_stretcher.set_param_value(value);
-        self.resampler.set_ratio(1.0 / self.params.pitch_shift);
-        let cepstrum_cutoff_samples = (self.params.quefrency_cutoff * self.params.sample_rate as f32
-            / (1000.0 * self.params.pitch_shift)) as usize;
-        self.envelope_shifter.set_params(cepstrum_cutoff_samples, self.params.pitch_shift);
-    }
-}
-
 /// Multi-channel pitch shifter that processes interleaved audio data with optional automatic peak correction.
 #[wasm_bindgen]
 pub struct MultiPitchShifter {
-    inner: MultiProcessor<PitchShifter>,
-    correction: PeakCorrector,
+    processors: Vec<PitchShifter>,
+    num_channels: usize,
+    corrector: PeakCorrector,
+    // Scratch buffers for deinterleaving
+    deinterleaved_buf: Vec<f32>,
+    interleaved_buf: Vec<f32>,
+    output_buf: Vec<f32>,
 }
 
 #[wasm_bindgen]
@@ -225,59 +256,97 @@ impl MultiPitchShifter {
     #[wasm_bindgen(constructor)]
     /// Create a new multi-channel pitch shifter for given number of channels.
     pub fn new(params: &PitchShiftParams, num_channels: usize) -> std::result::Result<Self, WrapAnyhowError> {
-        let inner = MultiProcessor::<PitchShifter>::new(params, num_channels).map_err(WrapAnyhowError)?;
+        let mut processors = vec![];
+        for _ in 0..num_channels {
+            processors.push(PitchShifter::new(params).map_err(WrapAnyhowError)?);
+        }
 
-        let correction =
+        let corrector =
             PeakCorrector::new(params.peak_correction_block_size, params.peak_correction_recovery_rate, num_channels)
                 .map_err(WrapAnyhowError)?;
 
-        Ok(Self { inner, correction })
+        Ok(Self {
+            processors,
+            num_channels,
+            corrector,
+            deinterleaved_buf: vec![],
+            interleaved_buf: vec![],
+            output_buf: vec![],
+        })
     }
 
-    /// Process a chunk of interleaved audio samples through the pitch shifter with optional peak correction.
+    /// Process a chunk of interleaved audio samples through the pitch shifter with optional peak correction. output is
+    /// NOT cleared.
     #[wasm_bindgen]
     pub fn process(&mut self, input: &Float32Vec, output: &mut Float32Vec) {
-        let mut inner_output = Float32Vec::new(0);
-        self.inner.process(&input.0, &mut inner_output.0);
-        self.correction.process(&inner_output.0, &mut output.0);
+        self.process_vec(&input.0, &mut output.0);
     }
 
-    /// Finish processing any remaining audio data.
+    /// Finish processing any remaining audio data. output is NOT cleared.
     #[wasm_bindgen]
     pub fn finish(&mut self, output: &mut Float32Vec) {
-        let mut inner_output = Float32Vec::new(0);
-        self.inner.finish(&mut inner_output.0);
-        self.correction.process(&inner_output.0, &mut output.0);
-        self.correction.finish(&mut output.0);
-        self.reset();
+        self.finish_vec(&mut output.0);
     }
 
     /// Reset all internal state.
     #[wasm_bindgen]
     pub fn reset(&mut self) {
-        self.inner.reset();
-        self.correction.reset();
+        for processor in &mut self.processors {
+            processor.reset();
+        }
+        self.corrector.reset();
     }
 
-    /// Set the pitch shift factor for all internal processors.
+    /// Update parameters.
     #[wasm_bindgen]
-    pub fn set_param_value(&mut self, value: f32) {
-        self.inner.set_param_value(value);
+    pub fn update_params(&mut self, params: &PitchShiftParams) {
+        for processor in &mut self.processors {
+            processor.update_params(params);
+        }
     }
 }
 
 impl MultiPitchShifter {
     pub fn process_vec(&mut self, input: &[f32], output: &mut Vec<f32>) {
-        let mut inner_output = Float32Vec::new(0);
-        self.inner.process(&input, &mut inner_output.0);
-        self.correction.process(&inner_output.0, output);
+        self.output_buf.clear();
+
+        if self.num_channels == 1 {
+            self.processors[0].process(input, &mut self.output_buf);
+        } else {
+            assert!(input.len().is_multiple_of(self.num_channels));
+            self.deinterleaved_buf.clear();
+            self.interleaved_buf.clear();
+
+            let samples_per_channel = input.len() / self.num_channels;
+            deinterleave_samples(input, self.num_channels, &mut self.deinterleaved_buf);
+
+            for (ch, processor) in self.processors.iter_mut().enumerate() {
+                let channel_start = ch * samples_per_channel;
+                let channel_end = (ch + 1) * samples_per_channel;
+                processor.process(&self.deinterleaved_buf[channel_start..channel_end], &mut self.interleaved_buf);
+            }
+
+            interleave_samples(&self.interleaved_buf, self.num_channels, &mut self.output_buf);
+        }
+
+        self.corrector.process(&self.output_buf, output);
     }
 
     pub fn finish_vec(&mut self, output: &mut Vec<f32>) {
-        let mut inner_output = Float32Vec::new(0);
-        self.inner.finish(&mut inner_output.0);
-        self.correction.process(&inner_output.0, output);
-        self.correction.finish(output);
+        self.output_buf.clear();
+
+        if self.num_channels == 1 {
+            self.processors[0].finish(&mut self.output_buf);
+        } else {
+            self.interleaved_buf.clear();
+            for processor in &mut self.processors {
+                processor.finish(&mut self.interleaved_buf);
+            }
+            interleave_samples(&self.interleaved_buf, self.num_channels, &mut self.output_buf);
+        }
+
+        self.corrector.process(&self.output_buf, output);
+        self.corrector.finish(output);
         self.reset();
     }
 }
@@ -285,7 +354,7 @@ impl MultiPitchShifter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::{compute_dominant_frequency, compute_magnitude, generate_sine_wave};
+    use crate::util::{compute_dominant_frequency, compute_magnitude, generate_sine_wave, interleave_samples};
     use anyhow::Result;
 
     fn process_all(shifter: &mut PitchShifter, input: &[f32]) -> Vec<f32> {
@@ -332,15 +401,16 @@ mod tests {
             let sample_rate = rng.random_range(10000..=100000);
             // overlap must be power of two, 4..=32
             let overlap = 1 << rng.random_range(2..=5); // 4, 8, 16, 32
-            // pitch shift must be within 0.25..=2.0 and also <= overlap/3
-            let max_pitch = (overlap as f32 / 3.0).min(2.0);
-            let pitch_shift = rng.random_range(0.5..=max_pitch);
+            let pitch_shift = rng.random_range(0.5..=2.0);
+            let max_time_stretch = 1.95 / pitch_shift;
+            let min_time_stretch = 0.55 / pitch_shift;
+            let time_stretch = rng.random_range(min_time_stretch..=max_time_stretch);
             // fft_size must be power of two, >= overlap, and divisible by overlap
             // generate exponent 9..=12 (512..=4096) which is >= overlap (max 32)
             let fft_size = 1 << rng.random_range(9..=12); // 512, 1024, 2048, 4096
             let quefrency_cutoff = if rng.random_bool(0.5) { 0.0 } else { rng.random_range(0.0..5.0) };
 
-            let mut params = PitchShiftParams::new(sample_rate, pitch_shift);
+            let mut params = PitchShiftParams::new(sample_rate as u32, pitch_shift, time_stretch);
             params.fft_size = fft_size;
             params.overlap = overlap;
             params.quefrency_cutoff = quefrency_cutoff;
@@ -368,7 +438,7 @@ mod tests {
                         for pitch_shift in [0.5, 0.75, 1.25, 1.5, 2.0] {
                             let input = generate_sine_wave(INPUT_FREQ, sample_rate, MAGNITUDE, DURATION);
 
-                            let mut params = PitchShiftParams::new(sample_rate as u32, pitch_shift);
+                            let mut params = PitchShiftParams::new(sample_rate as u32, pitch_shift, 1.0);
                             params.fft_size = fft_size;
                             params.overlap = overlap;
                             params.window_type = window_type;
@@ -454,7 +524,9 @@ mod tests {
                         for quefrency_cutoff in [0.0, 0.5, 100.0] {
                             let input = generate_sine_wave(FREQ, sample_rate, MAGNITUDE, DURATION);
 
-                            let mut params = PitchShiftParams::new(sample_rate as u32, 1.0);
+                            // The + 1e-7 is a hack: it makes the pitch_shift != 1.0, while essentially not changing
+                            // the rate.
+                            let mut params = PitchShiftParams::new(sample_rate as u32, 1.0 + 1e-7, 1.0);
                             params.fft_size = fft_size;
                             params.overlap = overlap;
                             params.window_type = window_type;
@@ -499,6 +571,72 @@ mod tests {
                     }
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_multi_pitch_shifter_three_sine_waves() -> Result<()> {
+        const DURATION: f32 = 0.5;
+        const MAGNITUDE: f32 = 0.37;
+        const SAMPLE_RATE: f32 = 44100.0;
+        const FFT_SIZE: usize = 1024;
+        const OVERLAP: u32 = 8;
+        const PITCH_SHIFT: f32 = 1.2;
+        const TIME_STRETCH: f32 = 1.4;
+
+        let test_frequencies = [250.0, 440.0, 880.0];
+        let num_channels = 3;
+
+        let mut planar_data = vec![];
+
+        for &freq in &test_frequencies {
+            let sine_wave = generate_sine_wave(freq, SAMPLE_RATE, MAGNITUDE, DURATION);
+            planar_data.extend(sine_wave);
+        }
+
+        let mut input_data = Vec::with_capacity(planar_data.len());
+        interleave_samples(&planar_data, num_channels, &mut input_data);
+
+        let mut params = PitchShiftParams::new(SAMPLE_RATE as u32, PITCH_SHIFT, TIME_STRETCH);
+        params.fft_size = FFT_SIZE;
+        params.overlap = OVERLAP;
+        params.window_type = WindowType::Hann;
+
+        let mut shifter = MultiPitchShifter::new(&params, num_channels)?;
+
+        let mut output_data = Vec::new();
+        shifter.process_vec(&input_data, &mut output_data);
+        shifter.finish_vec(&mut output_data);
+
+        let output_samples_per_channel = output_data.len() / num_channels;
+
+        for (ch, &input_freq) in test_frequencies.iter().enumerate() {
+            let mut channel_output = Vec::with_capacity(output_samples_per_channel);
+            for i in 0..output_samples_per_channel {
+                channel_output.push(output_data[i * num_channels + ch]);
+            }
+
+            let output_freq = compute_dominant_frequency(&channel_output, SAMPLE_RATE);
+            let expected_freq = input_freq * PITCH_SHIFT;
+            let bin_width = SAMPLE_RATE / FFT_SIZE as f32;
+            let tolerance = bin_width * 2.0;
+
+            println!(
+                "Channel {}: Input {} Hz, Output {:.2} Hz, Expected {:.2} Hz, Tolerance {:.2} Hz",
+                ch, input_freq, output_freq, expected_freq, tolerance
+            );
+
+            assert!(
+                (output_freq - expected_freq).abs() < tolerance,
+                "Channel {}: Expected {} Hz, got {} Hz for input {} Hz with pitch shift {}",
+                ch,
+                expected_freq,
+                output_freq,
+                input_freq,
+                PITCH_SHIFT
+            );
         }
 
         Ok(())
