@@ -1,11 +1,11 @@
 // Processing mode for audio transformation
-export type ProcessingMode = 'pitch' | 'time' | 'formant-preserving-pitch';
+export type ProcessingMode = 'pitch' | 'formant-preserving-pitch' | 'time';
 
 // Multi-channel interleaved audio samples
 export interface InterleavedAudio {
-    data: Float32Array,
-    sampleRate: number,
-    numChannels: number,
+    data: Float32Array;
+    sampleRate: number;
+    numChannels: number;
 }
 
 // Calculate total duration in seconds of an interleaved audio buffer

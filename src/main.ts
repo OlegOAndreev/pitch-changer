@@ -72,7 +72,7 @@ class AppState {
     private loadSettings(): AppSettings {
         const settings: AppSettings = {
             processingMode: DEFAULT_PROCESSING_MODE,
-            pitchValue: DEFAULT_PITCH_VALUE
+            pitchValue: DEFAULT_PITCH_VALUE,
         };
         Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}'));
         if (!settings.processingMode) {
@@ -232,7 +232,7 @@ async function runPlay(player: Player): Promise<void> {
     const sampleRate = appState.sourceAudio!.sampleRate;
     const numChannels = appState.sourceAudio!.numChannels;
     // Use smaller ring buffer of 0.5s. This means we react faster to changes in ratio or processing mode.
-    const bufferSize = sampleRate * numChannels / 2;
+    const bufferSize = (sampleRate * numChannels) / 2;
 
     console.log(`Start playing audio with buffer size ${bufferSize}`);
     const buffer = Float32RingBuffer.withCapacity(bufferSize);
@@ -287,7 +287,6 @@ async function handlePlayClick(): Promise<void> {
     }
 }
 
-
 function handleLoadClick(): void {
     // Oh https://developer.mozilla.org/en-US/docs/Web/API/Window/showOpenFilePicker, where are you
     fileInput.click();
@@ -302,7 +301,9 @@ async function handleFileInputChange(file: File): Promise<void> {
         processingLabel.textContent = `Decoding ${file.name}...`;
         appState.sourceAudio = await decodeAudioFromBlob(file, audioContext);
 
-        console.log(`Loaded ${file.name} in ${performance.now() - startTime}ms: ${getAudioLength(appState.sourceAudio)} samples per channel, ${appState.sourceAudio.numChannels} channels at ${appState.sourceAudio.sampleRate}Hz`);
+        console.log(
+            `Loaded ${file.name} in ${performance.now() - startTime}ms: ${getAudioLength(appState.sourceAudio)} samples per channel, ${appState.sourceAudio.numChannels} channels at ${appState.sourceAudio.sampleRate}Hz`,
+        );
         sourceLabel.textContent = `Loaded ${secondsToString(getAudioSeconds(appState.sourceAudio))} of ${file.name}`;
         onAfterSourceAudioDataSet();
     } catch (error) {
@@ -334,7 +335,7 @@ async function processAllAudio(): Promise<InterleavedAudio> {
     return {
         data,
         sampleRate: appState.sourceAudio!.sampleRate,
-        numChannels: appState.sourceAudio!.numChannels
+        numChannels: appState.sourceAudio!.numChannels,
     };
 }
 
@@ -403,7 +404,7 @@ async function handleDebugPanelClick() {
         // Add benchmark results if available
         if (appState.benchmarkTimes) {
             info += `\n\nBenchmark (processing-to-realtime):`;
-            const { 'time': timeStretch, pitch, 'formant-preserving-pitch': formantPitch } = appState.benchmarkTimes;
+            const { time: timeStretch, pitch, 'formant-preserving-pitch': formantPitch } = appState.benchmarkTimes;
             info += `\n  time-stretch: ${timeStretch.toFixed(2)}`;
             info += `\n  pitch: ${pitch.toFixed(2)}`;
             info += `\n  formant-preserving-pitch: ${formantPitch.toFixed(2)}`;
@@ -423,7 +424,7 @@ async function handleBenchmarkClick() {
 
     const origText = benchmarkBtn.textContent;
     benchmarkBtn.disabled = true;
-    benchmarkBtn.textContent = origText + " (running...)";
+    benchmarkBtn.textContent = origText + ' (running...)';
     // This is a hacky way to force button change the content/disable status while still blocking the main thread.
     await sleep(0);
     try {
@@ -455,18 +456,24 @@ async function handleCopyDebugClick() {
 recordBtn.addEventListener('click', () => handleRecordClick());
 playBtn.addEventListener('click', () => handlePlayClick());
 loadBtn.addEventListener('click', () => handleLoadClick());
-saveBtn.addEventListener('click', withButtonsDisabled([playBtn, saveBtn], () => handleSaveClick()));
+saveBtn.addEventListener(
+    'click',
+    withButtonsDisabled([playBtn, saveBtn], () => handleSaveClick()),
+);
 pitchModeRadio.addEventListener('change', () => handlePitchModeChange());
 timeModeRadio.addEventListener('change', () => handleTimeModeChange());
 formantPitchModeRadio.addEventListener('change', () => handleFormantModeChange());
 pitchSlider.addEventListener('input', () => handlePitchSliderInput());
-fileInput.addEventListener('change', withButtonsDisabled([loadBtn], async () => {
-    const file = fileInput.files![0];
-    if (!file) {
-        return;
-    }
-    await handleFileInputChange(file);
-}));
+fileInput.addEventListener(
+    'change',
+    withButtonsDisabled([loadBtn], async () => {
+        const file = fileInput.files![0];
+        if (!file) {
+            return;
+        }
+        await handleFileInputChange(file);
+    }),
+);
 debugToggleBtn.addEventListener('click', () => handleDebugPanelClick());
 copyDebugBtn.addEventListener('click', () => handleCopyDebugClick());
 benchmarkBtn.addEventListener('click', () => handleBenchmarkClick());

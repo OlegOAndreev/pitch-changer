@@ -2,11 +2,10 @@
 export function getById<T extends HTMLElement>(elementId: string): T {
     const element = document.getElementById(elementId);
     if (!element) {
-        throw new Error(`Element with id "${elementId}" not found`);
+        throw new Error(`Element with id '${elementId}' not found`);
     }
     return element as T;
 }
-
 
 // Converts a function into a function which is run after a fixed timeout.
 //
@@ -55,7 +54,7 @@ export function debounce<T extends unknown[]>(
         }, delay);
 
         return promise as Promise<void>;
-    }
+    };
 }
 
 // Wraps an async event handler to disable a button while the handler is executing.
@@ -69,7 +68,7 @@ export function withButtonsDisabled<T extends Event>(
         for (let i = 0; i < buttons.length; i++) {
             wasDisabled.push(buttons[i].disabled);
             buttons[i].disabled = true;
-        };
+        }
         try {
             await handler(event);
         } finally {
@@ -97,4 +96,4 @@ export async function sleep(delay: number): Promise<void> {
     const { promise, resolve } = Promise.withResolvers<void>();
     setTimeout(() => resolve(), delay);
     return promise;
-} 
+}

@@ -1,4 +1,4 @@
-import { Float32Vec, SpectralHistogram } from "../wasm/build/wasm_main_module";
+import { Float32Vec, SpectralHistogram } from '../wasm/build/wasm_main_module';
 
 // Size of the FFT window for spectrogram computation
 export const SPECTROGRAM_SIZE = 2048;
@@ -20,7 +20,7 @@ export class Spectrogram {
         canvas.addEventListener('resize', () => this.resizeCanvas());
         canvas.addEventListener('click', () => {
             this.showFrequencies = !this.showFrequencies;
-        })
+        });
     }
 
     // Return the amount of audio samples to get to render spectrogram.
@@ -51,7 +51,7 @@ export class Spectrogram {
         const barWidth = this.canvas.width / spectrogramRange;
         canvasCtx.fillStyle = '#223344';
         for (let i = 0; i < spectrogramRange; i++) {
-            const barHeight = Math.round(spectrogram[i] * this.canvas.height / NORM);
+            const barHeight = Math.round((spectrogram[i] * this.canvas.height) / NORM);
 
             const x = i * barWidth;
             canvasCtx.fillRect(x, this.canvas.height - barHeight, barWidth, barHeight);
@@ -63,8 +63,8 @@ export class Spectrogram {
             const topFreq = findTop2(spectrogram);
             topFreq.sort((a, b) => a - b);
             const binWidth = sampleRate / SPECTROGRAM_SIZE;
-            const freq1 = (topFreq[0] + 0.5) * binWidth >>> 0;
-            const freq2 = (topFreq[1] + 0.5) * binWidth >>> 0;
+            const freq1 = ((topFreq[0] + 0.5) * binWidth) >>> 0;
+            const freq2 = ((topFreq[1] + 0.5) * binWidth) >>> 0;
             canvasCtx.fillText(`F1: ${freq1}`, this.canvas.width - metrics.width * 2, 5 + height);
             canvasCtx.fillText(`F2: ${freq2}`, this.canvas.width - metrics.width * 1, 5 + height);
         }
@@ -102,7 +102,7 @@ function findTop2(arr: Float32Array): number[] {
         } else if (v > top2) {
             top2 = v;
             idx2 = i;
-        } 
+        }
     }
-    return [idx1, idx2]
+    return [idx1, idx2];
 }

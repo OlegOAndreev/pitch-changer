@@ -3,16 +3,16 @@
 // (run this test using npm run test:ring-buffer). I do not currently know a better way to test the Atomic.wait (unlike
 // Atomic.waitAsync).
 
-/// <reference types="node" />
+/// <reference types='node' />
 
 import { Worker, isMainThread, parentPort, workerData } from 'worker_threads';
 
 import { Float32RingBuffer } from './sync.ts';
 
 interface StartMessage {
-    type: 'producer' | 'consumer',
-    buffer: SharedArrayBuffer,
-    totalElements: number,
+    type: 'producer' | 'consumer';
+    buffer: SharedArrayBuffer;
+    totalElements: number;
 }
 
 interface DoneMessage {
@@ -33,15 +33,15 @@ async function main(): Promise<void> {
         workerData: {
             type: 'producer',
             buffer: buffer,
-            totalElements: TOTAL_ELEMENTS
-        } as StartMessage
+            totalElements: TOTAL_ELEMENTS,
+        } as StartMessage,
     });
     const consumerWorker = new Worker(new URL(import.meta.url), {
         workerData: {
             type: 'consumer',
             buffer: buffer,
-            totalElements: TOTAL_ELEMENTS
-        } as StartMessage
+            totalElements: TOTAL_ELEMENTS,
+        } as StartMessage,
     });
 
     let producerDone = false;
@@ -170,7 +170,7 @@ function worker() {
 }
 
 if (isMainThread) {
-    main().catch(err => {
+    main().catch((err) => {
         console.error('Test failed:', err);
         process.exit(1);
     });

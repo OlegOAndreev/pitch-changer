@@ -130,7 +130,7 @@ export class Float32RingBuffer {
     // Check if the buffer is closed.
     get isClosed(): boolean {
         // We read readIndex because it is updated before writeIndex: if we have woken a thread up on writeIndex,
-        // it should already see the new readIndex. 
+        // it should already see the new readIndex.
         return (Atomics.load(this.readIndex, 0) & CLOSED_BIT) !== 0;
     }
 

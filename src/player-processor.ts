@@ -1,7 +1,7 @@
 // This is a AudioWorklet processor for Player.
 
-import { playerProcessorName, type PlayerProcessorOptions } from "./player";
-import { CountDownLatch, Float32RingBuffer } from "./sync";
+import { playerProcessorName, type PlayerProcessorOptions } from './player';
+import { CountDownLatch, Float32RingBuffer } from './sync';
 
 class PlayerProcessor extends AudioWorkletProcessor {
     private ringBuffer: Float32RingBuffer;

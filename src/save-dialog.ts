@@ -1,4 +1,4 @@
-import { getById } from "./utils";
+import { getById } from './utils';
 
 const saveDialogOverlay = getById<HTMLDivElement>('save-dialog-overlay');
 const saveInput = getById<HTMLInputElement>('save-filename-input');
@@ -50,10 +50,10 @@ export async function showSaveDialog(): Promise<[string | null, FileSystemFileHa
                         accept: {
                             'audio/mpeg': ['.mp3'],
                             'audio/ogg': ['.ogg'],
-                            'audio/wav': ['.wav']
-                        }
-                    }
-                ]
+                            'audio/wav': ['.wav'],
+                        },
+                    },
+                ],
             });
             return [fileHandle.name, fileHandle];
         } catch (error) {
