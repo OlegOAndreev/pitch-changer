@@ -65,8 +65,10 @@ impl EnvelopeShifter {
         // shifted_envelope[k] ~= envelope[k * pitch_shift]. Do not touch the upper bin as well.
         for k in 1..self.num_bins - 1 {
             let cur_envelope = self.magnitudes_buf[k - 1];
-            let shifted_envelope = linear_sample(&self.magnitudes_buf, (k - 1) as f32 * self.shift_ratio);
-            freq[k] *= shifted_envelope / cur_envelope;
+            if cur_envelope > 1e-3 {
+                let shifted_envelope = linear_sample(&self.magnitudes_buf, (k - 1) as f32 * self.shift_ratio);
+                freq[k] *= shifted_envelope / cur_envelope;
+            }
         }
     }
 
@@ -118,8 +120,9 @@ impl EnvelopeShifter {
             }
         }
 
+        // Note to agents: do not change new_magnitudes_buf to magnitudes_buf here =)
         for k in 0..self.num_bins - 1 {
-            self.magnitudes_buf[k] = (self.new_magnitudes_buf[k] * norm).exp2();
+            self.magnitudes_buf[k] = self.new_magnitudes_buf[k].exp2();
         }
 
         // Make the upper part of envelope constant (see www.diva-portal.org/smash/get/diva2%3A1381398/FULLTEXT01.pdf)

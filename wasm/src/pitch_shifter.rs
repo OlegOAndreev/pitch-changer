@@ -213,7 +213,7 @@ impl PitchShifter {
         output.reserve(output_capacity);
 
         let mut shifted_pos = 0;
-        while shifted_pos + self.envelope_fft_size < self.shifted_buf.len() {
+        while shifted_pos + self.envelope_fft_size <= self.shifted_buf.len() {
             // Do one STFT iteration.
             self.do_stft(shifted_pos);
             self.output_accum_buf.output_next(self.envelope_hop_size, output);

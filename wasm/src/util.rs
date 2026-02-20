@@ -115,6 +115,9 @@ pub fn interleave_samples(input: &[f32], num_channels: usize, output: &mut Vec<f
 
 /// Return linearly interpolated sample at given position.
 pub fn linear_sample(input: &[f32], pos: f32) -> f32 {
+    if input.is_empty() {
+        return 0.0;
+    }
     let index = pos as usize;
     if index >= input.len() - 1 {
         input[input.len() - 1]
