@@ -84,7 +84,7 @@ class WorkerImpl implements WorkerApi {
     }
 
     private getProcessor(sampleRate: number, numChannels: number): Processor {
-        if (this.processor && this.processorNumChannels == numChannels && !this.paramsDirty) {
+        if (this.processor && this.processorNumChannels === numChannels && !this.paramsDirty) {
             return this.processor;
         }
 
@@ -100,6 +100,8 @@ class WorkerImpl implements WorkerApi {
                 timeStretch = this.params.pitchValue;
                 pitchShift = 1.0;
                 break;
+            default:
+                throw new Error(`Unknown processing mode ${this.params.processingMode}`);
         }
         const params = new PitchShiftParams(sampleRate, pitchShift, timeStretch);
         try {

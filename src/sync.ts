@@ -198,11 +198,11 @@ export class Float32RingBuffer {
         const toPop = this.peekImpl(dst, readIdx);
         // We do not directly store the new readIndex because we want to preserve the closed bit which may be
         // concurrently set.
-        let reaIdxDiff = toPop;
+        let readIdxDiff = toPop;
         if (readIdx + toPop >= this.capacity_ * 2) {
-            reaIdxDiff -= this.capacity_ * 2;
+            readIdxDiff -= this.capacity_ * 2;
         }
-        Atomics.add(this.readIndex, 0, reaIdxDiff << INDEX_SHIFT);
+        Atomics.add(this.readIndex, 0, readIdxDiff << INDEX_SHIFT);
         Atomics.notify(this.readIndex, 0);
         return toPop;
     }

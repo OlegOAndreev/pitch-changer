@@ -9,7 +9,7 @@ export const playerProcessorName = 'player-processor';
 export interface PlayerProcessorOptions {
     ringBufferSab: SharedArrayBuffer;
     latchSab: SharedArrayBuffer;
-    numChannels: number,
+    numChannels: number;
 }
 
 let moduleInitialized = false;
@@ -27,7 +27,7 @@ export class Player {
     // Workaround for lack of async constructors
     static async create(audioContext: AudioContext): Promise<Player> {
         if (!moduleInitialized) {
-            console.log(`Initializing processor player module`)
+            console.log(`Initializing processor player module`);
             await audioContext.audioWorklet.addModule(playerProcessor);
             moduleInitialized = true;
         }
@@ -72,7 +72,7 @@ export class Player {
         } finally {
             workletNode.disconnect();
             this.ringBuffer = null;
-            this.stoppedLatch = null
+            this.stoppedLatch = null;
         }
     }
 

@@ -167,7 +167,7 @@ mod tests {
         let mut corrector = PeakCorrector::new(256, 0.01, 1).unwrap();
 
         // Create input that clips (peak = 1.5)
-        let input = generate_sine_wave(44100.0, 440.0, 1.5, 1.0);
+        let input = generate_sine_wave(440.0, 44100.0, 1.5, 1.0);
 
         let mut output = vec![];
         for chunk in input.chunks(3) {
@@ -184,8 +184,8 @@ mod tests {
         let mut corrector = PeakCorrector::new(256, 0.01, 1).unwrap();
 
         // Create input that clips (peak = 1.5)
-        let mut input = generate_sine_wave(44100.0, 440.0, 1.5, 1.0);
-        input.extend_from_slice(&generate_sine_wave(44100.0, 440.0, 0.5, 1.0));
+        let mut input = generate_sine_wave(440.0, 44100.0, 1.5, 1.0);
+        input.extend_from_slice(&generate_sine_wave(440.0, 44100.0, 0.5, 1.0));
         let mut interleaved = vec![];
         interleave_samples(&input, 2, &mut interleaved);
 
