@@ -21,29 +21,15 @@ const SAVE_SETTINGS_DEBOUNCE = 500;
 
 const SETTINGS_KEY = 'pitch-changer-settings';
 
-window.onerror = (event: Event | string, source?: string, lineno?: number, colno?: number, error?: Error) => {
-    console.error('Error:', event, source, lineno, colno, error);
-    alert(event);
-};
-
-window.onunhandledrejection = (event: PromiseRejectionEvent) => {
-    console.error('Unhandled rejection:', event);
-    alert(event.reason);
-};
-
-if (!window.crossOriginIsolated) {
-    throw new Error('This app works only in cross-origin isolated environments, configure the web server');
-}
+//
+// Global app state
+//
 
 // Settings stored locally
 interface AppSettings {
     processingMode: ProcessingMode;
     pitchValue: number;
 }
-
-//
-// Global app state
-//
 
 class AppState {
     // Audio data
@@ -113,9 +99,7 @@ class AppState {
     }
 }
 
-await initWasmModule();
 const appState = new AppState();
-await appState.initProcessor();
 
 //
 // UI elements
@@ -192,9 +176,6 @@ function applySettingsToUI(settings: AppSettings): void {
     // Show the content container after settings are applied
     contentContainer.style.visibility = 'visible';
 }
-
-applySettingsToUI(appState.settings);
-appState.spectrogram = new Spectrogram(spectrogramCanvas);
 
 //
 // Event handlers
@@ -453,28 +434,52 @@ async function handleCopyDebugClick() {
     }
 }
 
-recordBtn.addEventListener('click', () => handleRecordClick());
-playBtn.addEventListener('click', () => handlePlayClick());
-loadBtn.addEventListener('click', () => handleLoadClick());
-saveBtn.addEventListener(
-    'click',
-    withButtonsDisabled([playBtn, saveBtn], () => handleSaveClick()),
-);
-pitchModeRadio.addEventListener('change', () => handlePitchModeChange());
-timeModeRadio.addEventListener('change', () => handleTimeModeChange());
-formantPitchModeRadio.addEventListener('change', () => handleFormantModeChange());
-pitchSlider.addEventListener('input', () => handlePitchSliderInput());
-fileInput.addEventListener(
-    'change',
-    withButtonsDisabled([loadBtn], async () => {
-        const file = fileInput.files![0];
-        if (!file) {
-            return;
-        }
-        await handleFileInputChange(file);
-    }),
-);
-debugToggleBtn.addEventListener('click', () => handleDebugPanelClick());
-copyDebugBtn.addEventListener('click', () => handleCopyDebugClick());
-benchmarkBtn.addEventListener('click', () => handleBenchmarkClick());
-debugInfo.addEventListener('click', () => handleDebugPanelClick());
+async function init() {
+    window.onerror = (event: Event | string, source?: string, lineno?: number, colno?: number, error?: Error) => {
+        console.error('Error:', event, source, lineno, colno, error);
+        alert(event);
+    };
+
+    window.onunhandledrejection = (event: PromiseRejectionEvent) => {
+        console.error('Unhandled rejection:', event);
+        alert(event.reason);
+    };
+
+    if (!window.crossOriginIsolated) {
+        throw new Error('This app works only in cross-origin isolated environments, configure the web server');
+    }
+
+    await initWasmModule();
+    await appState.initProcessor();
+
+    applySettingsToUI(appState.settings);
+    appState.spectrogram = new Spectrogram(spectrogramCanvas);
+
+    recordBtn.addEventListener('click', () => handleRecordClick());
+    playBtn.addEventListener('click', () => handlePlayClick());
+    loadBtn.addEventListener('click', () => handleLoadClick());
+    saveBtn.addEventListener(
+        'click',
+        withButtonsDisabled([playBtn, saveBtn], () => handleSaveClick()),
+    );
+    pitchModeRadio.addEventListener('change', () => handlePitchModeChange());
+    timeModeRadio.addEventListener('change', () => handleTimeModeChange());
+    formantPitchModeRadio.addEventListener('change', () => handleFormantModeChange());
+    pitchSlider.addEventListener('input', () => handlePitchSliderInput());
+    fileInput.addEventListener(
+        'change',
+        withButtonsDisabled([loadBtn], async () => {
+            const file = fileInput.files![0];
+            if (!file) {
+                return;
+            }
+            await handleFileInputChange(file);
+        }),
+    );
+    debugToggleBtn.addEventListener('click', () => handleDebugPanelClick());
+    copyDebugBtn.addEventListener('click', () => handleCopyDebugClick());
+    benchmarkBtn.addEventListener('click', () => handleBenchmarkClick());
+    debugInfo.addEventListener('click', () => handleDebugPanelClick());
+}
+
+init();
