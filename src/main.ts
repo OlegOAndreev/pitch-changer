@@ -412,8 +412,8 @@ async function handleBenchmarkClick() {
         const results = runBenchmark(sampleRate, numChannels, durationSeconds, pitchValue);
         appState.benchmarkTimes = results;
         // Refresh the debug panel in the simplest way =)
-        handleDebugPanelClick();
-        handleDebugPanelClick();
+        await handleDebugPanelClick();
+        await handleDebugPanelClick();
         console.log('Benchmark completed:', results);
     } catch (error) {
         console.error('Benchmark failed:', error);

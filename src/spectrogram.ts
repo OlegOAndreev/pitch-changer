@@ -17,7 +17,7 @@ export class Spectrogram {
         this.histogramInputVec = new Float32Vec(0);
         this.histogramOutputVec = new Float32Vec(0);
         this.resizeCanvas();
-        canvas.addEventListener('resize', () => this.resizeCanvas());
+        new ResizeObserver(() => this.resizeCanvas).observe(canvas);
         canvas.addEventListener('click', () => {
             this.showFrequencies = !this.showFrequencies;
         });
@@ -61,7 +61,6 @@ export class Spectrogram {
             const metrics = canvasCtx.measureText('F2: 10000');
             const height = metrics.actualBoundingBoxAscent;
             const topFreq = findTop2(spectrogram);
-            topFreq.sort((a, b) => a - b);
             const binWidth = sampleRate / SPECTROGRAM_SIZE;
             const freq1 = ((topFreq[0] + 0.5) * binWidth) >>> 0;
             const freq2 = ((topFreq[1] + 0.5) * binWidth) >>> 0;
@@ -89,9 +88,9 @@ export class Spectrogram {
 // Return indices for top 2 values in array.
 function findTop2(arr: Float32Array): number[] {
     let top1 = 0.0;
-    let idx1 = -1;
+    let idx1 = 0;
     let top2 = 0.0;
-    let idx2 = -1;
+    let idx2 = 0;
     for (let i = 0; i < arr.length; i++) {
         const v = arr[i];
         if (v > top1) {
@@ -103,6 +102,9 @@ function findTop2(arr: Float32Array): number[] {
             top2 = v;
             idx2 = i;
         }
+    }
+    if (idx1 > idx2) {
+        return [idx2, idx1];
     }
     return [idx1, idx2];
 }
