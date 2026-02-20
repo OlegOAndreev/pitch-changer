@@ -127,8 +127,10 @@ impl TimeStretcher {
         self.output_accum_buf.reset();
     }
 
-    pub(crate) fn update_params(&mut self, params: &TimeStretchParams) {
+    pub(crate) fn update_params(&mut self, params: &TimeStretchParams) -> Result<()> {
         use crate::window::generate_tail_window;
+
+        Self::validate_params(params)?;
 
         // Always update fields which do not contain the data. We want to be able to dynamically change the
         // shift/stretch factor without clearing the data.
@@ -146,6 +148,8 @@ impl TimeStretcher {
         }
 
         self.params = *params;
+
+        Ok(())
     }
 
     /// Validate parameters.

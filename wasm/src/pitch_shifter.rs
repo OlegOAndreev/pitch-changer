@@ -180,7 +180,7 @@ impl PitchShifter {
 
         self.params = *params;
         let time_stretch_params = self.params.to_time_stretch();
-        self.time_stretcher.update_params(&time_stretch_params);
+        self.time_stretcher.update_params(&time_stretch_params)?;
         self.resampler.set_ratio(1.0 / params.pitch_shift);
         self.envelope_shift_enabled = params.quefrency_cutoff != 0.0;
         let cepstrum_cutoff_samples =

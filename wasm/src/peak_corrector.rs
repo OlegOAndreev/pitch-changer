@@ -73,7 +73,7 @@ impl PeakCorrector {
         while input_pos < input.len() {
             // Try to fill analysis buffer.
             let to_fill = block_size - self.analysis_buf.len();
-            if input_pos + to_fill >= input.len() {
+            if input_pos + to_fill > input.len() {
                 self.analysis_buf.extend_from_slice(&input[input_pos..]);
                 return;
             }
@@ -207,7 +207,6 @@ mod tests {
         clipping_input.extend_from_slice(&generate_sine_wave(440.0, 44100.0, 1.0, 1.0));
         let mut output = vec![];
         corrector.process(&clipping_input, &mut output);
-        corrector.finish(&mut output);
         // Gain should have recovered
         assert!((corrector.current_gain - 1.0).abs() < 1e-3, "Gain should have recovered: {}", corrector.current_gain);
     }
