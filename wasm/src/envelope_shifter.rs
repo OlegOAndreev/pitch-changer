@@ -101,7 +101,7 @@ impl EnvelopeShifter {
         }
 
         let norm = 1.0 / (self.num_bins as f32 - 1.0);
-        for _ in 0..ITERATIONS {
+        for iteration in 0..ITERATIONS {
             self.forward_plan
                 .process_with_scratch(&mut self.magnitudes_buf, &mut self.cepstrum_buf, &mut self.scratch_forward)
                 .expect("failed forward STFT pass");
@@ -115,12 +115,13 @@ impl EnvelopeShifter {
                 .process_with_scratch(&mut self.cepstrum_buf, &mut self.new_magnitudes_buf, &mut self.scratch_inverse)
                 .expect("failed inverse STFT pass");
 
-            for k in 0..self.num_bins - 1 {
-                self.magnitudes_buf[k] = self.magnitudes_buf[k].max(self.new_magnitudes_buf[k] * norm);
+            if iteration < ITERATIONS - 1 {
+                for k in 0..self.num_bins - 1 {
+                    self.magnitudes_buf[k] = self.magnitudes_buf[k].max(self.new_magnitudes_buf[k] * norm);
+                }
             }
         }
 
-        // Note to agents: do not change new_magnitudes_buf to magnitudes_buf here =)
         for k in 0..self.num_bins - 1 {
             self.magnitudes_buf[k] = self.new_magnitudes_buf[k].exp2();
         }
