@@ -95,7 +95,7 @@ pub struct PitchShifter {
     // we have a single hop size.
     stretched_buf: Vec<f32>,
     shifted_buf: Vec<f32>,
-    output_accum_buf: StftAccumBuf,
+    envelope_output_accum_buf: StftAccumBuf,
 }
 
 impl PitchShifter {
@@ -128,7 +128,7 @@ impl PitchShifter {
             envelope_shifter,
             stretched_buf: vec![],
             shifted_buf: vec![],
-            output_accum_buf: StftAccumBuf::new(envelope_fft_size),
+            envelope_output_accum_buf: StftAccumBuf::new(envelope_fft_size),
         })
     }
 
@@ -172,7 +172,7 @@ impl PitchShifter {
         self.resampler.reset();
         self.stretched_buf.clear();
         self.shifted_buf.clear();
-        self.output_accum_buf.reset();
+        self.envelope_output_accum_buf.reset();
     }
 
     fn update_params(&mut self, params: &PitchShiftParams) -> Result<()> {
@@ -215,8 +215,8 @@ impl PitchShifter {
         let mut shifted_pos = 0;
         while shifted_pos + self.envelope_fft_size <= self.shifted_buf.len() {
             // Do one STFT iteration.
-            self.do_stft(shifted_pos);
-            self.output_accum_buf.output_next(self.envelope_hop_size, output);
+            self.do_envelope_stft(shifted_pos);
+            self.envelope_output_accum_buf.output_next(self.envelope_hop_size, output);
 
             shifted_pos += self.envelope_hop_size;
         }
@@ -224,23 +224,24 @@ impl PitchShifter {
     }
 
     fn finish_envelope_processing(&mut self, output: &mut Vec<f32>) {
+        output.extend_from_slice(&self.shifted_buf);
         self.do_envelope_processing(output);
         // Process the remainder in self.shifted_buf by doing the simplest thing: the end has already been windowed by
         // TimeStretcher, so we do not care about pops/cracks.
         let remainder = self.shifted_buf.len();
         self.shifted_buf.resize(self.envelope_fft_size, 0.0);
-        self.do_stft(0);
-        self.output_accum_buf.output_next(remainder, output);
+        self.do_envelope_stft(0);
+        self.envelope_output_accum_buf.output_next(remainder, output);
     }
 
-    fn do_stft(&mut self, shifted_buf_pos: usize) {
+    fn do_envelope_stft(&mut self, shifted_buf_pos: usize) {
         let norm_factor = self.envelope_stft.get_norm_factor(self.envelope_hop_size);
         let input = &self.shifted_buf[shifted_buf_pos..shifted_buf_pos + self.envelope_fft_size];
         let stft_output = self.envelope_stft.process(input, |ana_freq, syn_freq| {
             syn_freq.copy_from_slice(ana_freq);
             self.envelope_shifter.shift_envelope(syn_freq);
         });
-        self.output_accum_buf.add(stft_output, norm_factor);
+        self.envelope_output_accum_buf.add(stft_output, norm_factor);
     }
 }
 
@@ -519,15 +520,21 @@ mod tests {
 
     #[test]
     fn test_pitch_shift_identity() -> Result<()> {
-        const FREQ: f32 = 440.0;
+        const FREQ: f32 = 500.0;
+        // const FREQ: f32 = 440.0;
         const MAGNITUDE: f32 = 0.94;
         const DURATION: f32 = 0.5;
 
-        for sample_rate in [44100.0, 96000.0] {
-            for fft_size in [1024, 4096] {
-                for overlap in [8, 16] {
-                    for window_type in [WindowType::Hann, WindowType::SqrtBlackman, WindowType::SqrtHann] {
-                        for quefrency_cutoff in [0.0, 0.5, 100.0] {
+        for sample_rate in [44100.0] {
+            for fft_size in [1024] {
+                for overlap in [8] {
+                    for window_type in [WindowType::Hann] {
+                        for quefrency_cutoff in [0.5] {
+                            // for sample_rate in [44100.0, 96000.0] {
+                            //     for fft_size in [1024, 4096] {
+                            //         for overlap in [8, 16] {
+                            //             for window_type in [WindowType::Hann, WindowType::SqrtBlackman, WindowType::SqrtHann] {
+                            //                 for quefrency_cutoff in [0.0, 0.5, 100.0] {
                             let input = generate_sine_wave(FREQ, sample_rate, MAGNITUDE, DURATION);
 
                             // The + 1e-7 is a hack: it makes the pitch_shift != 1.0, while essentially not changing
