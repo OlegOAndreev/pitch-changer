@@ -148,6 +148,7 @@ h1 {
     width: 100%;
     max-width: 450px;
     gap: 2px;
+    user-select: none;
 }
 
 #mode-row .radio-option {
@@ -251,6 +252,7 @@ h1 {
     margin-top: 4px;
     font-size: 12px;
     color: #666;
+    user-select: none;
 }
 
 .dialog-overlay {

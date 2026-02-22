@@ -2,11 +2,7 @@
   "compilerOptions": {
     "target": "es2024",
     "module": "esnext",
-    "types": [
-      "vite/client",
-      "@types/audioworklet",
-      "@types/wicg-file-system-access"
-    ],
+    "types": ["vite/client", "@types/audioworklet", "@types/wicg-file-system-access"],
     "skipLibCheck": true,
 
     /* Bundler mode */
@@ -22,9 +18,7 @@
     "noUnusedParameters": false,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noUncheckedSideEffectImports": true,
   },
-  "include": [
-    "src"
-  ]
+  "include": ["src"],
 }
