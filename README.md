@@ -34,7 +34,7 @@ npx vite
 
 Starts the local dev server with URL http://localhost:5173/pitch-changer/
 
-## Literature
+## References
 
 Original source: https://github.com/OlegOAndreev/scratch/blob/master/audio-stretch/audio-stretch.cpp. Unlike the
 original code, we currently do time stretching using STFT and pitch shift by resampling the stretched audio, just like
