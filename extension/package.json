@@ -1,0 +1,18 @@
+{
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:ts && npm run build:assets && npm run lint:webext",
+    "build:ts": "eslint -c ../eslint.config.ts src/*.ts && esbuild --bundle --target=chrome89,firefox89 --format=esm --outdir=dist src/*.ts",
+    "build:assets": "cp -r assets/* dist/",
+    "lint:webext": "web-ext lint --source-dir dist",
+    "package": "npm run build && web-ext sign --source-dir dist --channel unlisted && mv web-ext-artifacts/*.xpi audio-pitch-changer-`jq -r .version < ./assets/manifest.json`.xpi"
+  },
+  "devDependencies": {
+    "@eslint/css": "^0.14.1",
+    "chrome-types": "^0.1.415",
+    "esbuild": "^0.27.3",
+    "eslint": "^9.39.2",
+    "typescript-eslint": "^8.56.0",
+    "web-ext": "^9.3.0"
+  }
+}

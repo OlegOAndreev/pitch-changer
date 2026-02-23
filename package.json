@@ -8,6 +8,7 @@
     "build": "npm run build:wasm && npm run build:ts",
     "build:wasm": "./wasm/run-build.sh",
     "build:ts": "eslint ./src/** && tsc && vite build",
+    "build:extension": "cd extension && npm run build",
     "preview": "vite preview",
     "test": "npm run test:ts && npm run test:wasm && npm run test:ring-buffer",
     "test:ts": "vitest run",
