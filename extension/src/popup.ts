@@ -11,8 +11,10 @@ import {
 // Note: yes, this is an intended import
 import { debounce } from '../../src/utils.js';
 
+const currentSettings: ExtensionSettings = await loadSettings();
+
 function debugLog(...args: unknown[]): void {
-    if (currentSettings?.debugLogging) {
+    if (currentSettings.debugLogging) {
         console.debug(...args);
     }
 }
@@ -32,8 +34,6 @@ const numAudioContextDestinationsValue = document.getElementById('numAudioContex
 const SAVE_SETTINGS_DEBOUNCE = 500;
 const HIDE_ERROR_AFTER = 10000;
 
-const currentSettings: ExtensionSettings = await loadSettings();
-
 function showStatus(message: string) {
     statusValue.style.display = 'flex';
     statusValue.textContent = message;
@@ -51,7 +51,7 @@ const saveSettings = debounce(SAVE_SETTINGS_DEBOUNCE, async () => {
     }
 });
 
-function setEnabledClass() {
+function setEnabled() {
     if (currentSettings.enabled) {
         modeButtons.forEach((btn) => btn.classList.remove('disabled'));
         pitchSlider.classList.remove('disabled');
@@ -201,13 +201,13 @@ async function init(): Promise<void> {
 
     toggleEnabled.checked = currentSettings.enabled !== false;
     debugLoggingCheckbox.checked = currentSettings.debugLogging !== false;
-    setEnabledClass();
+    setEnabled();
     updatePitchDisplay();
     updateActiveModeDisplay(currentSettings.processingMode);
 
     toggleEnabled.addEventListener('change', async () => {
         currentSettings.enabled = toggleEnabled.checked;
-        setEnabledClass();
+        setEnabled();
         saveSettings();
         applyToTabs();
     });
