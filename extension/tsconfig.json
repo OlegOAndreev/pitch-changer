@@ -3,7 +3,7 @@
     "target": "es2024",
     "module": "nodenext",
     "lib": ["DOM", "ES2022"],
-    "types": ["chrome-types", "@types/audioworklet"],
+    "types": ["@types/audioworklet", "@types/chrome"],
     "skipLibCheck": true,
 
     /* Bundler mode */

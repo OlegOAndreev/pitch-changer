@@ -1,9 +1,9 @@
 import {
-    type ExtensionSettings,
     loadSettings,
     PROCESSOR_NAME,
-    type ApplySettingsMessage,
-    type GetStatsResponse,
+    type ContentScriptExports,
+    type ExtensionSettings,
+    type StatsResult,
 } from './common.js';
 
 function debugLog(...args: unknown[]): void {
@@ -11,6 +11,25 @@ function debugLog(...args: unknown[]): void {
         console.debug(...args);
     }
 }
+
+// Notes on scripting.
+//
+// The extension does two things:
+// 1. it re-routes all audio and video elements through AudioContext and applies AudioWorklet with pitch processing
+//    if enabled (this can be done in the ISOLATED environment from this script)
+// 2. it overrides AudioWorklet constructor (this must be done in the MAIN environment from pitch-changer-override-ac:
+//    we need to replace the global variable)
+//
+// * We want to process all frames (it's extremely frequent that audio/video elements are inside iframes) in the tab.
+//
+// * The AudioWorklet overriding script must be ran as soon as possible, before all the page script: the easiest way
+//   to do it is by adding to manifest.json. The alternative of calling executeScript() is harder to pull off: getting
+//   current tab is an async operation, getting current frame is non-trivial.
+//
+// * The standard advice for communicating between scripts (e.g. popup <-> content scripts) is sendMessage, but a) this
+//   is a very verbose way of doing it, b) you can't sendMessage into a MAIN environment on Firefox and c) you have to
+//   enumerate frames if we need to get results from all frames. Instead we call functions using executeScript(). In
+//   order to do that we store the references to those functions into globalThis, which looks like a hack but works.
 
 let settings: ExtensionSettings;
 
@@ -46,6 +65,19 @@ async function getWorkletAudioContext(): Promise<AudioContext> {
     return workletAudioContext;
 }
 
+function createWorkletNode(context: AudioContext, sourceNode: MediaElementAudioSourceNode): AudioWorkletNode {
+    const workletNode = new AudioWorkletNode(context, PROCESSOR_NAME, {
+        channelCount: sourceNode.channelCount,
+        outputChannelCount: [context.destination.channelCount],
+        parameterData: {
+            pitchValue: settings.pitchValue,
+        },
+    });
+    sourceNode.connect(workletNode);
+    workletNode.connect(context.destination);
+    return workletNode;
+}
+
 async function applyWorklet(element: HTMLMediaElement) {
     if (nodesMap.get(element)) {
         return;
@@ -75,15 +107,7 @@ async function applyWorklet(element: HTMLMediaElement) {
         });
 
         const sourceNode = context.createMediaElementSource(element);
-        const workletNode = new AudioWorkletNode(context, PROCESSOR_NAME, {
-            channelCount: sourceNode.channelCount,
-            outputChannelCount: [context.destination.channelCount],
-            parameterData: {
-                pitchValue: settings.pitchValue,
-            },
-        });
-        sourceNode.connect(workletNode);
-        workletNode.connect(context.destination);
+        const workletNode = createWorkletNode(context, sourceNode);
         nodesMap.set(element, { sourceNode: sourceNode, workletNode: workletNode });
         debugLog(
             `Added worklet to element ${element.id}, channelCount ${sourceNode.channelCount}, outputChannelCount ${context.destination.channelCount}`,
@@ -160,25 +184,32 @@ function applyStoredSettings() {
     applyWorkletToChildren(document);
 }
 
-async function applyParameters() {
-    debugLog('Applying settings', settings);
+function applySettings(newSettings: ExtensionSettings) {
+    debugLog('Applying settings', newSettings);
+    const gotEnabled = !settings.enabled && newSettings.enabled;
+    settings = newSettings;
+
+    // Run the rest in the background so that this function exits as soon as possible.
+    setTimeout(() => applySettingsImpl(gotEnabled), 0);
+}
+
+async function applySettingsImpl(gotEnabled: boolean) {
+    // Re-scan the HTML elements to find new audio/video elements not in nodesMap.
+    if (gotEnabled) {
+        debugLog('Enabling pitch shift for page');
+        applyWorkletToChildren(document);
+    }
+
+    // Apply the new pitch value to the worklet nodes and creates worklet nodes if required.
     const context = await getWorkletAudioContext();
     const currentTime = context.currentTime;
     for (const node of nodesMap.values()) {
         if (settings.enabled) {
             if (!node.workletNode) {
-                node.workletNode = new AudioWorkletNode(context, PROCESSOR_NAME, {
-                    channelCount: node.sourceNode.channelCount,
-                    outputChannelCount: [context.destination.channelCount],
-                    parameterData: {
-                        pitchValue: settings.pitchValue,
-                    },
-                });
                 node.sourceNode.disconnect();
-                node.sourceNode.connect(node.workletNode);
-                node.workletNode.connect(context.destination);
+                node.workletNode = createWorkletNode(context, node.sourceNode);
             } else {
-                //@ts-expect-error AudioParamMap does not currently have full interface in TypeScript
+                //@ts-expect-error AudioParamMap does not currently have full interface described in TypeScript
                 (node.workletNode.parameters.get('pitchValue') as AudioParam).setValueAtTime(
                     settings.pitchValue,
                     currentTime,
@@ -194,9 +225,33 @@ async function applyParameters() {
     }
 }
 
+function getStats(): StatsResult {
+    const response: StatsResult = {
+        numAudioElements: 0,
+        numVideoElements: 0,
+    };
+    for (const node of nodesMap.keys()) {
+        if (node instanceof HTMLAudioElement) {
+            response.numAudioElements++;
+        } else if (node instanceof HTMLVideoElement) {
+            response.numVideoElements++;
+        } else {
+            console.error('Strange node in nodesMap', node);
+        }
+    }
+    return response;
+}
+
+function setupExports() {
+    (globalThis as unknown as ContentScriptExports).exportGetStats = getStats;
+    (globalThis as unknown as ContentScriptExports).exportApplySettings = applySettings;
+}
+
 async function init(): Promise<void> {
+    setupExports();
+
     settings = await loadSettings();
-    debugLog('Audio Pitch Changer: Initializing content script');
+    debugLog('Audio Pitch Changer: Initializing main content script');
 
     applyStoredSettings();
 
@@ -223,44 +278,3 @@ async function init(): Promise<void> {
 }
 
 init();
-
-chrome.runtime.onMessage.addListener(async (rawMessage, _sender, sendResponse) => {
-    switch (rawMessage.type) {
-        case 'ApplySettingsMessage': {
-            const message = rawMessage as ApplySettingsMessage;
-            const gotEnabled = !settings.enabled && message.settings.enabled;
-            settings = message.settings;
-            if (gotEnabled) {
-                debugLog('Enabling pitch shift for page');
-                applyWorkletToChildren(document);
-            }
-            // Do not remove elements when extension got disabled: there is currently no way to re-route processing
-            await applyParameters();
-            break;
-        }
-
-        case 'GetStatsRequest': {
-            const response: GetStatsResponse = {
-                type: 'GetStatsResponse',
-                numAudioElements: 0,
-                numVideoElements: 0,
-            };
-            for (const node of nodesMap.keys()) {
-                if (node instanceof HTMLAudioElement) {
-                    response.numAudioElements++;
-                } else if (node instanceof HTMLVideoElement) {
-                    response.numVideoElements++;
-                } else {
-                    console.error('Strange node in nodesMap', node);
-                }
-            }
-            debugLog(`Sending response from ${document.URL}`, response);
-            sendResponse(response);
-            break;
-        }
-
-        default:
-            console.log('pitch-changer: Unknown message type:', rawMessage.type);
-    }
-    return true;
-});

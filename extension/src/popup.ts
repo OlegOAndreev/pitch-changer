@@ -1,9 +1,10 @@
 import {
-    type ApplySettingsMessage,
+    type ContentScriptExports,
     type ExtensionSettings,
-    type GetStatsRequest,
-    type GetStatsResponse,
+    type OverrideScriptExports,
+    type OverrideStatsResult,
     type ProcessingMode,
+    type StatsResult,
     loadSettings,
     SETTINGS_KEY,
 } from './common.js';
@@ -16,6 +17,7 @@ function debugLog(...args: unknown[]): void {
     }
 }
 
+const statusValue = document.getElementById('status') as HTMLDivElement;
 const toggleEnabled = document.getElementById('toggleEnabled') as HTMLInputElement;
 const pitchSlider = document.getElementById('pitchSlider') as HTMLInputElement;
 const pitchValue = document.getElementById('pitchValue') as HTMLDivElement;
@@ -25,16 +27,27 @@ const advancedSection = document.getElementById('advancedSection') as HTMLDetail
 const debugLoggingCheckbox = document.getElementById('debugLogging') as HTMLInputElement;
 const numAudioElementsValue = document.getElementById('numAudioElements') as HTMLSpanElement;
 const numVideoElementsValue = document.getElementById('numVideoElements') as HTMLSpanElement;
+const numAudioContextDestinationsValue = document.getElementById('numAudioContextDestinations') as HTMLSpanElement;
 
 const SAVE_SETTINGS_DEBOUNCE = 500;
+const HIDE_ERROR_AFTER = 10000;
 
 const currentSettings: ExtensionSettings = await loadSettings();
+
+function showStatus(message: string) {
+    statusValue.style.display = 'flex';
+    statusValue.textContent = message;
+    setTimeout(() => {
+        statusValue.style.display = 'none';
+    }, HIDE_ERROR_AFTER);
+}
 
 const saveSettings = debounce(SAVE_SETTINGS_DEBOUNCE, async () => {
     try {
         await chrome.storage.local.set({ [SETTINGS_KEY]: currentSettings });
     } catch (error) {
         console.error('Error saving settings:', error);
+        showStatus(error as string);
     }
 });
 
@@ -98,11 +111,26 @@ async function applyToTabs() {
             continue;
         }
         debugLog(`Applying to ${tab.url}`);
-        const request: ApplySettingsMessage = {
-            type: 'ApplySettingsMessage',
-            settings: currentSettings,
-        };
-        chrome.tabs.sendMessage(tab.id!, request);
+        try {
+            await chrome.scripting.executeScript({
+                func: (settings) => {
+                    const applySettings = (globalThis as unknown as ContentScriptExports).exportApplySettings;
+                    // Skip the frames we did not get injected into for whatever reason.
+                    if (applySettings) {
+                        applySettings(settings);
+                    }
+                },
+                args: [currentSettings],
+                target: { tabId: tab.id!, allFrames: true },
+                world: 'ISOLATED',
+                // Set to true, otherwise the execution may hang for a looong time while the various iframes are being
+                // loaded.
+                injectImmediately: true,
+            });
+        } catch (error) {
+            console.error('Could not apply settings', error);
+            showStatus(error as string);
+        }
     }
 }
 
@@ -110,25 +138,62 @@ async function updateDebugStats() {
     const [tab] = await chrome.tabs.query({ active: true });
     let numAudioElements = 0;
     let numVideoElements = 0;
+    let numAudioContextDestinations = 0;
     if (shouldApplyToTab(tab)) {
-        const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id! });
-        if (frames) {
-            for (const frame of frames) {
-                try {
-                    const request: GetStatsRequest = { type: 'GetStatsRequest' };
-                    const response: GetStatsResponse = await chrome.tabs.sendMessage(tab.id!, request, {
-                        frameId: frame.frameId,
-                    });
-                    numAudioElements += response.numAudioElements;
-                    numVideoElements += response.numVideoElements;
-                } catch (error) {
-                    console.error('Could not message frame', frame, error);
-                }
+        console.debug('Running for tab', tab);
+        try {
+            // We need to call two functions: one in pitch-changer-content.ts and one in pitch-changer-override.ac.ts
+            const results = await chrome.scripting.executeScript({
+                func: () => {
+                    const getStats = (globalThis as unknown as ContentScriptExports).exportGetStats;
+                    // Skip the frames we did not get injected into for whatever reason.
+                    if (getStats) {
+                        return getStats();
+                    } else {
+                        return { numAudioElements: 0, numVideoElements: 0 } as StatsResult;
+                    }
+                },
+                target: { tabId: tab.id!, allFrames: true },
+                world: 'ISOLATED',
+                // Set to true, otherwise the execution may hang for a looong time while the various iframes are being
+                // loaded.
+                injectImmediately: true,
+            });
+            for (const result of results) {
+                const data = result.result as StatsResult;
+                numAudioElements += data.numAudioElements;
+                numVideoElements += data.numVideoElements;
             }
+
+            const overrideResults = await chrome.scripting.executeScript({
+                func: () => {
+                    const getStats = (globalThis as unknown as OverrideScriptExports)
+                        .exportPitchShifterOverrideGetStats;
+                    // Skip the frames we did not get injected into for whatever reason.
+                    if (getStats) {
+                        return getStats();
+                    } else {
+                        return { numAudioContextDestinations: 0 } as OverrideStatsResult;
+                    }
+                },
+                target: { tabId: tab.id!, allFrames: true },
+                world: 'MAIN',
+                // Set to true, otherwise the execution may hang for a looong time while the various iframes are being
+                // loaded.
+                injectImmediately: true,
+            });
+            for (const result of overrideResults) {
+                const data = result.result as OverrideStatsResult;
+                numAudioContextDestinations += data.numAudioContextDestinations;
+            }
+        } catch (error) {
+            console.error('Could not get stats from tab', error);
+            showStatus(error as string);
         }
     }
     numAudioElementsValue.textContent = numAudioElements.toString();
     numVideoElementsValue.textContent = numVideoElements.toString();
+    numAudioContextDestinationsValue.textContent = numAudioContextDestinations.toString();
 }
 
 async function init(): Promise<void> {

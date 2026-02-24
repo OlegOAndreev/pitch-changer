@@ -26,6 +26,15 @@
         gap: 12px;
       }
 
+      .status {
+        background: #ffcdd2;
+        padding: 8px;
+        color: #a91919;
+        border: 1px solid #ef9a9a;
+        border-radius: 8px;
+        user-select: text;
+      }
+
       .header {
         display: flex;
         align-items: center;
@@ -245,6 +254,7 @@
 
       .num-elements {
         margin-left: 4px;
+        user-select: text;
       }
     </style>
     <script src="popup.js" type="module"></script>
@@ -280,6 +290,8 @@
         </div>
       </div>
 
+      <div class="status" id="status" style="display: none"></div>
+
       <div class="advanced-section">
         <details id="advancedSection">
           <summary>Advanced</summary>
@@ -289,6 +301,9 @@
           </div>
           <div><span>Number of audio elements:</span><span id="numAudioElements" class="num-elements"></span></div>
           <div><span>Number of video elements:</span><span id="numVideoElements" class="num-elements"></span></div>
+          <div>
+            <span>Number of AudioContexts:</span><span id="numAudioContextDestinations" class="num-elements"></span>
+          </div>
         </details>
       </div>
     </div>

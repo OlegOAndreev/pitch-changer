@@ -11,19 +11,13 @@ export interface ExtensionSettings {
     pitchValue: number;
 }
 
-export interface ApplySettingsMessage {
-    type: 'ApplySettingsMessage';
-    settings: ExtensionSettings;
-}
-
-export interface GetStatsRequest {
-    type: 'GetStatsRequest';
-}
-
-export interface GetStatsResponse {
-    type: 'GetStatsResponse';
+export interface StatsResult {
     numAudioElements: number;
     numVideoElements: number;
+}
+
+export interface OverrideStatsResult {
+    numAudioContextDestinations: number;
 }
 
 const defaultSettings: ExtensionSettings = {
@@ -44,4 +38,17 @@ export async function loadSettings(): Promise<ExtensionSettings> {
         console.error('Error loading settings:', error);
     }
     return result;
+}
+
+// The following two interfaces are hacks for allowing calling functions in content scripts from popup script. We store
+// function pointers in globalThis properties via those interfaces. An alternative would be either a) passing messages
+// or b) exporting those functions using modules. Both options require more code and look more fragile.
+export interface ContentScriptExports {
+    exportGetStats?(): StatsResult;
+    exportApplySettings?(newSettings: ExtensionSettings): void;
+}
+
+export interface OverrideScriptExports {
+    // The function name must be unique: we are injecting into global user-visible namespace.
+    exportPitchShifterOverrideGetStats?(): OverrideStatsResult;
 }
