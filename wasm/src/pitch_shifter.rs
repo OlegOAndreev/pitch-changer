@@ -696,7 +696,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_pitch_shift_length() -> Result<()> {
         // Test that the pitch shifter returns almost the same length when time stretch = 1.0.
         const FREQ: f32 = 555.0;
