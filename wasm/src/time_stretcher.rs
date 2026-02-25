@@ -72,6 +72,12 @@ impl TimeStretcher {
         })
     }
 
+    // TimeStretcher does not do exact time stretching, because it rounds the syn hop size to integer, this method
+    // returns the actual time stretching ratio.
+    pub(crate) fn actual_time_stretch(&self) -> f64 {
+        self.syn_hop_size as f64 / self.ana_hop_size as f64
+    }
+
     pub(crate) fn process(&mut self, input: &[f32], output: &mut Vec<f32>) {
         // This is an approximation
         let output_capacity = (input.len()) / self.ana_hop_size * self.syn_hop_size;
@@ -219,7 +225,7 @@ mod tests {
         output
     }
 
-    fn process_all_small_chunks(stretcher: &mut TimeStretcher, input: &[f32]) -> Vec<f32> {
+    fn process_all_in_small_chunks(stretcher: &mut TimeStretcher, input: &[f32]) -> Vec<f32> {
         const PREFIX_SIZE: usize = 1000;
         const PREFIX: f32 = -1234.0;
         const CHUNK_SIZE: usize = 100;
@@ -239,6 +245,7 @@ mod tests {
 
     #[test]
     fn test_randomized_time_stretcher_no_crash() {
+        // Test that we do not crash with random params + data.
         use rand;
 
         let mut rng = rand::rng();
@@ -263,6 +270,7 @@ mod tests {
 
     #[test]
     fn test_time_stretch_single_sine_wave() -> Result<()> {
+        // Simple test which checks that dominant frequency of stretched sine wave stays the same.
         const DURATION: f32 = 0.5;
         const MAGNITUDE: f32 = 0.37;
 
@@ -351,6 +359,7 @@ mod tests {
 
     #[test]
     fn test_time_stretch_identity() -> Result<()> {
+        // Test that the shifting with time stretch = 1.0 is an (almost) identity.
         const FREQ: f32 = 440.0;
         const MAGNITUDE: f32 = 0.22;
         const DURATION: f32 = 1.0;
@@ -366,7 +375,7 @@ mod tests {
                         params.overlap = overlap;
                         params.window_type = window_type;
                         let mut stretcher = TimeStretcher::new(&params).unwrap();
-                        let output = process_all_small_chunks(&mut stretcher, &input);
+                        let output = process_all_in_small_chunks(&mut stretcher, &input);
 
                         // Skip transient at start and end, compare the middle
                         let offset = fft_size * 2;

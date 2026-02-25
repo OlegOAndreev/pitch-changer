@@ -105,7 +105,14 @@ impl PitchShifter {
         let time_stretch_params = params.to_time_stretch();
         let time_stretcher = TimeStretcher::new(&time_stretch_params)?;
 
-        let resampler = StreamingResampler::new(1.0 / params.pitch_shift)?;
+        // We need to compensate the difference between time_stretch and actual_time_stretch. This is important
+        // for cases when time_stretch = 1.0 and we need to do realtime pitch shifting.
+        //
+        // An alternative to that is doing a pitch-shift only transformation without resampling (FFT -> shifting
+        // frequencies -> envelope correction if required -> IFFT).
+        let resampling_ratio = 1.0 / params.pitch_shift as f64
+            * (time_stretch_params.time_stretch as f64 / time_stretcher.actual_time_stretch());
+        let resampler = StreamingResampler::new(resampling_ratio)?;
 
         let envelope_shift_enabled = params.quefrency_cutoff != 0.0;
         let envelope_fft_size = params.fft_size;
@@ -181,7 +188,10 @@ impl PitchShifter {
         self.params = *params;
         let time_stretch_params = self.params.to_time_stretch();
         self.time_stretcher.update_params(&time_stretch_params)?;
-        self.resampler.set_ratio(1.0 / params.pitch_shift);
+        // See comment in new()
+        let resampling_ratio = 1.0 / params.pitch_shift as f64
+            * (time_stretch_params.time_stretch as f64 / self.time_stretcher.actual_time_stretch());
+        self.resampler.set_ratio(resampling_ratio);
         self.envelope_shift_enabled = params.quefrency_cutoff != 0.0;
         let cepstrum_cutoff_samples =
             (params.quefrency_cutoff * params.sample_rate as f32 / (1000.0 * params.pitch_shift)) as usize;
@@ -379,7 +389,7 @@ mod tests {
         output
     }
 
-    fn process_all_small_chunks(shifter: &mut PitchShifter, input: &[f32]) -> Vec<f32> {
+    fn process_in_small_chunks(shifter: &mut PitchShifter, input: &[f32]) -> Vec<f32> {
         const PREFIX_SIZE: usize = 1000;
         const PREFIX: f32 = -1234.0;
         const CHUNK_SIZE: usize = 100;
@@ -399,6 +409,7 @@ mod tests {
 
     #[test]
     fn test_randomized_pitch_shifter_no_crash() {
+        // Test that we do not crash with random params + data.
         use rand::Rng;
 
         let mut rng = rand::rng();
@@ -434,6 +445,7 @@ mod tests {
 
     #[test]
     fn test_pitch_shift_single_sine_wave() -> Result<()> {
+        // Simple test which checks the dominant frequency of shifted sine wave.
         const DURATION: f32 = 0.5;
         const MAGNITUDE: f32 = 0.37;
         const INPUT_FREQ: f32 = 400.0;
@@ -520,21 +532,16 @@ mod tests {
 
     #[test]
     fn test_pitch_shift_identity() -> Result<()> {
+        // Test that the shifting with time stretch = 1.0 an pitch shift = 1.0 is an (almost) identity.
         const FREQ: f32 = 500.0;
-        // const FREQ: f32 = 440.0;
         const MAGNITUDE: f32 = 0.94;
         const DURATION: f32 = 0.5;
 
-        for sample_rate in [44100.0] {
-            for fft_size in [1024] {
-                for overlap in [8] {
-                    for window_type in [WindowType::Hann] {
-                        for quefrency_cutoff in [0.5] {
-                            // for sample_rate in [44100.0, 96000.0] {
-                            //     for fft_size in [1024, 4096] {
-                            //         for overlap in [8, 16] {
-                            //             for window_type in [WindowType::Hann, WindowType::SqrtBlackman, WindowType::SqrtHann] {
-                            //                 for quefrency_cutoff in [0.0, 0.5, 100.0] {
+        for sample_rate in [44100.0, 96000.0] {
+            for fft_size in [1024, 4096] {
+                for overlap in [8, 16] {
+                    for window_type in [WindowType::Hann, WindowType::SqrtBlackman, WindowType::SqrtHann] {
+                        for quefrency_cutoff in [0.0, 0.5, 100.0] {
                             let input = generate_sine_wave(FREQ, sample_rate, MAGNITUDE, DURATION);
 
                             // The + 1e-7 is a hack: it makes the pitch_shift != 1.0, while essentially not changing
@@ -545,7 +552,7 @@ mod tests {
                             params.window_type = window_type;
                             params.quefrency_cutoff = quefrency_cutoff;
                             let mut shifter = PitchShifter::new(&params).unwrap();
-                            let output = process_all_small_chunks(&mut shifter, &input);
+                            let output = process_in_small_chunks(&mut shifter, &input);
 
                             // Skip transient at start and end, compare the middle
                             let offset = fft_size * 2;
@@ -591,6 +598,7 @@ mod tests {
 
     #[test]
     fn test_multi_pitch_shifter_three_sine_waves() -> Result<()> {
+        // Basic MultiPitchShifter test with three channels.
         const DURATION: f32 = 0.5;
         const MAGNITUDE: f32 = 0.37;
         const SAMPLE_RATE: f32 = 44100.0;
@@ -615,8 +623,6 @@ mod tests {
         let mut params = PitchShiftParams::new(SAMPLE_RATE as u32, PITCH_SHIFT, TIME_STRETCH);
         params.fft_size = FFT_SIZE;
         params.overlap = OVERLAP;
-        params.window_type = WindowType::Hann;
-
         let mut shifter = MultiPitchShifter::new(&params, num_channels)?;
 
         let mut output_data = vec![];
@@ -657,6 +663,72 @@ mod tests {
                 "expected output length {}, got {}",
                 expected_output_len,
                 output_samples_per_channel,
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_pitch_chunks() -> Result<()> {
+        // Test that the pitch shifter result is the same whether we process in chunks or at once.
+        const FREQ: f32 = 1234.0;
+        const DURATION: f32 = 1.5;
+        const MAGNITUDE: f32 = 0.34;
+        const SAMPLE_RATE: f32 = 48000.0;
+        const FFT_SIZE: usize = 2048;
+        const OVERLAP: u32 = 8;
+        const PITCH_SHIFT: f32 = 1.23;
+        const TIME_SHIFT: f32 = 1.34;
+
+        let input = generate_sine_wave(FREQ, SAMPLE_RATE, MAGNITUDE, DURATION);
+        let mut params = PitchShiftParams::new(SAMPLE_RATE as u32, PITCH_SHIFT, TIME_SHIFT);
+        params.fft_size = FFT_SIZE;
+        params.overlap = OVERLAP;
+        let mut shifter = PitchShifter::new(&params)?;
+
+        let output_single = process_all(&mut shifter, &input);
+        let output_in_chunks = process_in_small_chunks(&mut shifter, &input);
+
+        assert_eq!(output_single, output_in_chunks);
+
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn test_pitch_shift_length() -> Result<()> {
+        // Test that the pitch shifter returns almost the same length when time stretch = 1.0.
+        const FREQ: f32 = 555.0;
+        const MAGNITUDE: f32 = 1.0;
+        const SAMPLE_RATE: f32 = 44100.0;
+        const FFT_SIZE: usize = 1024;
+        const OVERLAP: u32 = 8;
+        const PITCH_SHIFT: f32 = 1.3456789;
+
+        // Set env var TEST_PITCH_SHIFT_LENGTH_LONG to run the long tests.
+        let durations: &[f32] = if std::env::var("TEST_PITCH_SHIFT_LENGTH_LONG").is_ok() {
+            &[50.0, 100.0, 500.0, 1000.0, 2000.0, 3000.0, 5000.0, 10000.0]
+        } else {
+            &[50.0, 100.0, 500.0]
+        };
+
+        for &duration in durations {
+            let input = generate_sine_wave(FREQ, SAMPLE_RATE, MAGNITUDE, duration);
+            let mut params = PitchShiftParams::new(SAMPLE_RATE as u32, PITCH_SHIFT, 1.0);
+            params.fft_size = FFT_SIZE;
+            params.overlap = OVERLAP;
+            let mut shifter = PitchShifter::new(&params)?;
+
+            let output = process_all(&mut shifter, &input);
+            let len_diff = output.len().abs_diff(input.len());
+            println!("Got {} diff len for {} seconds (total len {})", len_diff, duration, output.len());
+            assert!(
+                len_diff < FFT_SIZE,
+                "expected output length {}, got {}, diff {}",
+                input.len(),
+                output.len(),
+                len_diff
             );
         }
 

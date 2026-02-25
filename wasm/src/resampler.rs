@@ -8,7 +8,7 @@ use crate::web::WrapAnyhowError;
 /// A resampler that uses rubato's FFT-based resampling with buffering for arbitrary input chunks.
 pub struct StreamingResampler {
     resampler: Async<f32>,
-    sample_rate_ratio: f32,
+    sample_rate_ratio: f64,
     // Buffer for leftover input samples that do not form a full chunk
     previous_input: Vec<f32>,
 }
@@ -20,10 +20,10 @@ impl StreamingResampler {
     pub const LATENCY: usize = 1;
 
     /// Create a new resampler with the given sample rate ratio. The ratio is output sample rate / input sample rate.
-    pub fn new(sample_rate_ratio: f32) -> std::result::Result<Self, WrapAnyhowError> {
+    pub fn new(sample_rate_ratio: f64) -> std::result::Result<Self, WrapAnyhowError> {
         // We do not care too much about quality in case of pitch shifting.
         let resampler = Async::<f32>::new_poly(
-            sample_rate_ratio as f64,
+            sample_rate_ratio,
             4.0,
             rubato::PolynomialDegree::Cubic,
             512,
@@ -109,13 +109,13 @@ impl StreamingResampler {
         self.resampler.reset();
         // Reset resets sample ratio to original.
         self.resampler
-            .set_resample_ratio(self.sample_rate_ratio as f64, false)
+            .set_resample_ratio(self.sample_rate_ratio, false)
             .expect("Failed to change resampling ratio");
         self.previous_input.clear();
     }
 
     /// Update the resampling ratio.
-    pub fn set_ratio(&mut self, sample_rate_ratio: f32) {
+    pub fn set_ratio(&mut self, sample_rate_ratio: f64) {
         self.sample_rate_ratio = sample_rate_ratio;
         self.resampler
             .set_resample_ratio(sample_rate_ratio as f64, true)
@@ -195,11 +195,11 @@ mod tests {
             let mut resampler = StreamingResampler::new(ratio)?;
             let output = resample_all_small_chunks(&mut resampler, &input);
 
-            let expected_freq = INPUT_FREQ / ratio;
+            let expected_freq = INPUT_FREQ / ratio as f32;
             let output_freq = compute_dominant_frequency(&output, SAMPLE_RATE);
             let output_magn = compute_magnitude(&output);
 
-            let expected_len = (input.len() as f32 * ratio) as usize;
+            let expected_len = (input.len() as f64 * ratio) as usize;
 
             let bin_width = SAMPLE_RATE as f32 / input.len() as f32;
             let tolerance = bin_width * 2.0;
