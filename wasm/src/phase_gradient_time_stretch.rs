@@ -4,6 +4,8 @@ use std::mem;
 
 use realfft::num_complex::Complex;
 
+use crate::util::{approx_atan2, approx_sincos};
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct PhaseGradientElem {
     pub bin: usize,
@@ -120,7 +122,8 @@ impl PhaseGradientTimeStretch {
         for k in 0..freq_size {
             // Optimization: do not compute phase for frequencies below the min_magn threshold.
             if self.magnitudes[k] > min_magn {
-                self.ana_phases[k] = ana_freq[k].arg();
+                // Use approximation instead of ana_freq[k].arg();
+                self.ana_phases[k] = approx_atan2(ana_freq[k].im, ana_freq[k].re);
                 self.phase_assigned[k] = false;
                 num_phase_unassigned += 1;
                 self.prev_max_heap.push(PhaseGradientElem { bin: k, magnitude: self.prev_magnitudes[k] });
@@ -198,9 +201,11 @@ impl PhaseGradientTimeStretch {
         // Convert phase/magnitude back to complex frequency domain
         for k in 0..freq_size {
             // Do the normalize_phase here so that the prev_syn_phases does not become too large, reducing the floating
-            // point error.
+            // point error. It also allows us to use approx_sincos implementation.
             self.prev_syn_phases[k] = normalize_phase(self.syn_phases[k]);
-            syn_freq[k] = Complex::from_polar(self.magnitudes[k], self.prev_syn_phases[k]);
+            // Use approximation instead of Complex::from_polar(self.magnitudes[k], self.prev_syn_phases[k])
+            let (sin, cos) = approx_sincos(self.prev_syn_phases[k]);
+            syn_freq[k] = Complex::new(self.magnitudes[k] * cos, self.magnitudes[k] * sin);
         }
         // Save previous analysis data for next frame
         mem::swap(&mut self.prev_magnitudes, &mut self.magnitudes);

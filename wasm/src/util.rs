@@ -1,4 +1,4 @@
-use std::f32::consts::PI;
+use std::f32::consts::{FRAC_PI_2, PI};
 
 /// Normalize a phase value to the range [-PI, PI).
 pub fn normalize_phase(phase: f32) -> f32 {
@@ -127,6 +127,57 @@ pub fn linear_sample(input: &[f32], pos: f32) -> f32 {
     }
 }
 
+/// Approximate atan2 implementation, taken from
+/// https://math.stackexchange.com/questions/1098487/atan2-faster-approximation
+pub fn approx_atan2(y: f32, x: f32) -> f32 {
+    let ax = x.abs();
+    let ay = y.abs();
+    let max = ax.max(ay);
+    if max == 0.0 {
+        return 0.0;
+    }
+    let a = ax.min(ay) / max;
+    let s = a * a;
+    let mut r = ((-0.0464964749 * s + 0.15931422) * s - 0.327622764) * s * a + a;
+    if ay > ax {
+        r = 1.57079637 - r;
+    }
+    if x < 0.0 {
+        r = 3.14159274 - r;
+    }
+    if y < 0.0 {
+        r = -r;
+    }
+    r
+}
+
+/// Approximate sin and cos implementation for cases when the angle is in [-PI, PI]. Taken from
+/// https://www.apulsoft.ch/blog/branchless-sincos/
+pub fn approx_sincos(x: f32) -> (f32, f32) {
+    const S0: f32 = -0.10132104963779; // x
+    const S1: f32 = 0.00662060857089096; // x^3
+    const S2: f32 = -0.000173351320734045; // x^5
+    const S3: f32 = 2.48668816803878e-06; // x^7
+    const S4: f32 = -1.97103310997063e-08; // x^9
+
+    const C0: f32 = -0.405284410277645; // 1
+    const C1: f32 = 0.0383849982168558; // x^2
+    const C2: f32 = -0.00132798793179218; // x^4
+    const C3: f32 = 2.37446117208029e-05; // x^6
+    const C4: f32 = -2.23984068352572e-07; // x^8
+
+    let x2 = x * x;
+
+    let x4 = x2 * x2;
+    let x8 = x4 * x4;
+    let poly1 = x8.mul_add(S4, x4.mul_add(S3.mul_add(x2, S2), S1.mul_add(x2, S0)));
+    let poly2 = x8.mul_add(C4, x4.mul_add(C3.mul_add(x2, C2), C1.mul_add(x2, C0)));
+
+    let si = (x - PI) * (x + PI) * x * poly1;
+    let co = (x - FRAC_PI_2) * (x + FRAC_PI_2) * poly2;
+    (si, co)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,6 +283,41 @@ mod tests {
             interleave_samples(&deinterleaved, num_channels, &mut interleaved);
 
             assert_eq!(interleaved, original);
+        }
+    }
+
+    #[test]
+    fn test_approx_atan2() {
+        let cases = [
+            (0.0_f32, 1.0_f32),
+            (0.0, -1.0),
+            (1.0, 0.0),
+            (-1.0, 0.0),
+            (1.0, 1.0),
+            (-1.0, 1.0),
+            (1.0, -1.0),
+            (-1.0, -1.0),
+            (0.5, 0.866),
+            (-0.866, -0.5),
+            (0.0, 0.0),
+        ];
+        for (y, x) in cases {
+            let expected = y.atan2(x);
+            let got = approx_atan2(y, x);
+            assert!((got - expected).abs() < 1e-3, "approx_atan2({y}, {x}) = {got}, expected {expected}");
+        }
+    }
+
+    #[test]
+    fn test_approx_sincos() {
+        let cases =
+            [0.0_f32, PI / 4.0, PI / 2.0, 3.0 * PI / 4.0, PI, -PI / 4.0, -PI / 2.0, -3.0 * PI / 4.0, -PI, 1.0, -1.0];
+        for x in cases {
+            let (si, co) = approx_sincos(x);
+            let expected_si = x.sin();
+            let expected_co = x.cos();
+            assert!((si - expected_si).abs() < 1e-5, "approx_sincos({x}).0 = {si}, expected sin = {expected_si}");
+            assert!((co - expected_co).abs() < 1e-5, "approx_sincos({x}).1 = {co}, expected cos = {expected_co}");
         }
     }
 
