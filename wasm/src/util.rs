@@ -167,11 +167,14 @@ pub fn approx_sincos(x: f32) -> (f32, f32) {
     const C4: f32 = -2.23984068352572e-07; // x^8
 
     let x2 = x * x;
-
     let x4 = x2 * x2;
     let x8 = x4 * x4;
-    let poly1 = x8.mul_add(S4, x4.mul_add(S3.mul_add(x2, S2), S1.mul_add(x2, S0)));
-    let poly2 = x8.mul_add(C4, x4.mul_add(C3.mul_add(x2, C2), C1.mul_add(x2, C0)));
+    let poly1 = x8 * S4 + x4 * (S3 * x2 + S2) + S1 * x2 + S0;
+    let poly2 = x8 * C4 + x4 * (C3 * x2 + C2) + C1 * x2 + C0;
+    // NOTE: f32::mul_add is slower than plain multiply+add on WASM in Chrome. Revisit this code once FMA instruction
+    // is available in WASM.
+    // let poly1 = x8.mul_add(S4, x4.mul_add(S3.mul_add(x2, S2), S1.mul_add(x2, S0)));
+    // let poly2 = x8.mul_add(C4, x4.mul_add(C3.mul_add(x2, C2), C1.mul_add(x2, C0)));
 
     let si = (x - PI) * (x + PI) * x * poly1;
     let co = (x - FRAC_PI_2) * (x + FRAC_PI_2) * poly2;

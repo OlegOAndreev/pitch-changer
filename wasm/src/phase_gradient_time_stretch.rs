@@ -203,9 +203,14 @@ impl PhaseGradientTimeStretch {
             // Do the normalize_phase here so that the prev_syn_phases does not become too large, reducing the floating
             // point error. It also allows us to use approx_sincos implementation.
             self.prev_syn_phases[k] = normalize_phase(self.syn_phases[k]);
-            // Use approximation instead of Complex::from_polar(self.magnitudes[k], self.prev_syn_phases[k])
-            let (sin, cos) = approx_sincos(self.prev_syn_phases[k]);
-            syn_freq[k] = Complex::new(self.magnitudes[k] * cos, self.magnitudes[k] * sin);
+            if self.magnitudes[k] > min_magn {
+                // Use approximation instead of Complex::from_polar(self.magnitudes[k], self.prev_syn_phases[k])
+                let (sin, cos) = approx_sincos(self.prev_syn_phases[k]);
+                syn_freq[k] = Complex::new(self.magnitudes[k] * cos, self.magnitudes[k] * sin);
+            } else {
+                // We do not care what to fill this bin with.
+                syn_freq[k] = ana_freq[k];
+            }
         }
         // Save previous analysis data for next frame
         mem::swap(&mut self.prev_magnitudes, &mut self.magnitudes);
