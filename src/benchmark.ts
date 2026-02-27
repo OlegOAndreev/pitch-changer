@@ -7,12 +7,28 @@ export interface BenchmarkResults {
     time: number;
 }
 
+// Simple deterministic pseudo-random number generator using LCG
+class SeededRandom {
+    private seed: number;
+
+    constructor(seed: number) {
+        this.seed = seed;
+    }
+
+    next(): number {
+        // Simple LCG: using parameters from glibc
+        this.seed = (1103515245 * this.seed + 12345) & 0x7fffffff;
+        return this.seed / 0x7fffffff;
+    }
+}
+
 // Generate random noise with uniform distribution between -1 and 1
 function generateNoise(samplesPerChannel: number, numChannels: number): Float32Array {
     const totalSamples = samplesPerChannel * numChannels;
     const arr = new Float32Array(totalSamples);
+    const randomGen = new SeededRandom(42);
     for (let i = 0; i < totalSamples; i++) {
-        arr[i] = (Math.random() - 0.5) * 2;
+        arr[i] = (randomGen.next() - 0.5) * 2;
     }
     return arr;
 }
@@ -119,8 +135,9 @@ export function runBenchmark(
         inputData = generateNoise(samplesPerChannel, numChannels);
     } else {
         const freqs = [];
+        const randomGen = new SeededRandom(42);
         for (let i = 0; i < 50; i++) {
-            freqs.push(Math.random() * 10000);
+            freqs.push(randomGen.next() * 10000);
         }
         inputData = generateSineWaves(samplesPerChannel, numChannels, sampleRate, freqs);
     }
