@@ -11,8 +11,7 @@ console.log('Initializing injected content script');
 // GainNode does not satisfy AudioDestinationNode, because it does not have one property. We simply add this property
 // to it.
 function gainWithMaxChannelCount(gainNode: GainNode, maxChannelCount: number): AudioDestinationNode {
-    //@ts-expect-error We are monkey-patching the live object, all the other solutions did not get accept by other
-    // AudioNode.connect() for some reason
+    //@ts-expect-error We are monkey-patching the live object, all the other solutions did not get accept by other AudioNode.connect() for some reason
     gainNode.maxChannelCount = maxChannelCount;
     return gainNode as unknown as AudioDestinationNode;
 }

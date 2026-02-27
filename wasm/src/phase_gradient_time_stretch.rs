@@ -7,20 +7,27 @@ use realfft::num_complex::Complex;
 use crate::util::{approx_atan2, approx_sincos};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct PhaseGradientElem {
-    pub bin: usize,
+struct PhaseGradientBin {
+    // Micro-optimization: store usize as u32.
+    pub index: u32,
     pub magnitude: f32,
 }
 
-impl Eq for PhaseGradientElem {}
+impl PhaseGradientBin {
+    fn new(index: usize, magnitude: f32) -> Self {
+        Self { index: index as u32, magnitude: magnitude }
+    }
+}
 
-impl PartialOrd for PhaseGradientElem {
+impl Eq for PhaseGradientBin {}
+
+impl PartialOrd for PhaseGradientBin {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for PhaseGradientElem {
+impl Ord for PhaseGradientBin {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.magnitude.total_cmp(&other.magnitude)
     }
@@ -46,8 +53,8 @@ pub(crate) struct PhaseGradientTimeStretch {
     // of previous magnitudes. Heap operations take ~50% of all time in PitchShifter and we try to optimize them as much
     // as we can. By segregating the HeapElem from prev stft frame and current stft frame, we reduce the BinaryHeap
     // size and can use sort, which is faster than a bunch of push/pop operations.
-    prev_max_heap: Vec<PhaseGradientElem>,
-    max_heap: BinaryHeap<PhaseGradientElem>,
+    prev_max_heap: Vec<PhaseGradientBin>,
+    max_heap: BinaryHeap<PhaseGradientBin>,
     // If true, syn_phases is assigned.
     phase_assigned: Vec<bool>,
 }
@@ -126,7 +133,8 @@ impl PhaseGradientTimeStretch {
                 self.ana_phases[k] = approx_atan2(ana_freq[k].im, ana_freq[k].re);
                 self.phase_assigned[k] = false;
                 num_phase_unassigned += 1;
-                self.prev_max_heap.push(PhaseGradientElem { bin: k, magnitude: self.prev_magnitudes[k] });
+                self.prev_max_heap
+                    .push(PhaseGradientBin { index: k as u32, magnitude: self.prev_magnitudes[k] });
             } else {
                 // The original paper assigns random values to frequencies below the min magnitude, but we simply zero
                 // them out.
@@ -148,7 +156,7 @@ impl PhaseGradientTimeStretch {
                 }
                 self.phase_assigned[k] = true;
                 num_phase_unassigned -= 1;
-                self.max_heap.push(PhaseGradientElem { bin: k, magnitude: self.magnitudes[k] });
+                self.max_heap.push(PhaseGradientBin::new(k, self.magnitudes[k]));
 
                 // From the paper
                 //   φ_s(m_h, n) ← φ_s(m_h, n − 1) + a_s / 2 * ((∆_t φ_a) (m_h, n − 1) + (∆_t φ_a) (m_h, n))
@@ -174,7 +182,7 @@ impl PhaseGradientTimeStretch {
                 if k > 0 && !self.phase_assigned[k - 1] {
                     self.phase_assigned[k - 1] = true;
                     num_phase_unassigned -= 1;
-                    self.max_heap.push(PhaseGradientElem { bin: k - 1, magnitude: self.magnitudes[k - 1] });
+                    self.max_heap.push(PhaseGradientBin::new(k - 1, self.magnitudes[k - 1]));
 
                     // From the paper
                     //   φ_s(m_h + 1, n) ← φ_s(m_h, n) + b_s / 2 ((∆_f φ_a) (m_h, n) + (∆_f φ_a) (m_h + 1, n))
@@ -191,7 +199,7 @@ impl PhaseGradientTimeStretch {
                 if k < freq_size - 1 && !self.phase_assigned[k + 1] {
                     self.phase_assigned[k + 1] = true;
                     num_phase_unassigned -= 1;
-                    self.max_heap.push(PhaseGradientElem { bin: k + 1, magnitude: self.magnitudes[k + 1] });
+                    self.max_heap.push(PhaseGradientBin::new(k + 1, self.magnitudes[k + 1]));
 
                     self.syn_phases[k + 1] = self.syn_phases[k] + self.ana_phases[k + 1] - self.ana_phases[k];
                 }
@@ -224,10 +232,10 @@ impl PhaseGradientTimeStretch {
         let top_magnitude = self.max_heap.peek().map_or(-1.0, |e| e.magnitude);
         if prev_top_magnitude > top_magnitude {
             let top = self.prev_max_heap.pop().expect("INTERNAL ERROR: no more elements remaining in the heaps");
-            (top.bin, true)
+            (top.index as usize, true)
         } else {
             let top = self.max_heap.pop().expect("INTERNAL ERROR: no more elements remaining in the heaps");
-            (top.bin, false)
+            (top.index as usize, false)
         }
     }
 
@@ -249,11 +257,11 @@ mod tests {
     fn test_heap_elem_ordering() {
         let mut heap = BinaryHeap::new();
 
-        heap.push(PhaseGradientElem { bin: 0, magnitude: 1.5 });
-        heap.push(PhaseGradientElem { bin: 1, magnitude: 3.2 });
-        heap.push(PhaseGradientElem { bin: 2, magnitude: 0.8 });
-        heap.push(PhaseGradientElem { bin: 3, magnitude: 2.7 });
-        heap.push(PhaseGradientElem { bin: 2, magnitude: 2.7 });
+        heap.push(PhaseGradientBin { index: 0, magnitude: 1.5 });
+        heap.push(PhaseGradientBin { index: 1, magnitude: 3.2 });
+        heap.push(PhaseGradientBin { index: 2, magnitude: 0.8 });
+        heap.push(PhaseGradientBin { index: 3, magnitude: 2.7 });
+        heap.push(PhaseGradientBin { index: 2, magnitude: 2.7 });
 
         assert_eq!(heap.pop().unwrap().magnitude, 3.2);
         assert_eq!(heap.pop().unwrap().magnitude, 2.7);

@@ -189,8 +189,10 @@ function applySettings(newSettings: ExtensionSettings) {
     const gotEnabled = !settings.enabled && newSettings.enabled;
     settings = newSettings;
 
-    // Run the rest in the background so that this function exits as soon as possible.
-    setTimeout(() => applySettingsImpl(gotEnabled), 0);
+    // TODO: Run the applySettings functino in the MAIN world.
+
+    // Do not await for future, so that applySettings exits asap.
+    applySettingsImpl(gotEnabled);
 }
 
 async function applySettingsImpl(gotEnabled: boolean) {
@@ -252,7 +254,9 @@ async function init(): Promise<void> {
 
     settings = await loadSettings();
     debugLog('Audio Pitch Changer: Initializing main content script');
-
+    // TODO:
+    // 1. Inject the pitch-changer-override-ac here.
+    // 2. Pass the current settings and processor URL to initialize the rest (call the function?)
     applyStoredSettings();
 
     const observer = new MutationObserver((mutations) => {
