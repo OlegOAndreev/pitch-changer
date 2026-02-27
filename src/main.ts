@@ -133,7 +133,8 @@ const debugToggleBtn = getById<HTMLButtonElement>('debug-toggle-btn');
 const debugPanel = getById<HTMLDivElement>('debug-panel');
 const debugInfo = getById<HTMLSpanElement>('debug-info');
 const copyDebugBtn = getById<HTMLButtonElement>('copy-debug-btn');
-const benchmarkBtn = getById<HTMLButtonElement>('benchmark-btn');
+const benchmarkSineBtn = getById<HTMLButtonElement>('benchmark-sine-btn');
+const benchmarkNoiseBtn = getById<HTMLButtonElement>('benchmark-noise-btn');
 
 // Reset all buttons to default state
 async function onBeforeSourceAudioDataSet() {
@@ -397,19 +398,26 @@ async function handleDebugPanelClick() {
     }
 }
 
-async function handleBenchmarkClick() {
+async function handleBenchmarkClick(withNoise: boolean) {
     const sampleRate = appState.getAudioContext().sampleRate;
     const numChannels = 2;
-    const durationSeconds = 30;
+    const durationSeconds = 15;
     const pitchValue = 1.25;
+    let btn: HTMLButtonElement;
+    if (withNoise) {
+        btn = benchmarkNoiseBtn;
+    } else {
+        btn = benchmarkSineBtn;
+    }
 
-    const origText = benchmarkBtn.textContent;
-    benchmarkBtn.disabled = true;
-    benchmarkBtn.textContent = origText + ' (running...)';
+    const origText = btn.textContent;
+    benchmarkNoiseBtn.disabled = true;
+    benchmarkSineBtn.disabled = true;
+    btn.textContent = origText + ' (running...)';
     // This is a hacky way to force button change the content/disable status while still blocking the main thread.
     await sleep(0);
     try {
-        const results = runBenchmark(sampleRate, numChannels, durationSeconds, pitchValue);
+        const results = runBenchmark(sampleRate, numChannels, durationSeconds, pitchValue, withNoise);
         appState.benchmarkTimes = results;
         // Refresh the debug panel in the simplest way =)
         await handleDebugPanelClick();
@@ -419,8 +427,9 @@ async function handleBenchmarkClick() {
         console.error('Benchmark failed:', error);
         alert(`Benchmark failed: ${error}`);
     } finally {
-        benchmarkBtn.disabled = false;
-        benchmarkBtn.textContent = origText;
+        benchmarkNoiseBtn.disabled = false;
+        benchmarkSineBtn.disabled = false;
+        btn.textContent = origText;
     }
 }
 
@@ -478,7 +487,8 @@ async function init() {
     );
     debugToggleBtn.addEventListener('click', () => handleDebugPanelClick());
     copyDebugBtn.addEventListener('click', () => handleCopyDebugClick());
-    benchmarkBtn.addEventListener('click', () => handleBenchmarkClick());
+    benchmarkSineBtn.addEventListener('click', () => handleBenchmarkClick(false));
+    benchmarkNoiseBtn.addEventListener('click', () => handleBenchmarkClick(true));
     debugInfo.addEventListener('click', () => handleDebugPanelClick());
 }
 

@@ -17,6 +17,45 @@ function generateNoise(samplesPerChannel: number, numChannels: number): Float32A
     return arr;
 }
 
+// Generate several sine waves with different frequencies and add into one Float32Array
+function generateSineWaves(
+    samplesPerChannel: number,
+    numChannels: number,
+    sampleRate: number,
+    freqs: number[],
+): Float32Array {
+    const totalSamples = samplesPerChannel * numChannels;
+    const arr = new Float32Array(totalSamples);
+
+    for (const freq of freqs) {
+        const step = (2 * Math.PI * freq) / sampleRate;
+        for (let idx = 0; idx < samplesPerChannel; idx++) {
+            const sineValue = Math.sin(step * idx);
+            for (let channel = 0; channel < numChannels; channel++) {
+                const index = idx * numChannels + channel;
+                arr[index] += sineValue;
+            }
+        }
+    }
+
+    // Normalize to [-1, 1]
+    let maxAbsValue = 0;
+    for (let i = 0; i < totalSamples; i++) {
+        const absValue = Math.abs(arr[i]);
+        if (absValue > maxAbsValue) {
+            maxAbsValue = absValue;
+        }
+    }
+    if (maxAbsValue > 0) {
+        const scale = 1.0 / maxAbsValue;
+        for (let i = 0; i < totalSamples; i++) {
+            arr[i] *= scale;
+        }
+    }
+
+    return arr;
+}
+
 // Process audio using the same logic as audio-processor-worker.ts but in the main thread
 function processAudio(input: InterleavedAudio, processingMode: ProcessingMode, pitchValue: number) {
     const sampleRate = input.sampleRate;
@@ -72,11 +111,21 @@ export function runBenchmark(
     numChannels: number,
     durationSeconds: number,
     pitchValue: number,
+    withNoise: boolean,
 ): BenchmarkResults {
     const samplesPerChannel = sampleRate * durationSeconds;
-    const noiseData = generateNoise(samplesPerChannel, numChannels);
-    const input: InterleavedAudio = {
-        data: noiseData,
+    let inputData;
+    if (withNoise) {
+        inputData = generateNoise(samplesPerChannel, numChannels);
+    } else {
+        const freqs = [];
+        for (let i = 0; i < 50; i++) {
+            freqs.push(Math.random() * 10000);
+        }
+        inputData = generateSineWaves(samplesPerChannel, numChannels, sampleRate, freqs);
+    }
+    const inputNoise: InterleavedAudio = {
+        data: inputData,
         sampleRate,
         numChannels,
     };
@@ -86,7 +135,7 @@ export function runBenchmark(
 
     for (const mode of modes) {
         const startTime = performance.now();
-        processAudio(input, mode, pitchValue);
+        processAudio(inputNoise, mode, pitchValue);
         const endTime = performance.now();
         const processingTimeMs = endTime - startTime;
 

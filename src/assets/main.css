@@ -333,6 +333,7 @@ h1 {
     right: 20px;
     width: 350px;
     max-height: 500px;
+    padding: 8px;
     background-color: white;
     border: 1px solid #ccc;
     border-radius: 6px;
@@ -344,8 +345,8 @@ h1 {
 
 #copy-debug-btn {
     position: absolute;
-    bottom: 36px;
-    right: 8px;
+    bottom: 72px;
+    right: 20px;
     width: 24px;
     height: 24px;
     border-radius: 4px;
@@ -369,15 +370,15 @@ h1 {
     font-size: 12px;
 }
 
-#benchmark-btn {
+.benchmark-btn {
     border-radius: 6px;
     font-size: 14px;
     font-weight: 400;
-    margin: 8px;
+    margin: 4px 16px 4px 16px;
 }
 
 #debug-info {
-    padding: 16px;
+    padding: 12px;
     /* padding: 36px 16px 16px; */
     font-size: 13px;
     overflow-y: auto;
