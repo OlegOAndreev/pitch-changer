@@ -6,11 +6,11 @@ use realfft::num_complex::Complex;
 
 use crate::util::{approx_atan2, approx_sincos};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct PhaseGradientBin {
-    // Micro-optimization: store usize as u32.
-    pub index: u32,
-    pub magnitude: f32,
+// SortedBin stored bin magnitude + bin index compacted into once i64 value. This allows much faster sorting of bins by
+// magnitude.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct SortedBin {
+    repr: i64,
 }
 
 impl PhaseGradientBin {
