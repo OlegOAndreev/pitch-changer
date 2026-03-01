@@ -12,6 +12,7 @@ mod window;
 
 pub use envelope_shifter::EnvelopeShifter;
 pub use histogram::SpectralHistogram;
+pub use phase_gradient_time_stretch::PhaseGradientTimeStretch;
 pub use pitch_shifter::{MultiPitchShifter, PitchShiftParams, PitchShifter};
 pub use time_stretcher::TimeStretchParams;
 pub use util::{

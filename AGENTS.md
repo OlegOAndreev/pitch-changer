@@ -24,11 +24,14 @@
 
 - Use single quotes instead of double quotes for strings
 - Use SharedArrayBuffer for synchronization with workers and audio worklets
+- Do not write trivial comments inside function bodies, only comment the important decisions/algorithms
 
 ## Rust rules
 
 - Use vec![] instead of Vec::new
 - Prefer for loops to iterators: they are more readable and usually optimize into the same code as iterators now
+- Do not write trivial comments inside function bodies, only comment the important decisions/algorithms
+- Always try using the latest versions of libraries
 
 ## Audio
 

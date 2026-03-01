@@ -38,7 +38,7 @@ impl Ord for PhaseGradientBin {
 ///
 /// TLDR: Phase of a bin in the current frame can be either computed from phase of the same bin from the previous frame
 /// or from the phase of a neighbor bin of the current frame.
-pub(crate) struct PhaseGradientTimeStretch {
+pub struct PhaseGradientTimeStretch {
     fft_size: usize,
     num_bins: usize,
 

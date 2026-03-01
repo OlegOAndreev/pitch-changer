@@ -208,7 +208,7 @@ mod tests {
     use crate::util::{compute_dominant_frequency, compute_magnitude, generate_sine_wave};
 
     use super::*;
-    use rand::Rng;
+    use rand::RngExt;
 
     fn process_all(stretcher: &mut TimeStretcher, input: &[f32]) -> Vec<f32> {
         const PREFIX_SIZE: usize = 1000;

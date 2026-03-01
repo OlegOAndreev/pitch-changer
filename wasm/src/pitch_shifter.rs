@@ -410,7 +410,7 @@ mod tests {
     #[test]
     fn test_randomized_pitch_shifter_no_crash() {
         // Test that we do not crash with random params + data.
-        use rand::Rng;
+        use rand::RngExt;
 
         let mut rng = rand::rng();
         const ITERATIONS: usize = 100;
