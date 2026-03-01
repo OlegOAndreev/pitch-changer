@@ -6,30 +6,25 @@ use realfft::num_complex::Complex;
 
 use crate::util::{approx_atan2, approx_sincos};
 
-// SortedBin stored bin magnitude + bin index compacted into once i64 value. This allows much faster sorting of bins by
+// PhaseGradientBin stored bin magnitude + bin index compacted into once i64 value. This allows much faster sorting of bins by
 // magnitude.
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-struct SortedBin {
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+struct PhaseGradientBin {
     repr: i64,
 }
 
 impl PhaseGradientBin {
-    fn new(index: usize, magnitude: f32) -> Self {
-        Self { index: index as u32, magnitude: magnitude }
+    fn new(magn: f32, index: usize) -> Self {
+        let repr = (magn.to_bits() as i64) << 32 | index as i64;
+        Self { repr }
     }
-}
 
-impl Eq for PhaseGradientBin {}
-
-impl PartialOrd for PhaseGradientBin {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
+    fn index(&self) -> usize {
+        (self.repr & 0xFFFFFFFF) as usize
     }
-}
 
-impl Ord for PhaseGradientBin {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.magnitude.total_cmp(&other.magnitude)
+    fn magnitude(&self) -> f32 {
+        f32::from_bits((self.repr >> 32) as u32)
     }
 }
 
@@ -134,7 +129,7 @@ impl PhaseGradientTimeStretch {
                 self.ana_phases[k] = approx_atan2(ana_freq[k].im, ana_freq[k].re);
                 self.phase_assigned[k] = false;
                 num_phase_unassigned += 1;
-                self.prev_max_heap.push(PhaseGradientBin::new(k, self.prev_magnitudes[k]));
+                self.prev_max_heap.push(PhaseGradientBin::new(self.prev_magnitudes[k], k));
             } else {
                 // The original paper assigns random values to frequencies below the min magnitude, but we simply zero
                 // them out.
@@ -156,7 +151,7 @@ impl PhaseGradientTimeStretch {
                 }
                 self.phase_assigned[k] = true;
                 num_phase_unassigned -= 1;
-                self.max_heap.push(PhaseGradientBin::new(k, self.magnitudes[k]));
+                self.max_heap.push(PhaseGradientBin::new(self.magnitudes[k], k));
 
                 // From the paper
                 //   φ_s(m_h, n) ← φ_s(m_h, n − 1) + a_s / 2 * ((∆_t φ_a) (m_h, n − 1) + (∆_t φ_a) (m_h, n))
@@ -182,7 +177,7 @@ impl PhaseGradientTimeStretch {
                 if k > 0 && !self.phase_assigned[k - 1] {
                     self.phase_assigned[k - 1] = true;
                     num_phase_unassigned -= 1;
-                    self.max_heap.push(PhaseGradientBin::new(k - 1, self.magnitudes[k - 1]));
+                    self.max_heap.push(PhaseGradientBin::new(self.magnitudes[k - 1], k - 1));
 
                     // From the paper
                     //   φ_s(m_h + 1, n) ← φ_s(m_h, n) + b_s / 2 ((∆_f φ_a) (m_h, n) + (∆_f φ_a) (m_h + 1, n))
@@ -199,7 +194,7 @@ impl PhaseGradientTimeStretch {
                 if k < self.num_bins - 1 && !self.phase_assigned[k + 1] {
                     self.phase_assigned[k + 1] = true;
                     num_phase_unassigned -= 1;
-                    self.max_heap.push(PhaseGradientBin::new(k + 1, self.magnitudes[k + 1]));
+                    self.max_heap.push(PhaseGradientBin::new(self.magnitudes[k + 1], k + 1));
 
                     self.syn_phases[k + 1] = self.syn_phases[k] + self.ana_phases[k + 1] - self.ana_phases[k];
                 }
@@ -228,14 +223,14 @@ impl PhaseGradientTimeStretch {
     // Find the next HeapElem with max magnited from prev_max_heap and max_heap, return true if it was from
     // prev_max_heap and the bin index.
     fn find_next_heap_elem(&mut self) -> (usize, bool) {
-        let prev_top_magnitude = self.prev_max_heap.last().map_or(-1.0, |e| e.magnitude);
-        let top_magnitude = self.max_heap.peek().map_or(-1.0, |e| e.magnitude);
+        let prev_top_magnitude = self.prev_max_heap.last().map_or(-1.0, |e| e.magnitude());
+        let top_magnitude = self.max_heap.peek().map_or(-1.0, |e| e.magnitude());
         if prev_top_magnitude > top_magnitude {
             let top = self.prev_max_heap.pop().expect("INTERNAL ERROR: no more elements remaining in the heaps");
-            (top.index as usize, true)
+            (top.index() as usize, true)
         } else {
             let top = self.max_heap.pop().expect("INTERNAL ERROR: no more elements remaining in the heaps");
-            (top.index as usize, false)
+            (top.index() as usize, false)
         }
     }
 
@@ -249,25 +244,54 @@ impl PhaseGradientTimeStretch {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BinaryHeap;
-
     use super::*;
 
     #[test]
-    fn test_heap_elem_ordering() {
+    fn test_phase_gradient_bin_binary_heap_ordering() {
+        // Test that BinaryHeap returns bins in descending magnitude order
         let mut heap = BinaryHeap::new();
 
-        heap.push(PhaseGradientBin { index: 0, magnitude: 1.5 });
-        heap.push(PhaseGradientBin { index: 1, magnitude: 3.2 });
-        heap.push(PhaseGradientBin { index: 2, magnitude: 0.8 });
-        heap.push(PhaseGradientBin { index: 3, magnitude: 2.7 });
-        heap.push(PhaseGradientBin { index: 2, magnitude: 2.7 });
+        heap.push(PhaseGradientBin::new(1.5, 1));
+        heap.push(PhaseGradientBin::new(3.0, 2));
+        heap.push(PhaseGradientBin::new(0.5, 3));
+        heap.push(PhaseGradientBin::new(2.0, 4));
 
-        assert_eq!(heap.pop().unwrap().magnitude, 3.2);
-        assert_eq!(heap.pop().unwrap().magnitude, 2.7);
-        assert_eq!(heap.pop().unwrap().magnitude, 2.7);
-        assert_eq!(heap.pop().unwrap().magnitude, 1.5);
-        assert_eq!(heap.pop().unwrap().magnitude, 0.8);
+        assert_eq!(heap.pop().unwrap().magnitude(), 3.0);
+        assert_eq!(heap.pop().unwrap().magnitude(), 2.0);
+        assert_eq!(heap.pop().unwrap().magnitude(), 1.5);
+        assert_eq!(heap.pop().unwrap().magnitude(), 0.5);
         assert!(heap.is_empty());
+    }
+
+    #[test]
+    fn test_phase_gradient_bin_sorting() {
+        // Test sorting of PhaseGradientBin vectors
+        let mut bins = vec![
+            PhaseGradientBin::new(1.0, 0),
+            PhaseGradientBin::new(3.0, 1),
+            PhaseGradientBin::new(0.5, 2),
+            PhaseGradientBin::new(2.0, 3),
+            PhaseGradientBin::new(1.5, 4),
+            PhaseGradientBin::new(3.0, 5),
+        ];
+        bins.sort_unstable();
+
+        let magnitudes: Vec<f32> = bins.iter().map(|b| b.magnitude()).collect();
+        let indices: Vec<usize> = bins.iter().map(|b| b.index()).collect();
+        assert_eq!(magnitudes, vec![0.5, 1.0, 1.5, 2.0, 3.0, 3.0]);
+        assert_eq!(indices, vec![2, 0, 4, 3, 1, 5]);
+    }
+
+    #[test]
+    fn test_phase_gradient_bin_edge_cases() {
+        // Test with very large magnitude
+        let bin = PhaseGradientBin::new(f32::MAX, 10);
+        assert_eq!(bin.magnitude(), f32::MAX);
+        assert_eq!(bin.index(), 10);
+
+        // Test with very small magnitude
+        let bin = PhaseGradientBin::new(f32::MIN_POSITIVE, 20);
+        assert_eq!(bin.magnitude(), f32::MIN_POSITIVE);
+        assert_eq!(bin.index(), 20);
     }
 }
