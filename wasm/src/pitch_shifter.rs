@@ -234,7 +234,6 @@ impl PitchShifter {
     }
 
     fn finish_envelope_processing(&mut self, output: &mut Vec<f32>) {
-        output.extend_from_slice(&self.shifted_buf);
         self.do_envelope_processing(output);
         // Process the remainder in self.shifted_buf by doing the simplest thing: the end has already been windowed by
         // TimeStretcher, so we do not care about pops/cracks.
