@@ -37,11 +37,11 @@ pub struct PhaseGradientTimeStretch {
     fft_size: usize,
     num_bins: usize,
 
-    prev_magnitudes: Vec<f32>,
+    prev_sqr_magnitudes: Vec<f32>,
     prev_ana_phases: Vec<f32>,
     prev_syn_phases: Vec<f32>,
 
-    magnitudes: Vec<f32>,
+    sqr_magnitudes: Vec<f32>,
     ana_phases: Vec<f32>,
     syn_phases: Vec<f32>,
     // Unlike the original paper, we split the max-heap into two heaps, where the first heap is simply a sorted vector
@@ -59,12 +59,12 @@ impl PhaseGradientTimeStretch {
     pub fn new(fft_size: usize) -> Self {
         let num_bins = fft_size / 2 + 1;
 
-        let prev_magnitudes = vec![0.0; num_bins];
+        let prev_sqr_magnitudes = vec![0.0; num_bins];
         let prev_ana_phases = vec![0.0; num_bins];
         let prev_syn_phases = vec![0.0; num_bins];
 
         // Scratch buffers
-        let magnitudes = vec![0.0; num_bins];
+        let sqr_magnitudes = vec![0.0; num_bins];
         let ana_phases = vec![0.0; num_bins];
         let syn_phases = vec![0.0; num_bins];
         let prev_max_heap = Vec::with_capacity(num_bins);
@@ -74,10 +74,10 @@ impl PhaseGradientTimeStretch {
         Self {
             fft_size,
             num_bins,
-            prev_magnitudes,
+            prev_sqr_magnitudes,
             prev_ana_phases,
             prev_syn_phases,
-            magnitudes,
+            sqr_magnitudes,
             ana_phases,
             syn_phases,
             prev_max_heap,
@@ -96,8 +96,9 @@ impl PhaseGradientTimeStretch {
     ) {
         use crate::util::normalize_phase;
 
-        // Ignore the frequencies with magnitude < (max magnitude * MIN_MAGNITUDE_TOLERANCE).
-        const MIN_MAGNITUDE_TOLERANCE: f32 = 1e-3;
+        // Ignore the frequencies with magnitude < (max magnitude * MIN_MAGNITUDE_TOLERANCE). Note that we process
+        // squared magnitudes.
+        const MIN_MAGNITUDE_TOLERANCE: f32 = 1e-6;
 
         let num_bins = self.num_bins;
         assert_eq!(ana_freq.len(), num_bins);
@@ -109,27 +110,29 @@ impl PhaseGradientTimeStretch {
         // Find maximum magnitude for thresholding
         let mut max_magn = 0.0f32;
         for k in 0..num_bins {
-            let magn = ana_freq[k].norm();
-            self.magnitudes[k] = magn;
-            max_magn = max_magn.max(magn).max(self.prev_magnitudes[k]);
+            // We compare squared magnitudes and call sqrt() only before computing the final value.
+            let magn = ana_freq[k].norm_sqr();
+            self.sqr_magnitudes[k] = magn;
+            max_magn = max_magn.max(magn).max(self.prev_sqr_magnitudes[k]);
         }
         let min_magn = max_magn * MIN_MAGNITUDE_TOLERANCE;
 
+        //
+
         self.prev_max_heap.clear();
         self.max_heap.clear();
-        self.syn_phases.fill(0.0);
         self.phase_assigned.fill(false);
 
         // Number of false values in self.phase_assigned
         let mut num_phase_unassigned = 0;
         for k in 0..num_bins {
             // Optimization: do not compute phase for frequencies below the min_magn threshold.
-            if self.magnitudes[k] > min_magn {
+            if self.sqr_magnitudes[k] > min_magn {
                 // Use approximation instead of ana_freq[k].arg();
                 self.ana_phases[k] = approx_atan2(ana_freq[k].im, ana_freq[k].re);
                 self.phase_assigned[k] = false;
                 num_phase_unassigned += 1;
-                self.prev_max_heap.push(PhaseGradientBin::new(self.prev_magnitudes[k], k));
+                self.prev_max_heap.push(PhaseGradientBin::new(self.prev_sqr_magnitudes[k], k));
             } else {
                 // The original paper assigns random values to frequencies below the min magnitude, but we simply zero
                 // them out.
@@ -151,7 +154,7 @@ impl PhaseGradientTimeStretch {
                 }
                 self.phase_assigned[k] = true;
                 num_phase_unassigned -= 1;
-                self.max_heap.push(PhaseGradientBin::new(self.magnitudes[k], k));
+                self.max_heap.push(PhaseGradientBin::new(self.sqr_magnitudes[k], k));
 
                 // From the paper
                 //   φ_s(m_h, n) ← φ_s(m_h, n − 1) + a_s / 2 * ((∆_t φ_a) (m_h, n − 1) + (∆_t φ_a) (m_h, n))
@@ -177,7 +180,7 @@ impl PhaseGradientTimeStretch {
                 if k > 0 && !self.phase_assigned[k - 1] {
                     self.phase_assigned[k - 1] = true;
                     num_phase_unassigned -= 1;
-                    self.max_heap.push(PhaseGradientBin::new(self.magnitudes[k - 1], k - 1));
+                    self.max_heap.push(PhaseGradientBin::new(self.sqr_magnitudes[k - 1], k - 1));
 
                     // From the paper
                     //   φ_s(m_h + 1, n) ← φ_s(m_h, n) + b_s / 2 ((∆_f φ_a) (m_h, n) + (∆_f φ_a) (m_h + 1, n))
@@ -194,7 +197,7 @@ impl PhaseGradientTimeStretch {
                 if k < self.num_bins - 1 && !self.phase_assigned[k + 1] {
                     self.phase_assigned[k + 1] = true;
                     num_phase_unassigned -= 1;
-                    self.max_heap.push(PhaseGradientBin::new(self.magnitudes[k + 1], k + 1));
+                    self.max_heap.push(PhaseGradientBin::new(self.sqr_magnitudes[k + 1], k + 1));
 
                     self.syn_phases[k + 1] = self.syn_phases[k] + self.ana_phases[k + 1] - self.ana_phases[k];
                 }
@@ -206,17 +209,18 @@ impl PhaseGradientTimeStretch {
             // Do the normalize_phase here so that the prev_syn_phases does not become too large, reducing the floating
             // point error. It also allows us to use approx_sincos implementation.
             self.prev_syn_phases[k] = normalize_phase(self.syn_phases[k]);
-            if self.magnitudes[k] > min_magn {
-                // Use approximation instead of Complex::from_polar(self.magnitudes[k], self.prev_syn_phases[k])
+            if self.sqr_magnitudes[k] > min_magn {
+                // Use approximation instead of Complex::from_polar(self.sqr_magnitudes[k].sqrt(), self.prev_syn_phases[k])
+                let magn = self.sqr_magnitudes[k].sqrt();
                 let (sin, cos) = approx_sincos(self.prev_syn_phases[k]);
-                syn_freq[k] = Complex::new(self.magnitudes[k] * cos, self.magnitudes[k] * sin);
+                syn_freq[k] = Complex::new(magn * cos, magn * sin);
             } else {
                 // We do not care what to fill this bin with.
                 syn_freq[k] = ana_freq[k];
             }
         }
         // Save previous analysis data for next frame
-        mem::swap(&mut self.prev_magnitudes, &mut self.magnitudes);
+        mem::swap(&mut self.prev_sqr_magnitudes, &mut self.sqr_magnitudes);
         mem::swap(&mut self.prev_ana_phases, &mut self.ana_phases);
     }
 
@@ -236,7 +240,7 @@ impl PhaseGradientTimeStretch {
 
     /// Reset internal state (clear previous frame data).
     pub fn reset(&mut self) {
-        self.prev_magnitudes.fill(0.0);
+        self.prev_sqr_magnitudes.fill(0.0);
         self.prev_ana_phases.fill(0.0);
         self.prev_syn_phases.fill(0.0);
     }
