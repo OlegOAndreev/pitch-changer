@@ -154,6 +154,8 @@ pub fn approx_atan2(y: f32, x: f32) -> f32 {
 /// Approximate sin and cos implementation for cases when the angle is in [-PI, PI]. Taken from
 /// https://www.apulsoft.ch/blog/branchless-sincos/
 pub fn approx_sincos(x: f32) -> (f32, f32) {
+    assert!(x <= PI + 1e-1, "{}", x);
+    assert!(x >= -PI - 1e-1, "{}", x);
     const S0: f32 = -0.10132104963779; // x
     const S1: f32 = 0.00662060857089096; // x^3
     const S2: f32 = -0.000173351320734045; // x^5
