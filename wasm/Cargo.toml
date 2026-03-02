@@ -41,4 +41,5 @@ symphonia = { version = "0.5", features = ["aac", "isomp4", "mp3"] }
 [lints.clippy]
 # Reading .iter().zip() chains is considerably harder for me, while the resulting code is the same if we bound the
 # iteration upper bound.
+manual_range_contains = "allow"
 needless-range-loop = "allow"

@@ -66,7 +66,7 @@ impl PitchShiftParams {
 }
 
 impl PitchShiftParams {
-    fn to_time_stretch(&self) -> TimeStretchParams {
+    fn make_time_stretch(&self) -> TimeStretchParams {
         let effective_time_stretch = self.pitch_shift * self.time_stretch;
         TimeStretchParams {
             time_stretch: effective_time_stretch,
@@ -102,7 +102,7 @@ impl PitchShifter {
     fn new(params: &PitchShiftParams) -> Result<Self> {
         Self::validate_params(params)?;
 
-        let time_stretch_params = params.to_time_stretch();
+        let time_stretch_params = params.make_time_stretch();
         let time_stretcher = TimeStretcher::new(&time_stretch_params)?;
 
         // We need to compensate the difference between time_stretch and actual_time_stretch. This is important
@@ -186,7 +186,7 @@ impl PitchShifter {
         Self::validate_params(params)?;
 
         self.params = *params;
-        let time_stretch_params = self.params.to_time_stretch();
+        let time_stretch_params = self.params.make_time_stretch();
         self.time_stretcher.update_params(&time_stretch_params)?;
         // See comment in new()
         let resampling_ratio = 1.0 / params.pitch_shift as f64

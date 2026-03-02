@@ -118,7 +118,7 @@ impl StreamingResampler {
     pub fn set_ratio(&mut self, sample_rate_ratio: f64) {
         self.sample_rate_ratio = sample_rate_ratio;
         self.resampler
-            .set_resample_ratio(sample_rate_ratio as f64, true)
+            .set_resample_ratio(sample_rate_ratio, true)
             .expect("Failed to change resampling ratio");
     }
 

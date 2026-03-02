@@ -2,9 +2,9 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use rand::RngExt;
 use std::hint::black_box;
 
-// Test sorting two-element struct with one u64
+// Test sorting two-element struct
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, PartialOrd, Clone, Copy, Debug)]
 struct Pair {
     key: f32,
     value: usize,
@@ -12,15 +12,9 @@ struct Pair {
 
 impl Eq for Pair {}
 
-impl PartialOrd for Pair {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(&other))
-    }
-}
-
 impl Ord for Pair {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.key.total_cmp(&other.key).then_with(|| self.value.cmp(&other.value))
+        self.partial_cmp(other).unwrap()
     }
 }
 
