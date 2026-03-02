@@ -4,13 +4,19 @@ use std::hint::black_box;
 
 // Test sorting two-element struct with one u64
 
-#[derive(PartialEq, PartialOrd, Clone, Copy, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 struct Pair {
     key: f32,
     value: usize,
 }
 
 impl Eq for Pair {}
+
+impl PartialOrd for Pair {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(&other))
+    }
+}
 
 impl Ord for Pair {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
@@ -94,7 +100,7 @@ fn benchmark_sort_f32(c: &mut Criterion, num: usize) {
     group.bench_function("pair", |b| {
         b.iter(|| {
             scratch.copy_from_slice(&vec);
-            scratch.sort();
+            scratch.sort_unstable();
             black_box(&scratch);
         })
     });
@@ -102,7 +108,7 @@ fn benchmark_sort_f32(c: &mut Criterion, num: usize) {
     group.bench_function("compressed_pair", |b| {
         b.iter(|| {
             scratch_compressed.copy_from_slice(&vec_compressed);
-            scratch_compressed.sort();
+            scratch_compressed.sort_unstable();
             black_box(&scratch_compressed);
         })
     });
@@ -120,5 +126,15 @@ fn benchmark_sort_1000_elements(c: &mut Criterion) {
     benchmark_sort_f32(c, 1000);
 }
 
-criterion_group!(benches, benchmark_sort_10_elements, benchmark_sort_100_elements, benchmark_sort_1000_elements);
+fn benchmark_sort_10000_elements(c: &mut Criterion) {
+    benchmark_sort_f32(c, 10000);
+}
+
+criterion_group!(
+    benches,
+    benchmark_sort_10_elements,
+    benchmark_sort_100_elements,
+    benchmark_sort_1000_elements,
+    benchmark_sort_10000_elements
+);
 criterion_main!(benches);
