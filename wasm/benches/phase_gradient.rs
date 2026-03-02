@@ -3,6 +3,7 @@ use rand::RngExt;
 use realfft::RealFftPlanner;
 use realfft::num_complex::Complex;
 use std::f32::consts::PI;
+use std::hint::black_box;
 
 use wasm_main_module::PhaseGradientTimeStretch;
 
@@ -81,6 +82,7 @@ fn benchmark_multiple_iterations(c: &mut Criterion) {
             let mut output_spectrum = vec![Complex::new(0.0, 0.0); random_spectrum.len()];
             for _ in 0..1000 {
                 time_stretcher.process(&random_spectrum, ana_hop_size, &mut output_spectrum, syn_hop_size);
+                let _ = black_box(&output_spectrum);
             }
         })
     });

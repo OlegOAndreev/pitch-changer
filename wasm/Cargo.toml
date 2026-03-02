@@ -13,6 +13,10 @@ name = "example"
 name = "phase_gradient"
 harness = false
 
+[[bench]]
+name = "sort_benchmark"
+harness = false
+
 [dependencies]
 anyhow = "1.0"
 js-sys = "0.3"
