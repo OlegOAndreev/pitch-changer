@@ -2,6 +2,7 @@ mod envelope_shifter;
 mod histogram;
 mod peak_corrector;
 mod phase_gradient_time_stretch;
+mod phase_gradient_time_stretch_v2;
 mod pitch_shifter;
 mod resampler;
 mod stft;

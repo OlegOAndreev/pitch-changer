@@ -14,8 +14,8 @@ struct PhaseGradientBin {
 }
 
 impl PhaseGradientBin {
-    fn new(magn: f32, index: usize) -> Self {
-        let repr = (magn.to_bits() as i64) << 32 | index as i64;
+    fn new(sqr_magnitude: f32, index: usize) -> Self {
+        let repr = (sqr_magnitude.to_bits() as i64) << 32 | index as i64;
         Self { repr }
     }
 
@@ -23,7 +23,7 @@ impl PhaseGradientBin {
         (self.repr & 0xFFFFFFFF) as usize
     }
 
-    fn magnitude(&self) -> f32 {
+    fn sqr_magnitude(&self) -> f32 {
         f32::from_bits((self.repr >> 32) as u32)
     }
 }
@@ -96,7 +96,7 @@ impl PhaseGradientTimeStretch {
     ) {
         use crate::util::normalize_phase;
 
-        // Ignore the frequencies with magnitude < (max magnitude * MIN_MAGNITUDE_TOLERANCE). Note that we process
+        // Ignore the frequencies with magnitude < (max magnitude * MIN_MAGNITUDE_TOLERANCE). Note that we deal with
         // squared magnitudes.
         const MIN_MAGNITUDE_TOLERANCE: f32 = 1e-6;
 
@@ -206,16 +206,17 @@ impl PhaseGradientTimeStretch {
 
         // Convert phase/magnitude back to complex frequency domain
         for k in 0..num_bins {
-            // Do the normalize_phase here so that the prev_syn_phases does not become too large, reducing the floating
-            // point error. It also allows us to use approx_sincos implementation.
-            self.prev_syn_phases[k] = normalize_phase(self.syn_phases[k]);
             if self.sqr_magnitudes[k] > min_magn {
+                // Do the normalize_phase here so that the prev_syn_phases does not become too large, reducing the floating
+                // point error. It also allows us to use approx_sincos implementation.
+                self.prev_syn_phases[k] = normalize_phase(self.syn_phases[k]);
                 // Use approximation instead of Complex::from_polar(self.sqr_magnitudes[k].sqrt(), self.prev_syn_phases[k])
                 let magn = self.sqr_magnitudes[k].sqrt();
                 let (sin, cos) = approx_sincos(self.prev_syn_phases[k]);
                 syn_freq[k] = Complex::new(magn * cos, magn * sin);
             } else {
                 // We do not care what to fill this bin with.
+                self.prev_syn_phases[k] = self.ana_phases[k];
                 syn_freq[k] = ana_freq[k];
             }
         }
@@ -227,8 +228,8 @@ impl PhaseGradientTimeStretch {
     // Find the next HeapElem with max magnited from prev_max_heap and max_heap, return true if it was from
     // prev_max_heap and the bin index.
     fn find_next_heap_elem(&mut self) -> (usize, bool) {
-        let prev_top_magnitude = self.prev_max_heap.last().map_or(-1.0, |e| e.magnitude());
-        let top_magnitude = self.max_heap.peek().map_or(-1.0, |e| e.magnitude());
+        let prev_top_magnitude = self.prev_max_heap.last().map_or(-1.0, |e| e.sqr_magnitude());
+        let top_magnitude = self.max_heap.peek().map_or(-1.0, |e| e.sqr_magnitude());
         if prev_top_magnitude > top_magnitude {
             let top = self.prev_max_heap.pop().expect("INTERNAL ERROR: no more elements remaining in the heaps");
             (top.index() as usize, true)
@@ -260,10 +261,10 @@ mod tests {
         heap.push(PhaseGradientBin::new(0.5, 3));
         heap.push(PhaseGradientBin::new(2.0, 4));
 
-        assert_eq!(heap.pop().unwrap().magnitude(), 3.0);
-        assert_eq!(heap.pop().unwrap().magnitude(), 2.0);
-        assert_eq!(heap.pop().unwrap().magnitude(), 1.5);
-        assert_eq!(heap.pop().unwrap().magnitude(), 0.5);
+        assert_eq!(heap.pop().unwrap().sqr_magnitude(), 3.0);
+        assert_eq!(heap.pop().unwrap().sqr_magnitude(), 2.0);
+        assert_eq!(heap.pop().unwrap().sqr_magnitude(), 1.5);
+        assert_eq!(heap.pop().unwrap().sqr_magnitude(), 0.5);
         assert!(heap.is_empty());
     }
 
@@ -280,7 +281,7 @@ mod tests {
         ];
         bins.sort_unstable();
 
-        let magnitudes: Vec<f32> = bins.iter().map(|b| b.magnitude()).collect();
+        let magnitudes: Vec<f32> = bins.iter().map(|b| b.sqr_magnitude()).collect();
         let indices: Vec<usize> = bins.iter().map(|b| b.index()).collect();
         assert_eq!(magnitudes, vec![0.5, 1.0, 1.5, 2.0, 3.0, 3.0]);
         assert_eq!(indices, vec![2, 0, 4, 3, 1, 5]);
@@ -290,12 +291,12 @@ mod tests {
     fn test_phase_gradient_bin_edge_cases() {
         // Test with very large magnitude
         let bin = PhaseGradientBin::new(f32::MAX, 10);
-        assert_eq!(bin.magnitude(), f32::MAX);
+        assert_eq!(bin.sqr_magnitude(), f32::MAX);
         assert_eq!(bin.index(), 10);
 
         // Test with very small magnitude
         let bin = PhaseGradientBin::new(f32::MIN_POSITIVE, 20);
-        assert_eq!(bin.magnitude(), f32::MIN_POSITIVE);
+        assert_eq!(bin.sqr_magnitude(), f32::MIN_POSITIVE);
         assert_eq!(bin.index(), 20);
     }
 }
