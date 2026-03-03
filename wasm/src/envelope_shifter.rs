@@ -81,7 +81,7 @@ impl EnvelopeShifter {
     pub fn compute_envelope(&mut self, magnitudes: &[f32], output: &mut Vec<f32>) {
         assert_eq!(magnitudes.len(), self.num_bins);
 
-        self.fill_magnitudes_buf_from_slice(&magnitudes);
+        self.fill_magnitudes_buf_from_slice(magnitudes);
         self.compute_envelope_impl();
 
         output.clear();
