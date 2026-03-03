@@ -113,16 +113,21 @@ impl PeakCorrector {
         // than recovery_rate per block.
         let target_gain = analysis_gain.min(self.required_gain).min(self.current_gain + self.recovery_rate);
 
-        let step = (target_gain - self.current_gain) / self.block_len as f32;
-        let mut gain = self.current_gain;
-        for i in 0..self.block_len {
-            for ch in 0..self.num_channels {
-                output.push(self.output_buf[i * self.num_channels + ch] * gain);
+        if target_gain == 1.0 && self.current_gain == 1.0 {
+            // Fast path: do nothing
+            output.extend_from_slice(&self.output_buf);
+        } else {
+            let step = (target_gain - self.current_gain) / self.block_len as f32;
+            let mut gain = self.current_gain;
+            for i in 0..self.block_len {
+                for ch in 0..self.num_channels {
+                    output.push(self.output_buf[i * self.num_channels + ch] * gain);
+                }
+                gain += step;
             }
-            gain += step;
+            self.current_gain = target_gain;
+            self.required_gain = analysis_gain;
         }
-        self.current_gain = target_gain;
-        self.required_gain = analysis_gain;
 
         // Move analysis_buf to output_buf.
         mem::swap(&mut self.analysis_buf, &mut self.output_buf);

@@ -1,9 +1,9 @@
-use std::f32::consts::{FRAC_PI_2, PI};
+use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 /// Normalize a phase value to the range [-PI, PI).
 pub fn normalize_phase(phase: f32) -> f32 {
     let shifted = phase + PI;
-    shifted - (shifted / (2.0 * PI)).floor() * 2.0 * PI - PI
+    shifted - (shifted / TAU).floor() * TAU - PI
 }
 
 /// Compute the dominant frequency of a signal using FFT. Returns the frequency in Hz.
