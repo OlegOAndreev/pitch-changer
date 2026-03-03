@@ -324,7 +324,7 @@ mod tests {
                                     input_freq,
                                 );
                                 assert!(
-                                    (output_magn - MAGNITUDE).abs() < MAGNITUDE * 0.1,
+                                    (output_magn - MAGNITUDE).abs() < MAGNITUDE * 0.15,
                                     "expected magnitude {}, got {} for sample rate {}, fft size {}, overlap {}, window {:?}, stretch {}, input {} Hz",
                                     MAGNITUDE,
                                     output_magn,

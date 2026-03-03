@@ -68,7 +68,8 @@ fn benchmark_multiple_iterations(c: &mut Criterion) {
     let random_spectrum = generate_random_fft_spectrum(fft_size);
     let sine_spectrum = generate_sine_waves_fft_spectrum(fft_size);
 
-    c.bench_function("process_1000_iterations_sine", |b| {
+    let mut group = c.benchmark_group("phase_gradient");
+    group.bench_function("process_1000_iterations_sine", |b| {
         b.iter(|| {
             let mut output_spectrum = vec![Complex::new(0.0, 0.0); sine_spectrum.len()];
             for _ in 0..1000 {
@@ -77,7 +78,7 @@ fn benchmark_multiple_iterations(c: &mut Criterion) {
         })
     });
 
-    c.bench_function("process_1000_iterations_random", |b| {
+    group.bench_function("process_1000_iterations_random", |b| {
         b.iter(|| {
             let mut output_spectrum = vec![Complex::new(0.0, 0.0); random_spectrum.len()];
             for _ in 0..1000 {
