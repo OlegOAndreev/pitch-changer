@@ -344,6 +344,10 @@ struct Generate {
     #[argh(option, default = "3.0")]
     duration: f32,
 
+    /// magnitude
+    #[argh(option, default = "0.8")]
+    magnitude: f32,
+
     /// number of channels (default: 1)
     #[argh(option, default = "1")]
     channels: usize,
@@ -423,7 +427,7 @@ fn main() -> Result<()> {
     let cli: Cli = argh::from_env();
 
     match cli.command {
-        Commands::Generate(Generate { frequency, sample_rate, duration, channels, output }) => {
+        Commands::Generate(Generate { frequency, sample_rate, duration, channels, output, magnitude }) => {
             println!(
                 "Generating sine wave: {} Hz, {} samples/sec, {} seconds, {} channels",
                 frequency, sample_rate, duration, channels
@@ -431,7 +435,7 @@ fn main() -> Result<()> {
             let mut sine_wave = vec![];
             for ch in 0..channels {
                 // Generate same frequency for all channels (could be modified)
-                let channel_data = generate_sine_wave(frequency, sample_rate, 1.0, duration);
+                let channel_data = generate_sine_wave(frequency, sample_rate, magnitude, duration);
                 if ch == 0 {
                     sine_wave = channel_data;
                 } else {
