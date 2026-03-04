@@ -122,42 +122,66 @@ function processAudio(input: InterleavedAudio, processingMode: ProcessingMode, p
     }
 }
 
+function measureTestTime(sampleRate: number, numChannels: number, pitchValue: number): number {
+    // Test how much time an iteration takes.
+    const testSamples = generateNoise(sampleRate * 10, numChannels);
+    const testData: InterleavedAudio = {
+        data: testSamples,
+        sampleRate,
+        numChannels,
+    };
+    const testStartTime = performance.now();
+    processAudio(testData, 'pitch', pitchValue);
+    return performance.now() - testStartTime;
+}
+
 export function runBenchmark(
     sampleRate: number,
     numChannels: number,
-    durationSeconds: number,
     pitchValue: number,
     withNoise: boolean,
 ): BenchmarkResults {
+    const NUM_ITERATIONS = 4;
+    const timePer10Sec = measureTestTime(sampleRate, numChannels, pitchValue);
+    // We want the whole test to take ~5 sec.
+    const durationSeconds = Math.round((1000 * 10) / (timePer10Sec * NUM_ITERATIONS));
+    console.log(`Generating benchmark samples for ${durationSeconds.toFixed(1)}sec`);
+
     const samplesPerChannel = sampleRate * durationSeconds;
-    let inputData;
+    let inputSamples;
     if (withNoise) {
-        inputData = generateNoise(samplesPerChannel, numChannels);
+        inputSamples = generateNoise(samplesPerChannel, numChannels);
     } else {
         const freqs = [];
         const randomGen = new SeededRandom(42);
         for (let i = 0; i < 50; i++) {
             freqs.push(randomGen.next() * 10000);
         }
-        inputData = generateSineWaves(samplesPerChannel, numChannels, sampleRate, freqs);
+        inputSamples = generateSineWaves(samplesPerChannel, numChannels, sampleRate, freqs);
     }
-    const inputNoise: InterleavedAudio = {
-        data: inputData,
+    const inputData: InterleavedAudio = {
+        data: inputSamples,
         sampleRate,
         numChannels,
     };
 
-    const modes: ProcessingMode[] = ['pitch', 'formant-preserving-pitch', 'time'];
-    const results: Partial<BenchmarkResults> = {};
+    const modes: ProcessingMode[] = ['time', 'pitch', 'formant-preserving-pitch'];
+    const results: BenchmarkResults = {
+        pitch: 0.0,
+        'formant-preserving-pitch': 0.0,
+        time: 0.0,
+    };
 
-    for (const mode of modes) {
-        const startTime = performance.now();
-        processAudio(inputNoise, mode, pitchValue);
-        const endTime = performance.now();
-        const processingTimeMs = endTime - startTime;
+    for (let iter = 0; iter < NUM_ITERATIONS; iter++) {
+        for (const mode of modes) {
+            const startTime = performance.now();
+            processAudio(inputData, mode, pitchValue);
+            const endTime = performance.now();
+            const processingTimeMs = endTime - startTime;
 
-        const ratio = (durationSeconds * 1000) / processingTimeMs;
-        results[mode as keyof BenchmarkResults] = ratio;
+            const ratio = (durationSeconds * 1000) / processingTimeMs;
+            results[mode] = Math.max(ratio, results[mode]);
+        }
     }
 
     return results as BenchmarkResults;

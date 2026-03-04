@@ -401,7 +401,6 @@ async function handleDebugPanelClick() {
 async function handleBenchmarkClick(withNoise: boolean) {
     const sampleRate = appState.getAudioContext().sampleRate;
     const numChannels = 2;
-    const durationSeconds = 15;
     const pitchValue = 1.25;
     let btn: HTMLButtonElement;
     if (withNoise) {
@@ -417,7 +416,7 @@ async function handleBenchmarkClick(withNoise: boolean) {
     // This is a hacky way to force button change the content/disable status while still blocking the main thread.
     await sleep(0);
     try {
-        const results = runBenchmark(sampleRate, numChannels, durationSeconds, pitchValue, withNoise);
+        const results = runBenchmark(sampleRate, numChannels, pitchValue, withNoise);
         appState.benchmarkTimes = results;
         // Refresh the debug panel in the simplest way =)
         await handleDebugPanelClick();
