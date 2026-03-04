@@ -225,10 +225,8 @@ impl PhaseGradientTimeStretch {
         syn_phase_diff: f32,
     ) {
         let ana_phase_derivative =
-            normalize_phase(self.ana_phases[k] - self.prev_ana_phases[k] - ana_phase_diff * k as f32)
-                / ana_hop_size as f32;
-        self.syn_phases[k] =
-            self.prev_syn_phases[k] + ana_phase_derivative * syn_hop_size as f32 + syn_phase_diff * k as f32;
+            normalize_phase(self.ana_phases[k] - self.prev_ana_phases[k] - ana_phase_diff * k as f32) / ana_hop_size;
+        self.syn_phases[k] = self.prev_syn_phases[k] + ana_phase_derivative * syn_hop_size + syn_phase_diff * k as f32;
         self.phase_assigned[k] = true;
     }
 

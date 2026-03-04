@@ -183,6 +183,25 @@ pub fn approx_sincos(x: f32) -> (f32, f32) {
     (si, co)
 }
 
+/// Approximate log2 implementation for float32. Taken from
+/// https://github.com/romeric/fastapprox/blob/master/fastapprox/src/fastlog.h
+pub fn approx_log2(x: f32) -> f32 {
+    let mx = f32::from_bits((x.to_bits() & 0x007FFFFF) | 0x3f000000);
+
+    let y = (x.to_bits() as i32) as f32;
+    y * 1.1920929e-7 - 124.22552 - 1.4980303 * mx - 1.72588 / (0.35208872 + mx)
+}
+
+/// Approximate exp2 implementation for float32. Taken from
+/// https://github.com/romeric/fastapprox/blob/master/fastapprox/src/fastexp.h
+pub fn approx_exp2(x: f32) -> f32 {
+    let offset = if x < 0.0 { 1.0f32 } else { 0.0f32 };
+    let clipp = if x < -126.0 { -126.0f32 } else { x };
+    let z = clipp - clipp.trunc() + offset;
+    let v = (1 << 23) as f32 * (clipp + 121.274055 + 27.728024 / (4.8425255 - z) - 1.4901291 * z);
+    f32::from_bits(v as u32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,6 +342,32 @@ mod tests {
             let expected_co = x.cos();
             assert!((si - expected_si).abs() < 1e-5, "approx_sincos({x}).0 = {si}, expected sin = {expected_si}");
             assert!((co - expected_co).abs() < 1e-5, "approx_sincos({x}).1 = {co}, expected cos = {expected_co}");
+        }
+    }
+
+    #[test]
+    fn test_approx_log2() {
+        let cases = [1e-4, 1.5e-3, 3.5e-1, 1.23, 7.1e+2, 4.5e+3, 2.3e+4];
+        for x in cases {
+            let log2 = approx_log2(x);
+            let expected_log2 = x.log2();
+            assert!(
+                (log2 - expected_log2).abs() < 1e-3,
+                "approx_log2({x}).0 = {log2}, expected log2 = {expected_log2}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_approx_exp2() {
+        let cases = [-1e-4, -1.5e-3, -3.5e-1, -1.23, -7.1e+2, -4.5e+3, -2.3e+4, 1e-4, 1.5e-3, 3.5e-1, 1.23];
+        for x in cases {
+            let exp2 = approx_exp2(x);
+            let expected_exp2 = x.exp2();
+            assert!(
+                (exp2 - expected_exp2).abs() < 1e-4,
+                "approx_exp2({x}).0 = {exp2}, expected exp2 = {expected_exp2}"
+            );
         }
     }
 
