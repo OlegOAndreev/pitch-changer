@@ -115,7 +115,8 @@ impl PitchShifter {
         let resampler = StreamingResampler::new(resampling_ratio)?;
 
         let envelope_shift_enabled = params.quefrency_cutoff != 0.0;
-        let envelope_fft_size = params.fft_size;
+        // Envelope correction is a heavy process with lots of artifacts, optimize it by halving the fft size.
+        let envelope_fft_size = params.fft_size / 2;
         let envelope_hop_size = envelope_fft_size / params.overlap as usize;
         let envelope_stft = Stft::new(envelope_fft_size, params.window_type);
         let num_bins = envelope_fft_size / 2 + 1;
