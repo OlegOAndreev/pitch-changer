@@ -224,34 +224,28 @@ impl PhaseGradientTimeStretch {
             // 1. Assign phase for bin k from previous frame.
             self.assign_phase_from_prev(k, ana_hop_size, ana_phase_diff, syn_hop_size, syn_phase_diff);
 
-            // 2. Try propagating the phase to the smaller bins to the left.
-            let mut i = k;
-            while i > 0 {
-                if self.phase_assigned[i - 1] || self.sqr_magnitudes[i - 1] > self.sqr_magnitudes[i] {
-                    break;
+            // 2. Try propagating the phase to the bins on the left.
+            if k > 0 {
+                if self.phase_assigned[k - 1] {
+                    continue;
                 }
                 // Check if we should propagate phase from previous or current frame.
-                if self.sqr_magnitudes[i] >= self.prev_sqr_magnitudes[i - 1] {
-                    self.assign_phase_from_neighbor(i - 1, i);
-                } else {
-                    self.assign_phase_from_prev(i - 1, ana_hop_size, ana_phase_diff, syn_hop_size, syn_phase_diff);
+                if self.sqr_magnitudes[k] < self.prev_sqr_magnitudes[k - 1] {
+                    continue;
                 }
-                i -= 1;
+                self.assign_phase_from_neighbor(k - 1, k);
             }
 
-            // 3. Try propagating the phase to the smaller bins to the right.
-            let mut i = k;
-            while i < num_bins - 1 {
-                if self.phase_assigned[i + 1] || self.sqr_magnitudes[i + 1] > self.sqr_magnitudes[i] {
-                    break;
+            // 3. Try propagating the phase to the bin on the right.
+            if k < num_bins - 1 {
+                if self.phase_assigned[k + 1] {
+                    continue;
                 }
                 // Check if we should propagate from previous or current frame.
-                if self.sqr_magnitudes[i] >= self.prev_sqr_magnitudes[i + 1] {
-                    self.assign_phase_from_neighbor(i + 1, i);
-                } else {
-                    self.assign_phase_from_prev(i + 1, ana_hop_size, ana_phase_diff, syn_hop_size, syn_phase_diff);
+                if self.sqr_magnitudes[k] < self.prev_sqr_magnitudes[k + 1] {
+                    continue;
                 }
-                i += 1;
+                self.assign_phase_from_neighbor(k + 1, k);
             }
         }
     }
@@ -264,6 +258,7 @@ impl PhaseGradientTimeStretch {
         // Convert phase/magnitude back to complex frequency domain
         for k in 0..num_bins {
             if self.sqr_magnitudes[k] > min_magn {
+                assert!(self.phase_assigned[k], "BUG: Phase {} not assigned", k);
                 // Do the normalize_phase here so that the prev_syn_phases does not become too large, reducing the
                 // floating point error. It also allows us to use approx_sincos implementation.
                 self.prev_syn_phases[k] = normalize_phase(self.syn_phases[k]);

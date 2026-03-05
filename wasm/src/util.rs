@@ -68,19 +68,32 @@ pub fn deinterleave_samples(input: &[f32], num_channels: usize, output: &mut Vec
     let num_samples = input.len() / num_channels;
     output.reserve(input.len());
 
-    // Fast-path for mono
-    if num_channels == 1 {
-        output.extend_from_slice(input);
-        return;
-    }
-
-    let output_base = output.len();
-    output.resize(output.len() + input.len(), 0.0);
-    for ch in 0..num_channels {
-        for sample_idx in 0..num_samples {
-            unsafe {
-                *output.get_unchecked_mut(output_base + ch * num_samples + sample_idx) =
-                    *input.get_unchecked(sample_idx * num_channels + ch);
+    // Fast-path for mono and stereo
+    match num_channels {
+        1 => {
+            output.extend_from_slice(input);
+        }
+        2 => {
+            let output_base = output.len();
+            output.resize(output.len() + input.len(), 0.0);
+            for sample_idx in 0..num_samples {
+                unsafe {
+                    *output.get_unchecked_mut(output_base + sample_idx) = *input.get_unchecked(sample_idx * 2);
+                    *output.get_unchecked_mut(output_base + num_samples + sample_idx) =
+                        *input.get_unchecked(sample_idx * 2 + 1);
+                }
+            }
+        }
+        _ => {
+            let output_base = output.len();
+            output.resize(output.len() + input.len(), 0.0);
+            for ch in 0..num_channels {
+                for sample_idx in 0..num_samples {
+                    unsafe {
+                        *output.get_unchecked_mut(output_base + ch * num_samples + sample_idx) =
+                            *input.get_unchecked(sample_idx * num_channels + ch);
+                    }
+                }
             }
         }
     }
@@ -96,34 +109,74 @@ pub fn interleave_samples(input: &[f32], num_channels: usize, output: &mut Vec<f
     let num_samples = input.len() / num_channels;
     output.reserve(input.len());
 
-    if num_channels == 1 {
-        output.extend_from_slice(input);
-        return;
-    }
-
-    let output_base = output.len();
-    output.resize(output.len() + input.len(), 0.0);
-    for sample_idx in 0..num_samples {
-        for ch in 0..num_channels {
-            unsafe {
-                *output.get_unchecked_mut(output_base + sample_idx * num_channels + ch) =
-                    *input.get_unchecked(ch * num_samples + sample_idx);
-            };
+    match num_channels {
+        1 => {
+            output.extend_from_slice(input);
+        }
+        2 => {
+            let output_base = output.len();
+            output.resize(output.len() + input.len(), 0.0);
+            for sample_idx in 0..num_samples {
+                unsafe {
+                    *output.get_unchecked_mut(output_base + sample_idx * num_channels) =
+                        *input.get_unchecked(sample_idx);
+                    *output.get_unchecked_mut(output_base + sample_idx * num_channels + 1) =
+                        *input.get_unchecked(num_samples + sample_idx);
+                };
+            }
+        }
+        _ => {
+            let output_base = output.len();
+            output.resize(output.len() + input.len(), 0.0);
+            for sample_idx in 0..num_samples {
+                for ch in 0..num_channels {
+                    unsafe {
+                        *output.get_unchecked_mut(output_base + sample_idx * num_channels + ch) =
+                            *input.get_unchecked(ch * num_samples + sample_idx);
+                    };
+                }
+            }
         }
     }
 }
 
-/// Return linearly interpolated sample at given position.
-pub fn linear_sample(input: &[f32], pos: f32) -> f32 {
-    if input.is_empty() {
-        return 0.0;
+/// LinearSample allow sampling array with a fixed linear step.
+pub struct LinearSample {
+    pos: usize,
+    fract: f32,
+
+    step_i: usize,
+    step_f: f32,
+}
+
+impl LinearSample {
+    /// Initializes LinearSample at position 0.0 with given step.
+    pub fn new(step: f32) -> Self {
+        assert!(step >= 0.0);
+        Self { pos: 0, fract: 0.0, step_i: step as usize, step_f: step.fract() }
     }
-    let index = pos as usize;
-    if index >= input.len() - 1 {
-        input[input.len() - 1]
-    } else {
-        let frac = pos.fract();
-        input[index] * (1.0 - frac) + input[index + 1] * frac
+
+    /// Return the sample of data with current position.
+    pub fn sample(&self, data: &[f32]) -> f32 {
+        if self.pos >= data.len() - 1 {
+            unsafe { *data.get_unchecked(data.len() - 1) }
+        } else {
+            #[cfg(test)]
+            assert!(self.fract >= 0.0 && self.fract < 1.0, "Got fract {}", self.fract);
+            unsafe {
+                *data.get_unchecked(self.pos) * (1.0 - self.fract) + *data.get_unchecked(self.pos + 1) * self.fract
+            }
+        }
+    }
+
+    /// Increments the current sampling position.
+    pub fn step(&mut self) {
+        self.pos += self.step_i;
+        self.fract += self.step_f;
+        if self.fract >= 1.0 {
+            self.pos += 1;
+            self.fract -= 1.0;
+        }
     }
 }
 
@@ -270,6 +323,11 @@ mod tests {
         deinterleave_samples(&input_mono, 1, &mut output);
         assert_eq!(output, vec![1.0, 2.0, 3.0, 4.0]);
 
+        let input_stereo = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        output.clear();
+        deinterleave_samples(&input_stereo, 2, &mut output);
+        assert_eq!(output, vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
+
         let input_3ch = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         output.clear();
         deinterleave_samples(&input_3ch, 3, &mut output);
@@ -283,6 +341,11 @@ mod tests {
         let mut output = vec![];
         interleave_samples(&input_mono, 1, &mut output);
         assert_eq!(output, vec![1.0, 2.0, 3.0, 4.0]);
+
+        let input_stereo = vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0];
+        output.clear();
+        interleave_samples(&input_stereo, 2, &mut output);
+        assert_eq!(output, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
 
         let input_3ch = vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0];
         output.clear();
@@ -369,18 +432,5 @@ mod tests {
                 "approx_exp2({x}).0 = {exp2}, expected exp2 = {expected_exp2}"
             );
         }
-    }
-
-    #[test]
-    fn test_linear_sample() {
-        let data = [3.0, 4.0, 5.0];
-        // Last element
-        assert_eq!(linear_sample(&data, -1.0), 3.0);
-        assert_eq!(linear_sample(&data, 3.0), 5.0);
-        assert_eq!(linear_sample(&data, 2.0), 5.0);
-        assert_eq!(linear_sample(&data, 1.0), 4.0);
-        assert_eq!(linear_sample(&data, 0.0), 3.0);
-        assert_eq!(linear_sample(&data, 0.2), 3.2);
-        assert_eq!(linear_sample(&data, 1.5), 4.5);
     }
 }

@@ -119,11 +119,11 @@ impl PitchShifter {
         let envelope_fft_size = params.fft_size / 2;
         let envelope_hop_size = envelope_fft_size / params.overlap as usize;
         let envelope_stft = Stft::new(envelope_fft_size, params.window_type);
-        let num_bins = envelope_fft_size / 2 + 1;
+        let envelope_num_bins = envelope_fft_size / 2 + 1;
         // We normalize the quefrency cutoff by pitch shift because we analyze the pitch shifted spectrum.
         let cepstrum_cutoff_samples =
             (params.quefrency_cutoff * params.sample_rate as f32 / (1000.0 * params.pitch_shift)) as usize;
-        let envelope_shifter = EnvelopeShifter::new(num_bins, cepstrum_cutoff_samples, params.pitch_shift);
+        let envelope_shifter = EnvelopeShifter::new(envelope_num_bins, cepstrum_cutoff_samples, params.pitch_shift);
 
         Ok(Self {
             params: *params,
