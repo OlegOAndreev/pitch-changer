@@ -225,26 +225,15 @@ impl PhaseGradientTimeStretch {
             self.assign_phase_from_prev(k, ana_hop_size, ana_phase_diff, syn_hop_size, syn_phase_diff);
 
             // 2. Try propagating the phase to the bins on the left.
-            if k > 0 {
-                if self.phase_assigned[k - 1] {
-                    continue;
-                }
-                // Check if we should propagate phase from previous or current frame.
-                if self.sqr_magnitudes[k] < self.prev_sqr_magnitudes[k - 1] {
-                    continue;
-                }
+            if k > 0 && !self.phase_assigned[k - 1] && self.sqr_magnitudes[k] >= self.prev_sqr_magnitudes[k - 1] {
                 self.assign_phase_from_neighbor(k - 1, k);
             }
 
             // 3. Try propagating the phase to the bin on the right.
-            if k < num_bins - 1 {
-                if self.phase_assigned[k + 1] {
-                    continue;
-                }
-                // Check if we should propagate from previous or current frame.
-                if self.sqr_magnitudes[k] < self.prev_sqr_magnitudes[k + 1] {
-                    continue;
-                }
+            if k < num_bins - 1
+                && !self.phase_assigned[k + 1]
+                && self.sqr_magnitudes[k] >= self.prev_sqr_magnitudes[k + 1]
+            {
                 self.assign_phase_from_neighbor(k + 1, k);
             }
         }
