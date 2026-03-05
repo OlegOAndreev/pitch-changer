@@ -136,7 +136,7 @@ fn save_wav(data: &[f32], sample_rate: u32, channels: usize, filename: &str) -> 
 
     let mut writer = WavWriter::create(filename, spec)?;
     for (i, &sample) in data.iter().enumerate() {
-        if sample.abs() > 1.01 {
+        if sample.abs() > 1.0 {
             println!("Oh no: sample {} has value {}", i, sample);
         }
         writer.write_sample(sample)?;
@@ -253,7 +253,9 @@ fn save_plot_audio_svg(input: &[f32], output: &[f32], sample_rate: u32, filename
 
 fn save_spectrum_plot_svg(
     spectrum: &[f32],
+    spectrum_peak: usize,
     envelope: &[f32],
+    envelope_peak: usize,
     sample_rate: u32,
     fft_size: usize,
     filename: &str,
@@ -278,7 +280,19 @@ fn save_spectrum_plot_svg(
             max_magnitude = e;
         }
     }
-    max_magnitude = max_magnitude.max(1000.0);
+
+    let spectrum_peak_h = spectrum[spectrum_peak] as f32;
+    let spectrum_peak_line = vec![
+        (spectrum_peak as f32 * bin_width, spectrum_peak_h),
+        (spectrum_peak as f32 * bin_width, spectrum[spectrum_peak] as f32 * 1.25),
+    ];
+    let envelope_peak_h = envelope[envelope_peak] as f32;
+    let envelope_peak_line = vec![
+        (envelope_peak as f32 * bin_width, envelope_peak_h),
+        (envelope_peak as f32 * bin_width, envelope_peak_h * 1.25),
+    ];
+
+    max_magnitude = max_magnitude.max(spectrum_peak_h * 1.25).max(envelope_peak_h * 1.25) + 50.0;
 
     let root = SVGBackend::new(filename, (1200, 800)).into_drawing_area();
     root.fill(&WHITE)?;
@@ -297,10 +311,11 @@ fn save_spectrum_plot_svg(
         .label_style(("sans-serif", 15))
         .draw()?;
 
-    chart.draw_series(LineSeries::new(spectrum_points.clone(), &BLUE))?.label("Spectrum");
-    chart
-        .draw_series(LineSeries::new(envelope_points.clone(), &RED))?
-        .label("Spectral Envelope");
+    chart.draw_series(LineSeries::new(spectrum_points, &BLUE))?.label("Spectrum");
+    chart.draw_series(LineSeries::new(envelope_points, &RED))?.label("Spectral Envelope");
+
+    chart.draw_series(LineSeries::new(spectrum_peak_line, &CYAN))?;
+    chart.draw_series(LineSeries::new(envelope_peak_line, &MAGENTA))?;
 
     chart
         .configure_series_labels()
@@ -562,9 +577,19 @@ fn main() -> Result<()> {
             let cepstrum_cutoff_samples = (quefrency_cutoff * input.sample_rate as f32 / 1000.0) as usize;
             let mut envelope_shifter = EnvelopeShifter::new(spectrum.len(), cepstrum_cutoff_samples, 1.0);
             envelope_shifter.compute_envelope(&spectrum, &mut envelope);
+            let spectrum_peak = EnvelopeShifter::find_peak(&spectrum);
+            let envelope_peak = EnvelopeShifter::find_peak(&envelope);
 
-            save_spectrum_plot_svg(&spectrum, &envelope, input.sample_rate, fft_size, &output_path)
-                .with_context(|| format!("saving spectrum plot {} failed", output_path))?;
+            save_spectrum_plot_svg(
+                &spectrum,
+                spectrum_peak,
+                &envelope,
+                envelope_peak,
+                input.sample_rate,
+                fft_size,
+                &output_path,
+            )
+            .with_context(|| format!("saving spectrum plot {} failed", output_path))?;
         }
     }
 

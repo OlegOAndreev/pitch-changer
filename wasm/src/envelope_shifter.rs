@@ -68,11 +68,33 @@ impl EnvelopeShifter {
         self.fill_magnitudes_buf(freq);
         self.compute_envelope_impl();
 
+        // Find peak in spectral envelope and reduce shifting envelope for bins before it. See EFFICIENT SPECTRAL
+        // ENVELOPE ESTIMATION AND ITS APPLICATION TO PITCH SHIFTING AND ENVELOPE PRESERVATION by A. R¨obel and X. Rodet
+        // for explanation.
+        let peak_bin = (Self::find_peak(&self.magnitudes_buf) + 1) * Self::DOWNSAMPLE_BY;
+        let start_bin = if self.shift_ratio < 1.0 { (peak_bin as f32 * self.shift_ratio) as usize } else { 1 };
+
         // magnitudes_buf now contains the spectral envelope at small resolution. Use linear interpolation to sample
         // both current and shifted envelope at full resolution.
         let mut cur_sample = LinearSample::new(1.0 / Self::DOWNSAMPLE_BY as f32);
         let mut shifted_sample = LinearSample::new(self.shift_ratio / Self::DOWNSAMPLE_BY as f32);
-        for k in 1..self.num_bins {
+        // Do not shift envelope at all until start_bin.
+        for _ in 1..start_bin {
+            cur_sample.step();
+            shifted_sample.step();
+        }
+        // Introduce envelope shift after start_bin
+        for k in start_bin..peak_bin {
+            let cur_envelope = cur_sample.sample(&self.magnitudes_buf);
+            if cur_envelope > 1e-7 {
+                let shifted_envelope = shifted_sample.sample(&self.magnitudes_buf);
+                let alpha = (k - start_bin) as f32 / (peak_bin - start_bin) as f32;
+                freq[k] *= 1.0 - alpha + (shifted_envelope / cur_envelope) * alpha;
+            }
+            cur_sample.step();
+            shifted_sample.step();
+        }
+        for k in peak_bin..self.num_bins {
             let cur_envelope = cur_sample.sample(&self.magnitudes_buf);
             if cur_envelope > 1e-7 {
                 let shifted_envelope = shifted_sample.sample(&self.magnitudes_buf);
@@ -211,5 +233,50 @@ impl EnvelopeShifter {
         for magn in &mut self.magnitudes_buf[upper_bin..] {
             *magn = fixed_magn;
         }
+    }
+
+    // The returns the id of peak, which is defined as a bin which is greater than 4 bins before and after it or 0 if no
+    // such bin exist.
+    pub fn find_peak(spectrum: &[f32]) -> usize {
+        assert!(spectrum.len() >= 9);
+        // Process the first part.
+        for i in 0..4 {
+            if spectrum[i] < spectrum[i + 1]
+                || spectrum[i] < spectrum[i + 2]
+                || spectrum[i] < spectrum[i + 3]
+                || spectrum[i] < spectrum[i + 4]
+            {
+                continue;
+            }
+            if i > 0 && spectrum[i] < spectrum[i - 1] {
+                continue;
+            }
+            if i > 1 && spectrum[i] < spectrum[i - 2] {
+                continue;
+            }
+            if i > 2 && spectrum[i] < spectrum[i - 3] {
+                continue;
+            }
+            if i > 3 && spectrum[i] < spectrum[i - 4] {
+                continue;
+            }
+            return i;
+        }
+        // Process the last part (we ignore the tail)
+        for i in 4..spectrum.len() - 4 {
+            if spectrum[i] < spectrum[i + 1]
+                || spectrum[i] < spectrum[i + 2]
+                || spectrum[i] < spectrum[i + 3]
+                || spectrum[i] < spectrum[i + 4]
+                || spectrum[i] < spectrum[i - 1]
+                || spectrum[i] < spectrum[i - 2]
+                || spectrum[i] < spectrum[i - 3]
+                || spectrum[i] < spectrum[i - 4]
+            {
+                continue;
+            }
+            return i;
+        }
+        0
     }
 }
