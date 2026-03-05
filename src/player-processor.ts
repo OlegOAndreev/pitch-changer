@@ -40,6 +40,9 @@ class PlayerProcessor extends AudioWorkletProcessor {
                 return false;
             }
             console.warn(`Ring buffer underflow: required ${interleavedLength}, got ${n}`);
+            for (let i = n; i < interleavedLength; i++) {
+                this.interleavedBuf[i] = 0.0;
+            }
         }
 
         // Deinterleave tempBuffer into outputs
