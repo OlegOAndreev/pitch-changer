@@ -20,6 +20,7 @@ pub struct EnvelopeShifter {
     inverse_plan: Arc<dyn ComplexToReal<f32>>,
     // Scratch buffers, all sized for the downsampled spectrum
     magnitudes_buf: Vec<f32>,
+    orig_magnitudes_buf: Vec<f32>,
     new_magnitudes_buf: Vec<f32>,
     cepstrum_buf: Vec<Complex<f32>>,
     scratch_forward: Vec<Complex<f32>>,
@@ -41,6 +42,7 @@ impl EnvelopeShifter {
         let inverse_plan = planner.plan_fft_inverse(downsample_size);
         let cepstrum_size = downsample_size / 2 + 1;
         let magnitudes_buf = vec![0.0; downsample_size];
+        let orig_magnitudes_buf = vec![0.0; downsample_size];
         let new_magnitudes_buf = vec![0.0; downsample_size];
         let cepstrum_buf = vec![Complex::ZERO; cepstrum_size];
         let scratch_forward = forward_plan.make_scratch_vec();
@@ -54,6 +56,7 @@ impl EnvelopeShifter {
             forward_plan,
             inverse_plan,
             magnitudes_buf,
+            orig_magnitudes_buf,
             new_magnitudes_buf,
             cepstrum_buf,
             scratch_forward,
@@ -65,16 +68,16 @@ impl EnvelopeShifter {
     pub fn shift_envelope(&mut self, freq: &mut [Complex<f32>]) {
         assert_eq!(freq.len(), self.num_bins);
 
-        self.fill_magnitudes_buf(freq);
+        self.fill_orig_magnitudes_buf(freq);
         self.compute_envelope_impl();
 
         // Find peak in spectral envelope and reduce shifting envelope for bins before it. See EFFICIENT SPECTRAL
         // ENVELOPE ESTIMATION AND ITS APPLICATION TO PITCH SHIFTING AND ENVELOPE PRESERVATION by A. R¨obel and X. Rodet
         // for explanation.
-        let peak_bin = (Self::find_peak(&self.magnitudes_buf) + 1) * Self::DOWNSAMPLE_BY;
+        let peak_bin = (Self::find_peak(&self.new_magnitudes_buf) + 1) * Self::DOWNSAMPLE_BY;
         let start_bin = if self.shift_ratio < 1.0 { (peak_bin as f32 * self.shift_ratio) as usize } else { 1 };
 
-        // magnitudes_buf now contains the spectral envelope at small resolution. Use linear interpolation to sample
+        // new_magnitudes_buf now contains the spectral envelope at small resolution. Use linear interpolation to sample
         // both current and shifted envelope at full resolution.
         let mut cur_sample = LinearSample::new(1.0 / Self::DOWNSAMPLE_BY as f32);
         let mut shifted_sample = LinearSample::new(self.shift_ratio / Self::DOWNSAMPLE_BY as f32);
@@ -85,9 +88,9 @@ impl EnvelopeShifter {
         }
         // Introduce envelope shift after start_bin
         for k in start_bin..peak_bin {
-            let cur_envelope = cur_sample.sample(&self.magnitudes_buf);
+            let cur_envelope = cur_sample.sample(&self.new_magnitudes_buf);
             if cur_envelope > 1e-7 {
-                let shifted_envelope = shifted_sample.sample(&self.magnitudes_buf);
+                let shifted_envelope = shifted_sample.sample(&self.new_magnitudes_buf);
                 let alpha = (k - start_bin) as f32 / (peak_bin - start_bin) as f32;
                 freq[k] *= 1.0 - alpha + (shifted_envelope / cur_envelope) * alpha;
             }
@@ -95,9 +98,9 @@ impl EnvelopeShifter {
             shifted_sample.step();
         }
         for k in peak_bin..self.num_bins {
-            let cur_envelope = cur_sample.sample(&self.magnitudes_buf);
+            let cur_envelope = cur_sample.sample(&self.new_magnitudes_buf);
             if cur_envelope > 1e-7 {
-                let shifted_envelope = shifted_sample.sample(&self.magnitudes_buf);
+                let shifted_envelope = shifted_sample.sample(&self.new_magnitudes_buf);
                 freq[k] *= shifted_envelope / cur_envelope;
             }
             cur_sample.step();
@@ -108,7 +111,7 @@ impl EnvelopeShifter {
     pub fn compute_envelope(&mut self, magnitudes: &[f32], output: &mut Vec<f32>) {
         assert_eq!(magnitudes.len(), self.num_bins);
 
-        self.fill_magnitudes_buf_from_slice(magnitudes);
+        self.fill_orig_magnitudes_buf_from_slice(magnitudes);
         self.compute_envelope_impl();
 
         output.clear();
@@ -116,7 +119,7 @@ impl EnvelopeShifter {
 
         let mut sample = LinearSample::new(1.0 / Self::DOWNSAMPLE_BY as f32);
         for _ in 0..self.num_bins - 1 {
-            output.push(sample.sample(&self.magnitudes_buf));
+            output.push(sample.sample(&self.new_magnitudes_buf));
             sample.step();
         }
     }
@@ -127,24 +130,24 @@ impl EnvelopeShifter {
         self.shift_ratio = shift_ratio;
     }
 
-    /// Downsample magnitudes of a freq slice into small_magnitudes_buf using max-pooling. Initially we store squared
-    /// magnitudes in magnitudes_buf, see compute_envelope_impl.
-    fn fill_magnitudes_buf(&mut self, freq: &[Complex<f32>]) {
+    /// Downsample magnitudes of freq using max-pooling. Initially we store squared magnitudes in orig_magnitudes_buf,
+    /// see compute_envelope_impl.
+    fn fill_orig_magnitudes_buf(&mut self, freq: &[Complex<f32>]) {
         match Self::DOWNSAMPLE_BY {
             1 => {
-                for (magn, freq) in self.magnitudes_buf.iter_mut().zip(&freq[1..]) {
+                for (magn, freq) in self.orig_magnitudes_buf.iter_mut().zip(&freq[1..]) {
                     *magn = freq.norm_sqr();
                 }
             }
             2 => {
-                for (magn, freq_chunk) in self.magnitudes_buf.iter_mut().zip(freq[1..].chunks_exact(2)) {
+                for (magn, freq_chunk) in self.orig_magnitudes_buf.iter_mut().zip(freq[1..].chunks_exact(2)) {
                     let a = freq_chunk[0].norm_sqr();
                     let b = freq_chunk[1].norm_sqr();
                     *magn = a.max(b);
                 }
             }
             4 => {
-                for (magn, freq_chunk) in self.magnitudes_buf.iter_mut().zip(freq[1..].chunks_exact(4)) {
+                for (magn, freq_chunk) in self.orig_magnitudes_buf.iter_mut().zip(freq[1..].chunks_exact(4)) {
                     let a = freq_chunk[0].norm_sqr();
                     let b = freq_chunk[1].norm_sqr();
                     let c = freq_chunk[2].norm_sqr();
@@ -158,24 +161,24 @@ impl EnvelopeShifter {
         }
     }
 
-    /// Downsample a magnitude slice into small_magnitudes_buf using max-pooling. Initially we store squared magnitudes
-    /// in magnitudes_buf, see compute_envelope_impl.
-    fn fill_magnitudes_buf_from_slice(&mut self, magnitudes: &[f32]) {
+    /// Downsample a magnitude slice using max-pooling. Initially we store squared magnitudes in orig_magnitudes_buf,
+    /// see compute_envelope_impl.
+    fn fill_orig_magnitudes_buf_from_slice(&mut self, magnitudes: &[f32]) {
         match Self::DOWNSAMPLE_BY {
             1 => {
-                for (magn, src) in self.magnitudes_buf.iter_mut().zip(&magnitudes[1..]) {
+                for (magn, src) in self.orig_magnitudes_buf.iter_mut().zip(&magnitudes[1..]) {
                     *magn = src * src;
                 }
             }
             2 => {
-                for (magn, magn_chunk) in self.magnitudes_buf.iter_mut().zip(magnitudes[1..].chunks_exact(2)) {
+                for (magn, magn_chunk) in self.orig_magnitudes_buf.iter_mut().zip(magnitudes[1..].chunks_exact(2)) {
                     let a = magn_chunk[0] * magn_chunk[0];
                     let b = magn_chunk[1] * magn_chunk[1];
                     *magn = a.max(b);
                 }
             }
             4 => {
-                for (magn, magn_chunk) in self.magnitudes_buf.iter_mut().zip(magnitudes[1..].chunks_exact(4)) {
+                for (magn, magn_chunk) in self.orig_magnitudes_buf.iter_mut().zip(magnitudes[1..].chunks_exact(4)) {
                     let a = magn_chunk[0] * magn_chunk[0];
                     let b = magn_chunk[1] * magn_chunk[1];
                     let c = magn_chunk[2] * magn_chunk[2];
@@ -189,7 +192,7 @@ impl EnvelopeShifter {
         }
     }
 
-    /// Compute the spectral envelope in-place on small_magnitudes_buf using iterative cepstral smoothing.
+    /// Compute the spectral envelope in-place on orig_magnitudes_buf using iterative cepstral smoothing.
     fn compute_envelope_impl(&mut self) {
         const EPSILON: f32 = 1e-6;
         // This code implements true envelope estimation by doing multiple iterations of spectrum -> cepstrum ->
@@ -197,15 +200,27 @@ impl EnvelopeShifter {
         // we envelope may become much larger for lower frequencies.
         const ITERATIONS: usize = 3;
 
-        for magn in &mut self.magnitudes_buf {
-            // Initially magnitudes_buf contains the squared magnitudes, see fill_magnitudes_buf. We user the equality
-            // log2(x^2) = log2(x) * 2 here.
+        for magn in &mut self.orig_magnitudes_buf {
+            // Initially orig_magnitudes_buf contains the squared magnitudes, see fill_magnitudes_buf. We use the
+            // equality log2(x^2) = log2(x) * 2 here.
             *magn = approx_log2(*magn + EPSILON) * 0.5;
         }
 
         let cutoff = self.cepstrum_cutoff_bins.min(self.cepstrum_buf.len());
         let norm = 1.0 / self.downsample_size as f32;
         for iteration in 0..ITERATIONS {
+            if iteration == 0 {
+                // realfft destroys the input buffer, which is why we need to store orig_magnitudes_buf separately
+                self.magnitudes_buf.copy_from_slice(&self.orig_magnitudes_buf);
+            } else {
+                for (magn, (orig_magn, new_magn)) in self
+                    .magnitudes_buf
+                    .iter_mut()
+                    .zip(self.orig_magnitudes_buf.iter().zip(&self.new_magnitudes_buf))
+                {
+                    *magn = orig_magn.max(new_magn * norm);
+                }
+            }
             self.forward_plan
                 .process_with_scratch(&mut self.magnitudes_buf, &mut self.cepstrum_buf, &mut self.scratch_forward)
                 .expect("failed forward STFT pass");
@@ -215,22 +230,16 @@ impl EnvelopeShifter {
             self.inverse_plan
                 .process_with_scratch(&mut self.cepstrum_buf, &mut self.new_magnitudes_buf, &mut self.scratch_inverse)
                 .expect("failed inverse STFT pass");
-
-            if iteration < ITERATIONS - 1 {
-                for (magn, new_magn) in self.magnitudes_buf.iter_mut().zip(&self.new_magnitudes_buf) {
-                    *magn = magn.max(new_magn * norm);
-                }
-            }
         }
 
         let upper_bin = self.downsample_size * 3 / 4;
-        for (magn, new_magn) in self.magnitudes_buf[0..upper_bin].iter_mut().zip(&self.new_magnitudes_buf) {
-            *magn = approx_exp2(new_magn * norm);
+        for magn in &mut self.new_magnitudes_buf[0..upper_bin] {
+            *magn = approx_exp2(*magn * norm);
         }
 
         // Make the upper part of envelope constant (see www.diva-portal.org/smash/get/diva2%3A1381398/FULLTEXT01.pdf)
-        let fixed_magn = self.magnitudes_buf[upper_bin - 1];
-        for magn in &mut self.magnitudes_buf[upper_bin..] {
+        let fixed_magn = self.new_magnitudes_buf[upper_bin - 1];
+        for magn in &mut self.new_magnitudes_buf[upper_bin..] {
             *magn = fixed_magn;
         }
     }
