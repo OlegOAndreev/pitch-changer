@@ -315,10 +315,10 @@ mod tests {
         let bin = CompactBin::new(10, f32::MAX);
         // When we reconstruct from 16 bits, we get an approximation
         let reconstructed = bin.sqr_magnitude();
-        // Check that it's close (we keep top 16 bits of 32-bit float, losing lower 16 bits) The relative error should
-        // be about 2^(-7) = 1/128 ≈ 0.0078 for normalized numbers
+        // Check that it's close (we keep top 16 bits of 32-bit float, losing lower 15 bits). The relative error should
+        // be about 2^(-8) = 1/256 ≈ 0.004 for normalized numbers
         let expected = f32::MAX;
-        let tolerance = expected * 0.01; // 1% tolerance
+        let tolerance = expected * 0.005; // 1% tolerance
         assert!(
             (reconstructed - expected).abs() <= tolerance,
             "reconstructed={}, expected={}, diff={}",
