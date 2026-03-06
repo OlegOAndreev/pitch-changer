@@ -12,7 +12,7 @@ pub fn get_disjoint_two_mut<T>(slice: &mut [T], idx1: usize, idx2: usize) -> (&m
     }
     unsafe {
         let ptr = slice.as_mut_ptr();
-        (ptr.add(idx1).as_mut().unwrap(), ptr.add(idx2).as_mut().unwrap())
+        (&mut *ptr.add(idx1), &mut *ptr.add(idx2))
     }
 }
 
