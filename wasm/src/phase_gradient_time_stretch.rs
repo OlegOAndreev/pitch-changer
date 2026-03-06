@@ -1,9 +1,34 @@
 use std::f32::consts::PI;
-use std::mem;
 
 use realfft::num_complex::Complex;
 
-use crate::util::{approx_atan2, approx_sincos, normalize_phase};
+use crate::util::{approx_atan2, approx_sincos, normalize_phase, get_disjoint_two_mut};
+
+/// PhaseGradientBin stores all per-bin data for phase gradient time stretching.
+#[derive(Debug, Clone)]
+struct PhaseGradientBin {
+    prev_sqr_magnitude: f32,
+    prev_ana_phase: f32,
+    prev_syn_phase: f32,
+    sqr_magnitude: f32,
+    ana_phase: f32,
+    syn_phase: f32,
+    phase_assigned: bool,
+}
+
+impl PhaseGradientBin {
+    fn new() -> Self {
+        Self {
+            prev_sqr_magnitude: 0.0,
+            prev_ana_phase: 0.0,
+            prev_syn_phase: 0.0,
+            sqr_magnitude: 0.0,
+            ana_phase: 0.0,
+            syn_phase: 0.0,
+            phase_assigned: false,
+        }
+    }
+}
 
 // BinWithMagnitude stores bin magnitude + bin index compacted into once i64 value. This allows much faster sorting of
 // bins by magnitude.
@@ -37,13 +62,7 @@ pub struct PhaseGradientTimeStretch {
     fft_size: usize,
     num_bins: usize,
 
-    prev_sqr_magnitudes: Vec<f32>,
-    prev_ana_phases: Vec<f32>,
-    prev_syn_phases: Vec<f32>,
-
-    sqr_magnitudes: Vec<f32>,
-    ana_phases: Vec<f32>,
-    syn_phases: Vec<f32>,
+    bins: Vec<PhaseGradientBin>,
     // Unlike the original paper, we do not use max-heap for all operations. Heap operations take more than ~50% of all
     // time in PitchShifter and we try to optimize them as much as we can.
     //
@@ -53,8 +72,6 @@ pub struct PhaseGradientTimeStretch {
     //
     // This results in almost the same phase assignment as the previous algorithm, but is considerably faster.
     prev_sorted_bins: Vec<BinWithMagnitude>,
-    // If true, syn_phases is assigned.
-    phase_assigned: Vec<bool>,
 }
 
 // The implementation uses inline(never) in a few places to make profiling easier.
@@ -67,29 +84,10 @@ impl PhaseGradientTimeStretch {
     pub fn new(fft_size: usize) -> Self {
         let num_bins = fft_size / 2 + 1;
 
-        let prev_sqr_magnitudes = vec![0.0; num_bins];
-        let prev_ana_phases = vec![0.0; num_bins];
-        let prev_syn_phases = vec![0.0; num_bins];
-
-        // Scratch buffers
-        let sqr_magnitudes = vec![0.0; num_bins];
-        let ana_phases = vec![0.0; num_bins];
-        let syn_phases = vec![0.0; num_bins];
+        let bins = vec![PhaseGradientBin::new(); num_bins];
         let prev_sorted_bins = Vec::with_capacity(num_bins);
-        let phase_assigned = vec![false; num_bins];
 
-        Self {
-            fft_size,
-            num_bins,
-            prev_sqr_magnitudes,
-            prev_ana_phases,
-            prev_syn_phases,
-            sqr_magnitudes,
-            ana_phases,
-            syn_phases,
-            prev_sorted_bins,
-            phase_assigned,
-        }
+        Self { fft_size, num_bins, bins, prev_sorted_bins }
     }
 
     /// Process a single STFT frame.
@@ -109,8 +107,10 @@ impl PhaseGradientTimeStretch {
         self.convert_to_freq(ana_freq, syn_freq, min_magn);
 
         // Save previous analysis data for next frame
-        mem::swap(&mut self.prev_sqr_magnitudes, &mut self.sqr_magnitudes);
-        mem::swap(&mut self.prev_ana_phases, &mut self.ana_phases);
+        for bin in &mut self.bins {
+            bin.prev_sqr_magnitude = bin.sqr_magnitude;
+            bin.prev_ana_phase = bin.ana_phase;
+        }
     }
 
     // Helper that assigns the phase to bin k based on the phase of bin k in the previous frame.
@@ -138,10 +138,11 @@ impl PhaseGradientTimeStretch {
         syn_hop_size: f32,
         syn_phase_diff: f32,
     ) {
+        let bin = &mut self.bins[k];
         let ana_phase_derivative =
-            normalize_phase(self.ana_phases[k] - self.prev_ana_phases[k] - ana_phase_diff * k as f32) / ana_hop_size;
-        self.syn_phases[k] = self.prev_syn_phases[k] + ana_phase_derivative * syn_hop_size + syn_phase_diff * k as f32;
-        self.phase_assigned[k] = true;
+            normalize_phase(bin.ana_phase - bin.prev_ana_phase - ana_phase_diff * k as f32) / ana_hop_size;
+        bin.syn_phase = bin.prev_syn_phase + ana_phase_derivative * syn_hop_size + syn_phase_diff * k as f32;
+        bin.phase_assigned = true;
     }
 
     // Helper that assigns the phase to bin k from another bin k_src in the current frame.
@@ -157,15 +158,19 @@ impl PhaseGradientTimeStretch {
     // In simpler terms, we lock the phase in bin k_src to phase in bin k.
     #[inline(always)]
     fn assign_phase_from_neighbor(&mut self, k: usize, k_src: usize) {
-        self.syn_phases[k] = self.syn_phases[k_src] + (self.ana_phases[k] - self.ana_phases[k_src]);
-        self.phase_assigned[k] = true;
+        // Use take_two helper to get mutable references to two different bins
+        let (bin, src_bin) = get_disjoint_two_mut(&mut self.bins, k, k_src);
+        bin.syn_phase = src_bin.syn_phase + (bin.ana_phase - src_bin.ana_phase);
+        bin.phase_assigned = true;
     }
 
     /// Reset internal state (clear previous frame data).
     pub fn reset(&mut self) {
-        self.prev_sqr_magnitudes.fill(0.0);
-        self.prev_ana_phases.fill(0.0);
-        self.prev_syn_phases.fill(0.0);
+        for bin in &mut self.bins {
+            bin.prev_sqr_magnitude = 0.0;
+            bin.prev_ana_phase = 0.0;
+            bin.prev_syn_phase = 0.0;
+        }
     }
 
     // Fill in the sqr_magnitudes and return magnitude threshold.
@@ -178,26 +183,28 @@ impl PhaseGradientTimeStretch {
         for k in 0..num_bins {
             // We compare squared magnitudes and call sqrt() only before computing the final value.
             let magn = ana_freq[k].norm_sqr();
-            self.sqr_magnitudes[k] = magn;
-            max_magn = max_magn.max(magn).max(self.prev_sqr_magnitudes[k]);
+            let bin = &mut self.bins[k];
+            bin.sqr_magnitude = magn;
+            max_magn = max_magn.max(magn).max(bin.prev_sqr_magnitude);
         }
         let min_magn = max_magn * Self::MIN_MAGNITUDE_TOLERANCE;
 
         self.prev_sorted_bins.clear();
 
         for k in 0..num_bins {
+            let bin = &mut self.bins[k];
             // Optimization: do not compute phase for frequencies below the min_magn threshold.
-            if self.sqr_magnitudes[k] > min_magn {
+            if bin.sqr_magnitude > min_magn {
                 // Use approximation instead of ana_freq[k].arg();
-                self.ana_phases[k] = approx_atan2(ana_freq[k].im, ana_freq[k].re);
-                self.phase_assigned[k] = false;
-                self.prev_sorted_bins.push(BinWithMagnitude::new(k, self.prev_sqr_magnitudes[k]));
+                bin.ana_phase = approx_atan2(ana_freq[k].im, ana_freq[k].re);
+                bin.phase_assigned = false;
+                self.prev_sorted_bins.push(BinWithMagnitude::new(k, bin.prev_sqr_magnitude));
             } else {
                 // The original paper assigns random values to frequencies below the min magnitude, but we simply zero
                 // them out.
-                self.ana_phases[k] = 0.0;
-                self.syn_phases[k] = 0.0;
-                self.phase_assigned[k] = true;
+                bin.ana_phase = 0.0;
+                bin.syn_phase = 0.0;
+                bin.phase_assigned = true;
             }
         }
         self.prev_sorted_bins.sort_unstable();
@@ -217,7 +224,7 @@ impl PhaseGradientTimeStretch {
         // Phase assignment algorithm: start with the bin with max magnitude.
         for bin in (0..self.prev_sorted_bins.len()).rev() {
             let k = self.prev_sorted_bins[bin].index();
-            if self.phase_assigned[k] {
+            if self.bins[k].phase_assigned {
                 continue;
             }
 
@@ -225,14 +232,17 @@ impl PhaseGradientTimeStretch {
             self.assign_phase_from_prev(k, ana_hop_size, ana_phase_diff, syn_hop_size, syn_phase_diff);
 
             // 2. Try propagating the phase to the bins on the left.
-            if k > 0 && !self.phase_assigned[k - 1] && self.sqr_magnitudes[k] >= self.prev_sqr_magnitudes[k - 1] {
+            if k > 0
+                && !self.bins[k - 1].phase_assigned
+                && self.bins[k].sqr_magnitude >= self.bins[k - 1].prev_sqr_magnitude
+            {
                 self.assign_phase_from_neighbor(k - 1, k);
             }
 
             // 3. Try propagating the phase to the bin on the right.
             if k < num_bins - 1
-                && !self.phase_assigned[k + 1]
-                && self.sqr_magnitudes[k] >= self.prev_sqr_magnitudes[k + 1]
+                && !self.bins[k + 1].phase_assigned
+                && self.bins[k].sqr_magnitude >= self.bins[k + 1].prev_sqr_magnitude
             {
                 self.assign_phase_from_neighbor(k + 1, k);
             }
@@ -246,19 +256,20 @@ impl PhaseGradientTimeStretch {
 
         // Convert phase/magnitude back to complex frequency domain
         for k in 0..num_bins {
-            if self.sqr_magnitudes[k] > min_magn {
-                assert!(self.phase_assigned[k], "BUG: Phase {} not assigned", k);
+            let bin = &mut self.bins[k];
+            if bin.sqr_magnitude > min_magn {
+                assert!(bin.phase_assigned, "BUG: Phase {} not assigned", k);
                 // Do the normalize_phase here so that the prev_syn_phases does not become too large, reducing the
                 // floating point error. It also allows us to use approx_sincos implementation.
-                self.prev_syn_phases[k] = normalize_phase(self.syn_phases[k]);
-                // Use approximation instead of Complex::from_polar(self.sqr_magnitudes[k].sqrt(),
-                // self.prev_syn_phases[k])
-                let magn = self.sqr_magnitudes[k].sqrt();
-                let (sin, cos) = approx_sincos(self.prev_syn_phases[k]);
+                bin.prev_syn_phase = normalize_phase(bin.syn_phase);
+                // Use approximation instead of Complex::from_polar(bin.sqr_magnitude.sqrt(),
+                // bin.prev_syn_phase)
+                let magn = bin.sqr_magnitude.sqrt();
+                let (sin, cos) = approx_sincos(bin.prev_syn_phase);
                 syn_freq[k] = Complex::new(magn * cos, magn * sin);
             } else {
                 // We do not care what to fill this bin with.
-                self.prev_syn_phases[k] = self.ana_phases[k];
+                bin.prev_syn_phase = bin.ana_phase;
                 syn_freq[k] = ana_freq[k];
             }
         }

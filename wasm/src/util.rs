@@ -1,5 +1,21 @@
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
+/// Get mutable references to two elements in a slice at different indices. Returns (&mut slice[idx1], &mut slice[idx2])
+/// where idx1 != idx2.
+pub fn get_disjoint_two_mut<T>(slice: &mut [T], idx1: usize, idx2: usize) -> (&mut T, &mut T) {
+    assert!(idx1 != idx2, "indices must be different");
+
+    if idx1 < idx2 {
+        assert!(idx2 < slice.len(), "Index {} out of bounds {}", idx2, slice.len());
+    } else {
+        assert!(idx1 < slice.len(), "Index {} out of bounds {}", idx1, slice.len());
+    }
+    unsafe {
+        let ptr = slice.as_mut_ptr();
+        (ptr.add(idx1).as_mut().unwrap(), ptr.add(idx2).as_mut().unwrap())
+    }
+}
+
 /// Normalize a phase value to the range [-PI, PI).
 pub fn normalize_phase(phase: f32) -> f32 {
     let shifted = phase + PI;
@@ -258,6 +274,53 @@ pub fn approx_exp2(x: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_get_disjoint_two_mut() {
+        // Test basic functionality with different indices
+        let mut data = vec![1, 2, 3, 4, 5];
+
+        // Test with idx1 < idx2
+        let (a, b) = get_disjoint_two_mut(&mut data, 1, 3);
+        *a = 20;
+        *b = 40;
+        assert_eq!(data, vec![1, 20, 3, 40, 5]);
+
+        // Test with idx1 > idx2
+        let (c, d) = get_disjoint_two_mut(&mut data, 4, 0);
+        *c = 50;
+        *d = 10;
+        assert_eq!(data, vec![10, 20, 3, 40, 50]);
+
+        // Test that modifications are independent
+        let (e, f) = get_disjoint_two_mut(&mut data, 2, 3);
+        assert_eq!(*e, 3);
+        assert_eq!(*f, 40);
+        *e = 30;
+        *f = 400;
+        assert_eq!(data, vec![10, 20, 30, 400, 50]);
+    }
+
+    #[test]
+    #[should_panic(expected = "indices must be different")]
+    fn test_get_disjoint_two_mut_same_indices() {
+        let mut data = vec![1, 2, 3];
+        get_disjoint_two_mut(&mut data, 1, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "Index 5 out of bounds 5")]
+    fn test_get_disjoint_two_mut_out_of_bounds_idx2() {
+        let mut data = vec![1, 2, 3, 4, 5];
+        get_disjoint_two_mut(&mut data, 1, 5);
+    }
+
+    #[test]
+    #[should_panic(expected = "Index 5 out of bounds 5")]
+    fn test_get_disjoint_two_mut_out_of_bounds_idx1() {
+        let mut data = vec![1, 2, 3, 4, 5];
+        get_disjoint_two_mut(&mut data, 5, 1);
+    }
 
     #[test]
     fn test_normalize_phase() {
