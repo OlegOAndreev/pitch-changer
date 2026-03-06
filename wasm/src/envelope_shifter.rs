@@ -157,14 +157,18 @@ impl EnvelopeShifter {
                 }
             }
             2 => {
-                for (magn, freq_chunk) in self.orig_magnitudes_buf.iter_mut().zip(freq[1..].chunks_exact(2)) {
+                let (freq_chunks, freq_remainder) = freq[1..].as_chunks::<2>();
+                assert!(freq_remainder.is_empty());
+                for (magn, freq_chunk) in self.orig_magnitudes_buf.iter_mut().zip(freq_chunks) {
                     let a = freq_chunk[0].norm_sqr();
                     let b = freq_chunk[1].norm_sqr();
                     *magn = a.max(b);
                 }
             }
             4 => {
-                for (magn, freq_chunk) in self.orig_magnitudes_buf.iter_mut().zip(freq[1..].chunks_exact(4)) {
+                let (freq_chunks, freq_remainder) = freq[1..].as_chunks::<4>();
+                assert!(freq_remainder.is_empty());
+                for (magn, freq_chunk) in self.orig_magnitudes_buf.iter_mut().zip(freq_chunks) {
                     let a = freq_chunk[0].norm_sqr();
                     let b = freq_chunk[1].norm_sqr();
                     let c = freq_chunk[2].norm_sqr();
@@ -188,14 +192,18 @@ impl EnvelopeShifter {
                 }
             }
             2 => {
-                for (magn, magn_chunk) in self.orig_magnitudes_buf.iter_mut().zip(magnitudes[1..].chunks_exact(2)) {
+                let (magn_chunks, magn_remainder) = magnitudes[1..].as_chunks::<2>();
+                assert!(magn_remainder.is_empty());
+                for (magn, magn_chunk) in self.orig_magnitudes_buf.iter_mut().zip(magn_chunks) {
                     let a = magn_chunk[0] * magn_chunk[0];
                     let b = magn_chunk[1] * magn_chunk[1];
                     *magn = a.max(b);
                 }
             }
             4 => {
-                for (magn, magn_chunk) in self.orig_magnitudes_buf.iter_mut().zip(magnitudes[1..].chunks_exact(4)) {
+                let (magn_chunks, magn_remainder) = magnitudes[1..].as_chunks::<4>();
+                assert!(magn_remainder.is_empty());
+                for (magn, magn_chunk) in self.orig_magnitudes_buf.iter_mut().zip(magn_chunks) {
                     let a = magn_chunk[0] * magn_chunk[0];
                     let b = magn_chunk[1] * magn_chunk[1];
                     let c = magn_chunk[2] * magn_chunk[2];

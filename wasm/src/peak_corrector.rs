@@ -126,7 +126,9 @@ impl PeakCorrector {
                     }
                 }
                 2 => {
-                    for chunk in self.output_buf.chunks_exact_mut(2) {
+                    let (chunks, remainder) = self.output_buf.as_chunks_mut::<2>();
+                    assert!(remainder.is_empty());
+                    for chunk in chunks {
                         chunk[0] *= gain;
                         chunk[1] *= gain;
                         gain += step;
