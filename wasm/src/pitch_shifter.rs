@@ -53,7 +53,7 @@ impl PitchShiftParams {
             overlap: stretch_params.overlap,
             window_type: stretch_params.window_type,
             quefrency_cutoff: 0.0,
-            peak_correction_block_size: 256,
+            peak_correction_block_size: 128,
             peak_correction_recovery_rate: 0.01,
         }
     }
