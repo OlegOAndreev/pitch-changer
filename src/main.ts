@@ -60,7 +60,11 @@ class AppState {
             processingMode: DEFAULT_PROCESSING_MODE,
             pitchValue: DEFAULT_PITCH_VALUE,
         };
-        Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}'));
+        try {
+            Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}'));
+        } catch (error) {
+            console.error('Failed to parse settings from localStorage, using defaults:', error);
+        }
         if (!settings.processingMode) {
             settings.processingMode = DEFAULT_PROCESSING_MODE;
         }
@@ -88,14 +92,24 @@ class AppState {
         if (!this.recorder) {
             this.recorder = Recorder.create(this.getAudioContext());
         }
-        return this.recorder!;
+        try {
+            return await this.recorder;
+        } catch (error) {
+            this.recorder = null;
+            throw error;
+        }
     }
 
     async getPlayer(): Promise<Player> {
         if (!this.player) {
             this.player = Player.create(this.getAudioContext());
         }
-        return this.player;
+        try {
+            return await this.player;
+        } catch (error) {
+            this.player = null;
+            throw error;
+        }
     }
 }
 
@@ -258,12 +272,14 @@ async function handlePlayClick(): Promise<void> {
         playBtn.title = 'Pause';
         playBtn.classList.add('playing');
 
-        await runPlay(player);
-
-        playBtn.title = 'Play';
-        playBtn.classList.remove('playing');
-        playBtnEmoji.classList.remove(stopBtnClass);
-        playBtnEmoji.classList.add(playingBtnClass);
+        try {
+            await runPlay(player);
+        } finally {
+            playBtn.title = 'Play';
+            playBtn.classList.remove('playing');
+            playBtnEmoji.classList.remove(stopBtnClass);
+            playBtnEmoji.classList.add(playingBtnClass);
+        }
     } else {
         player.stop();
     }
@@ -333,6 +349,7 @@ async function handleSaveClick(): Promise<void> {
         return;
     }
 
+    let saved = false;
     try {
         processingSpinner.style.display = 'inline-block';
         processingLabel.textContent = 'Processing...';
@@ -341,9 +358,14 @@ async function handleSaveClick(): Promise<void> {
         processingLabel.textContent = 'Encoding...';
         const blob = await encodeAudioToBlob(fileType, processedAudio);
         await saveFile(filename, fileHandle, blob);
+        saved = true;
     } finally {
         processingSpinner.style.display = 'none';
-        processingLabel.textContent = `Saved ${filename}`;
+        if (saved) {
+            processingLabel.textContent = `Saved ${filename}`;
+        } else {
+            processingLabel.textContent = 'Save failed';
+        }
     }
 }
 
