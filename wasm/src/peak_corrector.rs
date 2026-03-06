@@ -113,8 +113,8 @@ impl PeakCorrector {
         // than recovery_rate per block.
         let target_gain = analysis_gain.min(self.required_gain).min(self.current_gain + self.recovery_rate);
 
+        // Fast path: do nothing if the gains are 1.0
         if target_gain != 1.0 || self.current_gain != 1.0 {
-            // Fast path: do nothing
             let step = (target_gain - self.current_gain) / self.block_len as f32;
             let mut gain = self.current_gain;
             // Fast-path for mono and stereo

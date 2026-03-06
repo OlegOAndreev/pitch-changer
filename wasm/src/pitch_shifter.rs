@@ -263,7 +263,7 @@ pub struct MultiPitchShifter {
     corrector: PeakCorrector,
     // Scratch buffers for deinterleaving
     deinterleaved_buf: Vec<f32>,
-    interleaved_buf: Vec<f32>,
+    deinterleaved_output_buf: Vec<f32>,
     output_buf: Vec<f32>,
 }
 
@@ -286,7 +286,7 @@ impl MultiPitchShifter {
             num_channels,
             corrector,
             deinterleaved_buf: vec![],
-            interleaved_buf: vec![],
+            deinterleaved_output_buf: vec![],
             output_buf: vec![],
         })
     }
@@ -332,7 +332,7 @@ impl MultiPitchShifter {
         } else {
             assert!(input.len().is_multiple_of(self.num_channels));
             self.deinterleaved_buf.clear();
-            self.interleaved_buf.clear();
+            self.deinterleaved_output_buf.clear();
 
             let samples_per_channel = input.len() / self.num_channels;
             deinterleave_samples(input, self.num_channels, &mut self.deinterleaved_buf);
@@ -340,10 +340,11 @@ impl MultiPitchShifter {
             for (ch, processor) in self.processors.iter_mut().enumerate() {
                 let channel_start = ch * samples_per_channel;
                 let channel_end = (ch + 1) * samples_per_channel;
-                processor.process(&self.deinterleaved_buf[channel_start..channel_end], &mut self.interleaved_buf);
+                processor
+                    .process(&self.deinterleaved_buf[channel_start..channel_end], &mut self.deinterleaved_output_buf);
             }
 
-            interleave_samples(&self.interleaved_buf, self.num_channels, &mut self.output_buf);
+            interleave_samples(&self.deinterleaved_output_buf, self.num_channels, &mut self.output_buf);
         }
 
         self.corrector.process(&self.output_buf, output);
@@ -355,11 +356,11 @@ impl MultiPitchShifter {
         if self.num_channels == 1 {
             self.processors[0].finish(&mut self.output_buf);
         } else {
-            self.interleaved_buf.clear();
+            self.deinterleaved_output_buf.clear();
             for processor in &mut self.processors {
-                processor.finish(&mut self.interleaved_buf);
+                processor.finish(&mut self.deinterleaved_output_buf);
             }
-            interleave_samples(&self.interleaved_buf, self.num_channels, &mut self.output_buf);
+            interleave_samples(&self.deinterleaved_output_buf, self.num_channels, &mut self.output_buf);
         }
 
         self.corrector.process(&self.output_buf, output);
