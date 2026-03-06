@@ -10,7 +10,7 @@ const RING_BUFFER_CAPACITY = 1 << 18;
 export const recorderProcessorName = 'recorder-processor';
 
 export interface RecorderProcessorOptions {
-    ringBufferSab: SharedArrayBuffer
+    ringBufferSab: SharedArrayBuffer;
 }
 
 let moduleInitialized = false;
@@ -27,7 +27,7 @@ export class Recorder {
     // Workaround for lack of async constructors
     static async create(audioContext: AudioContext): Promise<Recorder> {
         if (!moduleInitialized) {
-            console.log(`Initializing recorder processor module`)
+            console.log(`Initializing recorder processor module`);
             await audioContext.audioWorklet.addModule(recorderProcessor);
             moduleInitialized = true;
         }
@@ -54,10 +54,10 @@ export class Recorder {
         this.ringBuffer = ringBuffer;
 
         const options: RecorderProcessorOptions = {
-            ringBufferSab: ringBuffer.buffer
+            ringBufferSab: ringBuffer.buffer,
         };
         const audioWorkletNode = new AudioWorkletNode(this.audioContext, recorderProcessorName, {
-            processorOptions: options
+            processorOptions: options,
         });
 
         console.log('Requesting microphone access...');
@@ -76,13 +76,13 @@ export class Recorder {
             return {
                 data,
                 sampleRate: this.audioContext.sampleRate,
-                numChannels: 1
+                numChannels: 1,
             };
         } finally {
-            // If we do not disconnect the MediaStreamAudioSourceNode, even if we stop the media stream tracks, it continues
-            // sending data to connected nodes.
+            // If we do not disconnect the MediaStreamAudioSourceNode, even if we stop the media stream tracks, it
+            // continues sending data to connected nodes.
             mediaStreamSourceNode.disconnect();
-            mediaStream.getTracks().forEach(track => track.stop());
+            mediaStream.getTracks().forEach((track) => track.stop());
             // audioWorkletNode.disconnect();
         }
     }
