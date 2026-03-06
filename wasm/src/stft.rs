@@ -79,8 +79,8 @@ impl Stft {
         F: FnMut(&[Complex<f32>], &mut [Complex<f32>]),
     {
         assert_eq!(input.len(), self.fft_size);
-        for i in 0..self.fft_size {
-            self.input_buf[i] = input[i] * self.window[i];
+        for (b, (i, w)) in self.input_buf.iter_mut().zip(input.iter().zip(&self.window)) {
+            *b = *i * *w;
         }
         self.forward_plan
             .process_with_scratch(&mut self.input_buf, &mut self.input_freq_buf, &mut self.scratch_forward)
@@ -91,8 +91,8 @@ impl Stft {
         self.inverse_plan
             .process_with_scratch(&mut self.output_freq_buf, &mut self.output_buf, &mut self.scratch_inverse)
             .expect("failed inverse STFT pass");
-        for i in 0..self.fft_size {
-            self.output_buf[i] *= self.window[i];
+        for (o, w) in self.output_buf.iter_mut().zip(&self.window) {
+            *o *= *w;
         }
 
         &self.output_buf
@@ -123,11 +123,12 @@ impl StftAccumBuf {
     pub(crate) fn add(&mut self, input: &[f32], factor: f32) {
         assert_eq!(input.len(), self.buffer.len());
         let remaining = self.buffer.len() - self.pos;
-        for i in 0..remaining {
-            self.buffer[self.pos + i] += input[i] * factor;
+        for (b, i) in self.buffer[self.pos..self.pos + remaining].iter_mut().zip(input) {
+            *b += *i * factor;
         }
-        for i in remaining..input.len() {
-            self.buffer[i - remaining] += input[i] * factor;
+        let remainder = input.len() - remaining;
+        for (b, i) in self.buffer[0..remainder].iter_mut().zip(&input[remaining..]) {
+            *b += *i * factor;
         }
     }
 
@@ -135,11 +136,12 @@ impl StftAccumBuf {
     pub(crate) fn multiply_next(&mut self, window: &[f32]) {
         assert!(window.len() <= self.buffer.len());
         let first_part = (self.buffer.len() - self.pos).min(window.len());
-        for i in 0..first_part {
-            self.buffer[self.pos + i] *= window[i];
+        for (b, w) in self.buffer[self.pos..self.pos + first_part].iter_mut().zip(window) {
+            *b *= *w;
         }
-        for i in first_part..window.len() {
-            self.buffer[i - first_part] *= window[i];
+        let remainder = window.len() - first_part;
+        for (b, w) in self.buffer[0..remainder].iter_mut().zip(&window[first_part..]) {
+            *b *= *w;
         }
     }
 
