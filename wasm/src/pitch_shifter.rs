@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 
 use crate::envelope_shifter::EnvelopeShifter;
 use crate::peak_corrector::PeakCorrector;
@@ -184,6 +184,10 @@ impl PitchShifter {
     }
 
     fn update_params(&mut self, params: &PitchShiftParams) -> Result<()> {
+        if params.fft_size != self.params.fft_size {
+            bail!("Can't update fft_size parameter");
+        }
+
         Self::validate_params(params)?;
 
         self.params = *params;
@@ -272,6 +276,9 @@ impl MultiPitchShifter {
     #[wasm_bindgen(constructor)]
     /// Create a new multi-channel pitch shifter for given number of channels.
     pub fn new(params: &PitchShiftParams, num_channels: usize) -> std::result::Result<Self, WrapAnyhowError> {
+        if num_channels == 0 {
+            return Err(WrapAnyhowError(anyhow!("num_channels must be positive")));
+        }
         let mut processors = vec![];
         for _ in 0..num_channels {
             processors.push(PitchShifter::new(params).map_err(WrapAnyhowError)?);

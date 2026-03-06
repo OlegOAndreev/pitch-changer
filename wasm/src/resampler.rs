@@ -97,6 +97,7 @@ impl StreamingResampler {
     /// Note: after calling `finish()`, the resampler is reset and ready to process new audio data.
     pub fn finish(&mut self, output: &mut Vec<f32>) {
         if self.previous_input.is_empty() {
+            self.reset();
             return;
         }
         self.resample_previous_chunk(output);

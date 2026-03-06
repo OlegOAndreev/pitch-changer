@@ -76,7 +76,14 @@ impl EnvelopeShifter {
 
         // Find peak in spectral envelope and reduce shifting envelope for bins before it. See EFFICIENT SPECTRAL
         // ENVELOPE ESTIMATION AND ITS APPLICATION TO PITCH SHIFTING AND ENVELOPE PRESERVATION by A. R¨obel and X. Rodet
-        // for explanation.
+        // for explanation:
+        //
+        // > Further inspection of the problem reveals the following issues. The spectral envelope below the fundamental
+        // > partial will generally have a rather steep slope towards 0. Pitch shifting down will therefore attenuate
+        // > the fundamental and create a less complete sound perception. Moreover, due to the fact that the cepstral
+        // > order needs to be adjusted to fit the highest fundamental frequency that is present in the whole signal,
+        // > the formants that may be observed for lower pitched signals will be smoothed such that the sound is
+        // > perceived as dull.
         let peak_bin = (Self::find_peak(&self.new_magnitudes_buf) + 1) * Self::DOWNSAMPLE_BY;
         let start_bin = if self.shift_ratio < 1.0 { (peak_bin as f32 * self.shift_ratio) as usize } else { 1 };
         let upper_bin = num_bins * 3 / 4;
@@ -93,7 +100,7 @@ impl EnvelopeShifter {
         // Introduce envelope shift after start_bin
         for k in start_bin..peak_bin {
             let cur_envelope = cur_sample.sample(&self.new_magnitudes_buf);
-            if cur_envelope > 1e-7 {
+            if cur_envelope > 1e-5 {
                 let shifted_envelope = shifted_sample.sample(&self.new_magnitudes_buf);
                 let alpha = (k - start_bin) as f32 / (peak_bin - start_bin) as f32;
                 let ratio = (shifted_envelope / cur_envelope) * alpha + 1.0 - alpha;
@@ -104,7 +111,7 @@ impl EnvelopeShifter {
         }
         for k in peak_bin..upper_bin {
             let cur_envelope = cur_sample.sample(&self.new_magnitudes_buf);
-            if cur_envelope > 1e-7 {
+            if cur_envelope > 1e-5 {
                 let shifted_envelope = shifted_sample.sample(&self.new_magnitudes_buf);
                 let mut ratio = shifted_envelope / cur_envelope;
                 // Limit the gain for upper parts of spectrum
