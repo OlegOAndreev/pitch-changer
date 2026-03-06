@@ -25,6 +25,7 @@ realfft = { version = "3.5", features = ["wasm_simd"] }
 rubato = "1.0"
 audioadapter = "2.0"
 audioadapter-buffers = "2.0"
+radsort = "0.1"
 
 [dev-dependencies]
 argh = "0.1"

@@ -2,7 +2,7 @@ use std::f32::consts::PI;
 
 use realfft::num_complex::Complex;
 
-use crate::util::{approx_atan2, approx_sincos, normalize_phase, get_disjoint_two_mut};
+use crate::util::{approx_atan2, approx_sincos, get_disjoint_two_mut, normalize_phase};
 
 /// PhaseGradientBin stores all per-bin data for phase gradient time stretching.
 #[derive(Debug, Clone)]
@@ -30,26 +30,32 @@ impl PhaseGradientBin {
     }
 }
 
-// BinWithMagnitude stores bin magnitude + bin index compacted into once i64 value. This allows much faster sorting of
-// bins by magnitude.
+// CompactBin stores bin magnitude + bin index compacted into one u32 value. This allows much faster sorting of bins by
+// magnitude, because sorting takes a large chunk of time of process().
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
-struct BinWithMagnitude {
-    repr: i64,
+struct CompactBin {
+    // Upper bits: bits 15-30 from f32 representation (the f32 should be non-negative, so the sign bit should always be
+    // zero), lower bits: index. This trunctates the lower 15 bits of fraction, but it does not matter much: approximate
+    // order by magnitude is ok.
+    repr: u32,
 }
 
-impl BinWithMagnitude {
+impl CompactBin {
     fn new(index: usize, sqr_magnitude: f32) -> Self {
-        let repr = (sqr_magnitude.to_bits() as i64) << 32 | index as i64;
+        assert!(sqr_magnitude >= 0.0, "Magnitude {} is not positive", sqr_magnitude);
+        // Skip the sign bit as it should always be zero, store the remainder.
+        let magnitude_bits = (sqr_magnitude.to_bits() << 1) & 0xFFFF0000;
+        let repr = magnitude_bits | (index as u32);
         Self { repr }
     }
 
     fn index(&self) -> usize {
-        (self.repr & 0xFFFFFFFF) as usize
+        (self.repr & 0xFFFF) as usize
     }
 
     #[allow(unused)]
     fn sqr_magnitude(&self) -> f32 {
-        f32::from_bits((self.repr >> 32) as u32)
+        f32::from_bits((self.repr & 0xFFFF0000) >> 1)
     }
 }
 
@@ -71,7 +77,7 @@ pub struct PhaseGradientTimeStretch {
     // frame.
     //
     // This results in almost the same phase assignment as the previous algorithm, but is considerably faster.
-    prev_sorted_bins: Vec<BinWithMagnitude>,
+    prev_sorted_bins: Vec<CompactBin>,
 }
 
 // The implementation uses inline(never) in a few places to make profiling easier.
@@ -82,6 +88,8 @@ impl PhaseGradientTimeStretch {
 
     /// Create a new phase gradient time stretcher with given FFT size.
     pub fn new(fft_size: usize) -> Self {
+        assert!(fft_size <= u16::MAX as usize + 1, "FFT size must be at most {}", u16::MAX as usize + 1);
+
         let num_bins = fft_size / 2 + 1;
 
         let bins = vec![PhaseGradientBin::new(); num_bins];
@@ -198,7 +206,7 @@ impl PhaseGradientTimeStretch {
                 // Use approximation instead of ana_freq[k].arg();
                 bin.ana_phase = approx_atan2(ana_freq[k].im, ana_freq[k].re);
                 bin.phase_assigned = false;
-                self.prev_sorted_bins.push(BinWithMagnitude::new(k, bin.prev_sqr_magnitude));
+                self.prev_sorted_bins.push(CompactBin::new(k, bin.prev_sqr_magnitude));
             } else {
                 // The original paper assigns random values to frequencies below the min magnitude, but we simply zero
                 // them out.
@@ -207,7 +215,8 @@ impl PhaseGradientTimeStretch {
                 bin.phase_assigned = true;
             }
         }
-        self.prev_sorted_bins.sort_unstable();
+        radsort::sort_by_key(&mut self.prev_sorted_bins, |bin| bin.repr);
+        // self.prev_sorted_bins.sort_unstable();
 
         min_magn
     }
@@ -281,15 +290,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_phase_gradient_bin_sorting() {
-        // Test sorting of BinWithMagnitude vectors
+    fn test_compact_bin_sorting() {
+        // Test sorting of CompactBin vectors
         let mut bins = vec![
-            BinWithMagnitude::new(0, 1.0),
-            BinWithMagnitude::new(1, 3.0),
-            BinWithMagnitude::new(2, 0.5),
-            BinWithMagnitude::new(3, 2.0),
-            BinWithMagnitude::new(4, 1.5),
-            BinWithMagnitude::new(5, 3.0),
+            CompactBin::new(0, 1.0),
+            CompactBin::new(1, 3.0),
+            CompactBin::new(2, 0.5),
+            CompactBin::new(3, 2.0),
+            CompactBin::new(4, 1.5),
+            CompactBin::new(5, 3.0),
         ];
         bins.sort_unstable();
 
@@ -300,15 +309,76 @@ mod tests {
     }
 
     #[test]
-    fn test_phase_gradient_bin_edge_cases() {
-        // Test with very large magnitude
-        let bin = BinWithMagnitude::new(10, f32::MAX);
-        assert_eq!(bin.sqr_magnitude(), f32::MAX);
+    fn test_compact_bin_edge_cases() {
+        // Test with very large magnitude. Note: we only store top 16 bits of f32 representation, so we lose some
+        // precision
+        let bin = CompactBin::new(10, f32::MAX);
+        // When we reconstruct from 16 bits, we get an approximation
+        let reconstructed = bin.sqr_magnitude();
+        // Check that it's close (we keep top 16 bits of 32-bit float, losing lower 16 bits) The relative error should
+        // be about 2^(-7) = 1/128 ≈ 0.0078 for normalized numbers
+        let expected = f32::MAX;
+        let tolerance = expected * 0.01; // 1% tolerance
+        assert!(
+            (reconstructed - expected).abs() <= tolerance,
+            "reconstructed={}, expected={}, diff={}",
+            reconstructed,
+            expected,
+            (reconstructed - expected).abs()
+        );
         assert_eq!(bin.index(), 10);
 
         // Test with very small magnitude
-        let bin = BinWithMagnitude::new(20, f32::MIN_POSITIVE);
-        assert_eq!(bin.sqr_magnitude(), f32::MIN_POSITIVE);
+        let bin = CompactBin::new(20, f32::MIN_POSITIVE);
+        // For very small values, the top 16 bits might be all zeros
+        let reconstructed = bin.sqr_magnitude();
+        // Check that it's either 0.0 or very close to MIN_POSITIVE
+        if reconstructed != 0.0 {
+            let expected = f32::MIN_POSITIVE;
+            let tolerance = expected * 0.01; // 1% tolerance
+            assert!(
+                (reconstructed - expected).abs() <= tolerance,
+                "reconstructed={}, expected={}, diff={}",
+                reconstructed,
+                expected,
+                (reconstructed - expected).abs()
+            );
+        }
         assert_eq!(bin.index(), 20);
+    }
+
+    #[test]
+    fn test_phase_gradient_bin_sorting_precision() {
+        // Test that sorting works correctly even with 16-bit magnitude precision
+        // Create bins with magnitudes that differ only in lower bits
+        let mut bins = vec![
+            CompactBin::new(0, 1.0),
+            CompactBin::new(1, 1.0 + f32::EPSILON * 1000.0),
+            CompactBin::new(2, 1.0 - f32::EPSILON * 1000.0),
+            CompactBin::new(3, 2.0),
+            CompactBin::new(4, 2.0 + f32::EPSILON * 1000.0),
+        ];
+        bins.sort_unstable();
+
+        // With 16-bit precision, bins with very close magnitudes might get the same compressed representation and sort
+        // by index instead of exact magnitude This is acceptable for the algorithm
+        let indices: Vec<usize> = bins.iter().map(|b| b.index()).collect();
+
+        // Basic checks: bins should be roughly sorted by magnitude. Index 3 (magnitude ~2.0) should come after indices
+        // 0,1,2 (magnitude ~1.0)
+        let pos_of_3 = indices.iter().position(|&i| i == 3).unwrap();
+        let pos_of_0 = indices.iter().position(|&i| i == 0).unwrap();
+        let pos_of_1 = indices.iter().position(|&i| i == 1).unwrap();
+        let pos_of_2 = indices.iter().position(|&i| i == 2).unwrap();
+
+        // Magnitude ~2.0 should come after magnitude ~1.0
+        assert!(pos_of_3 > pos_of_0);
+        assert!(pos_of_3 > pos_of_1);
+        assert!(pos_of_3 > pos_of_2);
+
+        // Index 4 (magnitude ~2.0) should be near index 3
+        let pos_of_4 = indices.iter().position(|&i| i == 4).unwrap();
+        // Should be close to index 3 (both ~2.0 magnitude)
+        assert!((pos_of_4 as isize - pos_of_3 as isize).abs() <= 1);
     }
 }
