@@ -5,7 +5,7 @@ import type { InterleavedAudio } from './types';
 export const recorderProcessorName = 'recorder-processor';
 
 // Message types for communication between Recorder and RecorderProcessor
-export interface AudioDataMessage {
+export interface RecordedSamplesMessage {
     samples: Float32Array;
 }
 
@@ -88,7 +88,7 @@ export class Recorder {
         this.completeRecording();
     }
 
-    private handleMessage = (event: MessageEvent<AudioDataMessage>): void => {
+    private handleMessage = (event: MessageEvent<RecordedSamplesMessage>): void => {
         const message = event.data;
         this.recordedChunks.push(message.samples);
     };

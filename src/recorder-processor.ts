@@ -1,6 +1,6 @@
 // This is a AudioWorklet processor for Recorder.
 
-import { recorderProcessorName, type AudioDataMessage } from './recorder';
+import { recorderProcessorName, type RecordedSamplesMessage } from './recorder';
 
 class RecorderProcessor extends AudioWorkletProcessor {
     private isRecording: boolean = true;
@@ -20,7 +20,7 @@ class RecorderProcessor extends AudioWorkletProcessor {
             const channelData = input[0];
             const audioData = new Float32Array(channelData.length);
             audioData.set(channelData);
-            this.port.postMessage({ samples: audioData } as AudioDataMessage, [audioData.buffer]);
+            this.port.postMessage({ samples: audioData } as RecordedSamplesMessage, [audioData.buffer]);
         }
 
         return true;
