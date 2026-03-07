@@ -1,29 +1,28 @@
 // This is a AudioWorklet processor for Recorder.
 
-import { recorderProcessorName, type RecorderProcessorOptions } from './recorder';
-import { Float32RingBuffer } from './sync';
+import { recorderProcessorName, type AudioDataMessage } from './recorder';
 
 class RecorderProcessor extends AudioWorkletProcessor {
-    private ringBuffer: Float32RingBuffer;
+    private isRecording: boolean = true;
 
-    constructor(options: AudioWorkletNodeOptions) {
+    constructor() {
         super();
-        const ringBufferSab = (options.processorOptions as RecorderProcessorOptions).ringBufferSab;
-        this.ringBuffer = new Float32RingBuffer(ringBufferSab);
     }
 
     process(inputs: Float32Array[][], _outputs: Float32Array[][], _parameters: Record<string, Float32Array>): boolean {
+        if (!this.isRecording) {
+            return false;
+        }
+
         const input = inputs[0];
         if (input && input.length > 0) {
+            // Get the first channel (mono recording)
             const channelData = input[0];
-            const pushed = this.ringBuffer.push(channelData);
-            if (pushed < channelData.length) {
-                if (this.ringBuffer.isClosed) {
-                    return false;
-                }
-                console.warn(`Ring buffer overflow: dropped ${channelData.length - pushed} samples`);
-            }
+            const audioData = new Float32Array(channelData.length);
+            audioData.set(channelData);
+            this.port.postMessage({ samples: audioData } as AudioDataMessage, [audioData.buffer]);
         }
+
         return true;
     }
 }
