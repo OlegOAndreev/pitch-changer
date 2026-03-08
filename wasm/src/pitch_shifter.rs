@@ -260,7 +260,9 @@ impl PitchShifter {
     }
 }
 
-/// Multi-channel pitch shifter that processes interleaved audio data with optional automatic peak correction.
+/// Multi-channel pitch shifter that processes interleaved audio data with optional automatic peak correction. NOTE:
+/// peak correction is the reason why it is useful to process all channels simultaneously: you want to apply the same
+/// gain correction to all channels at once.
 #[wasm_bindgen]
 pub struct MultiPitchShifter {
     processors: Vec<PitchShifter>,
