@@ -1,6 +1,4 @@
-// This is a worker for AudioProcessor
-
-import * as Comlink from 'comlink';
+// This is a worker code for player.ts
 
 import initWasmModule, {
     Float32Vec,
@@ -8,28 +6,61 @@ import initWasmModule, {
     MultiPitchShifter,
     PitchShiftParams,
 } from '../wasm/build/wasm_main_module';
-import type { WorkerApi, WorkerParams } from './audio-processor';
-import { Float32RingBuffer, pushAllRingBuffer } from './sync';
-import type { InterleavedAudio, ProcessingMode } from './types';
+import type { ProcessingMode } from './types';
 
-type Processor = MultiPitchShifter;
+// Message types for communication with the player worker
+export interface WorkerParams {
+    processingMode: ProcessingMode;
+    pitchValue: number;
+    sampleRate: number;
+    numChannels: number;
+    fftSize: number;
+}
 
-class WorkerImpl implements WorkerApi {
-    params: WorkerParams = { processingMode: 'pitch', pitchValue: 1.0 };
-    paramsDirty: boolean = false;
-    currentProcessorMode: ProcessingMode | null = null;
-    processor: Processor | null = null;
-    processorNumChannels: number | null = null;
-    wasmMemory: WebAssembly.Memory | null = null;
+export interface ProcessSamplesMessage {
+    type: 'processSamples';
+    samples: Float32Array;
+}
 
-    async init(): Promise<boolean> {
-        // Initialize WASM module. It must be done in the function, not top-level:
-        // https://github.com/GoogleChromeLabs/comlink/issues/635
+export interface SetParamsMessage {
+    type: 'setParams';
+    params: WorkerParams;
+}
+
+export interface FinishMessage {
+    type: 'finish';
+}
+
+export interface ProcessedSamplesMessage {
+    type: 'processedSamples';
+    samples: Float32Array;
+    finished: boolean;
+}
+
+export type WorkerRequestMessage = SetParamsMessage | ProcessSamplesMessage | FinishMessage;
+
+export type WorkerResponseMessage = ProcessedSamplesMessage;
+
+class AudioProcessorWorker {
+    private params: WorkerParams = {
+        processingMode: 'pitch',
+        pitchValue: 1.0,
+        sampleRate: 44100,
+        numChannels: 1,
+        fftSize: 4096,
+    };
+    private paramsDirty: boolean = false;
+    private processor: MultiPitchShifter | null = null;
+    private processorNumChannels: number | null = null;
+    private inputVec: Float32Vec = new Float32Vec(0);
+    private processedVec: Float32Vec = new Float32Vec(0);
+
+    // Initialize WASM module
+    async init(): Promise<void> {
         const module = await initWasmModule();
-        this.wasmMemory = module.memory;
-        console.log(`Wasm settings: ${get_settings()}`);
-        console.log(`Initial wasm memory size: ${this.wasmMemory.buffer.byteLength}`);
-        return true;
+        const wasmMemory = module.memory;
+        console.debug(`Player worker: Wasm settings: ${get_settings()}`);
+        console.debug(`Player worker: Initial wasm memory size: ${wasmMemory.buffer.byteLength}`);
     }
 
     setParams(newParams: WorkerParams): void {
@@ -37,54 +68,30 @@ class WorkerImpl implements WorkerApi {
         this.paramsDirty = true;
     }
 
-    async process(input: InterleavedAudio, outputSab: SharedArrayBuffer): Promise<void> {
-        const output = new Float32RingBuffer(outputSab);
-        const chunkSize = output.capacity / 4;
-
-        this.paramsDirty = true;
-        // Clean the state if previous process() was aborted.
-        this.getProcessor(input.sampleRate, input.numChannels).reset();
-
-        let inputPos = 0;
-        // Main processing loop.
-        const inputVec = new Float32Vec(0);
-        const processedVec = new Float32Vec(0);
-        try {
-            while (inputPos < input.data.length) {
-                const nextChunkSize = Math.min(chunkSize, input.data.length - inputPos);
-                inputVec.set(input.data.subarray(inputPos, inputPos + nextChunkSize));
-                inputPos += nextChunkSize;
-
-                processedVec.clear();
-                this.getProcessor(input.sampleRate, input.numChannels).process(inputVec, processedVec);
-                // Copy processedVec: if WASM memory gets resized during pushAllRingBuffer, we will get an error with
-                // detached ArrayBuffer.
-                const processedArr = new Float32Array(processedVec.array);
-
-                // console.debug(`Processing chunks of size ${inputVec.len}, num channels ${input.numChannels} with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}`);
-                await pushAllRingBuffer(processedArr, output);
-                if (output.isClosed) {
-                    return;
-                }
-            }
-
-            // Finish processing (get remaining data from processor)
-            processedVec.clear();
-            this.getProcessor(input.sampleRate, input.numChannels).finish(processedVec);
-            const processedArr = new Float32Array(processedVec.array);
-            // console.debug(`Processing final chunk num channels ${input.numChannels} with parameters ${this.params.processingMode}, ${this.params.pitchValue}, got ${processedVec.len}`);
-            await pushAllRingBuffer(processedArr, output);
-        } finally {
-            inputVec.free();
-            processedVec.free();
-            // Always close output so that the other side does not hang forever.
-            output.close();
-        }
-        console.log(`Wasm memory size: ${this.wasmMemory!.buffer.byteLength}`);
+    processSamples(samples: Float32Array): Float32Array {
+        const processor = this.getProcessor();
+        this.inputVec.set(samples);
+        this.processedVec.clear();
+        processor.process(this.inputVec, this.processedVec);
+        // Clone the array: we will transfer the buffer back and allow processedVec to be reused.
+        const result = this.processedVec.array.slice();
+        // console.debug(
+        //     `AudioProcessorWorker: Processed ${samples.length} input samples into ${result.length} output samples`,
+        // );
+        return result;
     }
 
-    private getProcessor(sampleRate: number, numChannels: number): Processor {
-        if (this.processor && this.processorNumChannels === numChannels && !this.paramsDirty) {
+    finish(): Float32Array {
+        const processor = this.getProcessor();
+        this.processedVec.clear();
+        processor.finish(this.processedVec);
+        const result = this.processedVec.array.slice();
+        console.debug(`AudioProcessorWorker: Finished into ${result.length} output samples`);
+        return result;
+    }
+
+    private getProcessor(): MultiPitchShifter {
+        if (this.processor && !this.paramsDirty) {
             return this.processor;
         }
 
@@ -103,30 +110,76 @@ class WorkerImpl implements WorkerApi {
             default:
                 throw new Error(`Unknown processing mode ${this.params.processingMode}`);
         }
-        const params = new PitchShiftParams(sampleRate, pitchShift, timeStretch);
+
+        const params = new PitchShiftParams(this.params.sampleRate, pitchShift, timeStretch);
         try {
             if (this.params.processingMode === 'formant-preserving-pitch') {
                 params.quefrency_cutoff = 1.0;
             }
 
-            if (this.processor && this.processorNumChannels === numChannels) {
-                console.log(`Updating processor parameters to ${params.to_debug_string()}`);
+            if (this.processor && this.processorNumChannels === this.params.numChannels) {
+                console.log(`Player worker: Updating processor parameters to ${params.to_debug_string()}`);
                 this.processor.update_params(params);
             } else {
-                console.log(`Creating new processor with parameters to ${params.to_debug_string()}`);
+                console.log(`Player worker: Creating new processor with parameters ${params.to_debug_string()}`);
                 if (this.processor) {
                     this.processor.free();
                 }
-                this.processor = new MultiPitchShifter(params, numChannels);
+                this.processor = new MultiPitchShifter(params, this.params.numChannels);
             }
         } finally {
             params.free();
         }
-        this.processorNumChannels = numChannels;
+
+        this.processorNumChannels = this.params.numChannels;
         this.paramsDirty = false;
 
         return this.processor!;
     }
 }
 
-Comlink.expose(new WorkerImpl());
+const workerImpl = new AudioProcessorWorker();
+workerImpl.init();
+
+addEventListener('message', async (event: MessageEvent<WorkerRequestMessage>) => {
+    const message = event.data;
+    switch (message.type) {
+        case 'setParams':
+            workerImpl.setParams(message.params);
+            break;
+
+        case 'processSamples': {
+            try {
+                const samples = workerImpl.processSamples(message.samples);
+                const response: ProcessedSamplesMessage = {
+                    type: 'processedSamples',
+                    samples,
+                    finished: false,
+                };
+                self.postMessage(response, { transfer: [samples.buffer] });
+            } catch (error) {
+                console.error('AudioProcessorWorker: failed to process samples:', error);
+            }
+            break;
+        }
+
+        case 'finish': {
+            try {
+                const samples = workerImpl.finish();
+                const response: ProcessedSamplesMessage = {
+                    type: 'processedSamples',
+                    samples,
+                    finished: true,
+                };
+                self.postMessage(response, { transfer: [samples.buffer] });
+            } catch (error) {
+                console.error('AudioProcessorWorker: failed to process samples:', error);
+            }
+            break;
+        }
+
+        default:
+            console.error('Player worker: Unknown message type:', message);
+            break;
+    }
+});
