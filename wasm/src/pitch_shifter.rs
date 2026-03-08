@@ -33,10 +33,6 @@ pub struct PitchShiftParams {
     ///
     /// If the default value of 0.0 is used, no formant preservation is applied.
     pub quefrency_cutoff: f32,
-    /// Peak correction block size
-    pub peak_correction_block_size: usize,
-    /// Peak correction recovery rate per block
-    pub peak_correction_recovery_rate: f32,
 }
 
 #[wasm_bindgen]
@@ -53,8 +49,6 @@ impl PitchShiftParams {
             overlap: stretch_params.overlap,
             window_type: stretch_params.window_type,
             quefrency_cutoff: 0.0,
-            peak_correction_block_size: 128,
-            peak_correction_recovery_rate: 0.01,
         }
     }
 
@@ -184,10 +178,6 @@ impl PitchShifter {
     }
 
     fn update_params(&mut self, params: &PitchShiftParams) -> Result<()> {
-        if params.fft_size != self.params.fft_size {
-            bail!("Can't update fft_size parameter");
-        }
-
         Self::validate_params(params)?;
 
         self.params = *params;
@@ -200,7 +190,18 @@ impl PitchShifter {
         self.envelope_shift_enabled = params.quefrency_cutoff != 0.0;
         let cepstrum_cutoff_samples =
             (params.quefrency_cutoff * params.sample_rate as f32 / (1000.0 * params.pitch_shift)) as usize;
-        self.envelope_shifter.set_params(cepstrum_cutoff_samples, params.pitch_shift);
+        // We either regenerate the enveloper processing or update hte parameters.
+        if params.fft_size != self.params.fft_size {
+            let envelope_fft_size = params.fft_size / 2;
+            self.envelope_hop_size = envelope_fft_size / params.overlap as usize;
+            self.envelope_stft = Stft::new(envelope_fft_size, params.window_type);
+            let envelope_num_bins = envelope_fft_size / 2 + 1;
+            // We normalize the quefrency cutoff by pitch shift because we analyze the pitch shifted spectrum.
+            self.envelope_shifter =
+                EnvelopeShifter::new(envelope_num_bins, cepstrum_cutoff_samples, params.pitch_shift);
+        } else {
+            self.envelope_shifter.update_params(cepstrum_cutoff_samples, params.pitch_shift);
+        }
 
         Ok(())
     }
@@ -284,9 +285,9 @@ impl MultiPitchShifter {
             processors.push(PitchShifter::new(params).map_err(WrapAnyhowError)?);
         }
 
-        let corrector =
-            PeakCorrector::new(params.peak_correction_block_size, params.peak_correction_recovery_rate, num_channels)
-                .map_err(WrapAnyhowError)?;
+        // Choose 4ms for the total delay in peak corrector and allow the gain to return from zero to normal in 400ms.
+        let block_size = params.sample_rate as usize / 500;
+        let corrector = PeakCorrector::new(block_size, 0.005, num_channels).map_err(WrapAnyhowError)?;
 
         Ok(Self {
             processors,
