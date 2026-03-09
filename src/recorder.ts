@@ -88,10 +88,10 @@ export class Recorder {
         this.completeRecording();
     }
 
-    private handleMessage = (event: MessageEvent<RecordedSamplesMessage>): void => {
+    private handleMessage(event: MessageEvent<RecordedSamplesMessage>): void {
         const message = event.data;
         this.recordedChunks.push(message.samples);
-    };
+    }
 
     // Complete the recording and resolve the promise
     private completeRecording(): void {

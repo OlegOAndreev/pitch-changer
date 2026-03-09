@@ -10,7 +10,7 @@ import {
     OutputFormat,
     QUALITY_HIGH,
     WavOutputFormat,
-    type AudioCodec
+    type AudioCodec,
 } from 'mediabunny';
 import type { InterleavedAudio } from './types';
 
@@ -44,11 +44,11 @@ export async function encodeAudioToBlob(fileType: string, audio: InterleavedAudi
 async function encodeAudioToBuffer(
     audio: InterleavedAudio,
     outputFormat: OutputFormat,
-    codec: AudioCodec
+    codec: AudioCodec,
 ): Promise<ArrayBuffer> {
     const output = new Output({
         format: outputFormat,
-        target: new BufferTarget()
+        target: new BufferTarget(),
     });
 
     const numberOfFrames = audio.data.length / audio.numChannels;
@@ -58,13 +58,13 @@ async function encodeAudioToBuffer(
         numberOfChannels: audio.numChannels,
         numberOfFrames: numberOfFrames,
         timestamp: 0,
-        data: audio.data
+        data: audio.data,
     });
 
     try {
         const audioSource = new AudioSampleSource({
             codec: codec,
-            bitrate: QUALITY_HIGH
+            bitrate: QUALITY_HIGH,
         });
 
         output.addAudioTrack(audioSource);
