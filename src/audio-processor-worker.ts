@@ -1,5 +1,4 @@
-// This is a worker code for player.ts
-
+// This is a worker for AudioProcessor, see also AudioProcessorControl
 import initWasmModule, {
     Float32Vec,
     get_settings,
@@ -8,7 +7,7 @@ import initWasmModule, {
 } from '../wasm/build/wasm_main_module';
 import type { ProcessingMode } from './types';
 
-// Message types for communication with the player worker
+// Message types for communication with the AudioProcessor
 export interface WorkerParams {
     processingMode: ProcessingMode;
     pitchValue: number;
@@ -17,9 +16,9 @@ export interface WorkerParams {
     fftSize: number;
 }
 
-export interface ProcessSamplesMessage {
-    type: 'processSamples';
-    samples: Float32Array;
+export interface SetClientPortMessage {
+    type: 'setClientPort';
+    clientPort: MessagePort;
 }
 
 export interface SetParamsMessage {
@@ -27,19 +26,23 @@ export interface SetParamsMessage {
     params: WorkerParams;
 }
 
-export interface FinishMessage {
-    type: 'finish';
+export interface ProcessSamplesRequest {
+    type: 'processSamplesRequest';
+    samples: Float32Array;
 }
 
-export interface ProcessedSamplesMessage {
-    type: 'processedSamples';
+export interface FinishProcessRequest {
+    type: 'finishRequest';
+}
+
+export interface ProcessSamplesResponse {
+    type: 'processSamplesResponse';
     samples: Float32Array;
     finished: boolean;
 }
 
-export type WorkerRequestMessage = SetParamsMessage | ProcessSamplesMessage | FinishMessage;
-
-export type WorkerResponseMessage = ProcessedSamplesMessage;
+type AudioProcessorMessage = SetClientPortMessage | SetParamsMessage;
+type AudioProcessorClientMessage = ProcessSamplesRequest | FinishProcessRequest;
 
 class AudioProcessorWorker {
     private params: WorkerParams = {
@@ -54,6 +57,7 @@ class AudioProcessorWorker {
     private processorNumChannels: number | null = null;
     private inputVec: Float32Vec = new Float32Vec(0);
     private processedVec: Float32Vec = new Float32Vec(0);
+    private clientPort: MessagePort | undefined;
 
     // Initialize WASM module
     async init(): Promise<void> {
@@ -63,12 +67,37 @@ class AudioProcessorWorker {
         console.debug(`Player worker: Initial wasm memory size: ${wasmMemory.buffer.byteLength}`);
     }
 
+    setClientPort(clientPort: MessagePort) {
+        if (this.clientPort) {
+            this.clientPort.close();
+        }
+        this.clientPort = clientPort;
+        // Start the client event loop
+        this.clientPort.onmessage = (event: MessageEvent<AudioProcessorClientMessage>) => this.onMessage(event.data);
+    }
+
     setParams(newParams: WorkerParams): void {
         this.params = newParams;
         this.paramsDirty = true;
     }
 
-    processSamples(samples: Float32Array): Float32Array {
+    private onMessage(message: AudioProcessorClientMessage) {
+        switch (message.type) {
+            case 'processSamplesRequest':
+                this.processSamples(message.samples);
+                break;
+
+            case 'finishRequest':
+                this.finish();
+                break;
+
+            default:
+                console.error('Player worker: Unknown message type:', message);
+                break;
+        }
+    }
+
+    private processSamples(samples: Float32Array) {
         const processor = this.getProcessor();
         this.inputVec.set(samples);
         this.processedVec.clear();
@@ -78,16 +107,16 @@ class AudioProcessorWorker {
         // console.debug(
         //     `AudioProcessorWorker: Processed ${samples.length} input samples into ${result.length} output samples`,
         // );
-        return result;
+        this.sendResult(result, false);
     }
 
-    finish(): Float32Array {
+    private finish() {
         const processor = this.getProcessor();
         this.processedVec.clear();
         processor.finish(this.processedVec);
         const result = this.processedVec.array.slice();
-        console.debug(`AudioProcessorWorker: Finished into ${result.length} output samples`);
-        return result;
+        // console.debug(`AudioProcessorWorker: Finished into ${result.length} output samples`);
+        this.sendResult(result, true);
     }
 
     private getProcessor(): MultiPitchShifter {
@@ -112,6 +141,7 @@ class AudioProcessorWorker {
         }
 
         const params = new PitchShiftParams(this.params.sampleRate, pitchShift, timeStretch);
+        params.fft_size = this.params.fftSize;
         try {
             if (this.params.processingMode === 'formant-preserving-pitch') {
                 params.quefrency_cutoff = 1.0;
@@ -136,50 +166,41 @@ class AudioProcessorWorker {
 
         return this.processor!;
     }
+
+    private sendResult(samples: Float32Array, finished: boolean) {
+        if (!this.clientPort) {
+            throw new Error('Impossible: init should be called before before all other');
+        }
+
+        const response: ProcessSamplesResponse = {
+            type: 'processSamplesResponse',
+            samples,
+            finished,
+        };
+        this.clientPort.postMessage(response, [samples.buffer]);
+    }
 }
 
-const workerImpl = new AudioProcessorWorker();
-workerImpl.init();
+async function init() {
+    const workerImpl = new AudioProcessorWorker();
+    await workerImpl.init();
+    // Start manager event loop
+    onmessage = (event: MessageEvent<AudioProcessorMessage>) => {
+        const message = event.data;
+        switch (message.type) {
+            case 'setClientPort':
+                workerImpl.setClientPort(message.clientPort);
+                break;
 
-addEventListener('message', async (event: MessageEvent<WorkerRequestMessage>) => {
-    const message = event.data;
-    switch (message.type) {
-        case 'setParams':
-            workerImpl.setParams(message.params);
-            break;
+            case 'setParams':
+                workerImpl.setParams(message.params);
+                break;
 
-        case 'processSamples': {
-            try {
-                const samples = workerImpl.processSamples(message.samples);
-                const response: ProcessedSamplesMessage = {
-                    type: 'processedSamples',
-                    samples,
-                    finished: false,
-                };
-                self.postMessage(response, { transfer: [samples.buffer] });
-            } catch (error) {
-                console.error('AudioProcessorWorker: failed to process samples:', error);
-            }
-            break;
+            default:
+                console.error('Player worker: Unknown message type:', message);
+                break;
         }
+    };
+}
 
-        case 'finish': {
-            try {
-                const samples = workerImpl.finish();
-                const response: ProcessedSamplesMessage = {
-                    type: 'processedSamples',
-                    samples,
-                    finished: true,
-                };
-                self.postMessage(response, { transfer: [samples.buffer] });
-            } catch (error) {
-                console.error('AudioProcessorWorker: failed to process samples:', error);
-            }
-            break;
-        }
-
-        default:
-            console.error('Player worker: Unknown message type:', message);
-            break;
-    }
-});
+init();
