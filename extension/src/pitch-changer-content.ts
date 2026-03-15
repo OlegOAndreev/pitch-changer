@@ -139,7 +139,7 @@ function removeWorklet(element: HTMLMediaElement) {
 
 function applyWorkletToChildren(rootNode: Element | Document) {
     const elements = rootNode.querySelectorAll('audio, video');
-    if (elements.length == 0) {
+    if (elements.length === 0) {
         debugLog(`Found no audio/video elements in ${rootNode}`);
         return;
     }
@@ -158,7 +158,7 @@ function applyWorkletToChildren(rootNode: Element | Document) {
 
 function removeWorkletFromChildren(rootNode: Element) {
     const elements = rootNode.querySelectorAll('audio, video');
-    if (elements.length == 0) {
+    if (elements.length === 0) {
         debugLog(`Found no audio/video elements in ${rootNode}`);
         return;
     }
