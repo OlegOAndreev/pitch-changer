@@ -20,7 +20,10 @@ class RecorderProcessor extends AudioWorkletProcessor {
             const channelData = input[0];
             const audioData = new Float32Array(channelData.length);
             audioData.set(channelData);
-            this.port.postMessage({ samples: audioData } as RecordedSamplesMessage, [audioData.buffer]);
+            const message: RecordedSamplesMessage = {
+                samples: audioData,
+            };
+            this.port.postMessage(message, [audioData.buffer]);
         }
 
         return true;

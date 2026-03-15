@@ -60,8 +60,7 @@ export class Recorder {
 
         try {
             this.audioWorkletNode = new AudioWorkletNode(this.audioContext, recorderProcessorName);
-            this.audioWorkletNode.port.addEventListener('message', this.handleMessage);
-            this.audioWorkletNode.port.start();
+            this.audioWorkletNode.port.onmessage = this.onMessage;
 
             console.log('Requesting microphone access...');
             this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -88,7 +87,7 @@ export class Recorder {
         this.completeRecording();
     }
 
-    private handleMessage(event: MessageEvent<RecordedSamplesMessage>): void {
+    private onMessage(event: MessageEvent<RecordedSamplesMessage>): void {
         const message = event.data;
         this.recordedChunks.push(message.samples);
     }
@@ -138,7 +137,6 @@ export class Recorder {
         }
 
         if (this.audioWorkletNode) {
-            this.audioWorkletNode.port.removeEventListener('message', this.handleMessage);
             this.audioWorkletNode.disconnect();
             this.audioWorkletNode = null;
         }
