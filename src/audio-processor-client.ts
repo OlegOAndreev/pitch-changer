@@ -1,7 +1,12 @@
-// AudioProcessorClient allows controlling AudiorProcessorWorker from another Worker/AudioWorklet. It wraps a
+// AudioProcessorClient allows controlling AudioProcessorWorker from another Worker/AudioWorklet. It wraps a
 // MessagePort and provides request/response messaging for sample processing: source sample buffers are transferred from
 // the client to the worker, processed sample buffers are transferred from the worker to the client.
-import type { FinishProcessRequest, ProcessSamplesRequest, ProcessSamplesResponse } from './audio-processor-worker';
+import type {
+    FinishProcessRequest,
+    ProcessSamplesRequest,
+    ProcessSamplesResponse,
+    ResetRequest,
+} from './audio-processor-worker';
 
 export class AudioProcessorClient {
     private port: MessagePort;
@@ -20,6 +25,14 @@ export class AudioProcessorClient {
             }
             this.onProcessedSamples(message.samples, message.finished);
         };
+    }
+
+    // Resets the processor, should be called before processing new audio
+    reset(): void {
+        const message: ResetRequest = {
+            type: 'resetRequest',
+        };
+        this.port.postMessage(message);
     }
 
     // Request processing samples from the worker. The `samples` buffer will be transferred to avoid copying.

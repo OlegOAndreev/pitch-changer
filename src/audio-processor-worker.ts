@@ -26,6 +26,10 @@ export interface SetParamsMessage {
     params: WorkerParams;
 }
 
+export interface ResetRequest {
+    type: 'resetRequest';
+}
+
 export interface ProcessSamplesRequest {
     type: 'processSamplesRequest';
     samples: Float32Array;
@@ -35,14 +39,15 @@ export interface FinishProcessRequest {
     type: 'finishRequest';
 }
 
+// This message is sent in response both to ProcessSamplesRequest and FinishProcessRequest
 export interface ProcessSamplesResponse {
     type: 'processSamplesResponse';
     samples: Float32Array;
     finished: boolean;
 }
 
-type AudioProcessorMessage = SetClientPortMessage | SetParamsMessage;
-type AudioProcessorClientMessage = ProcessSamplesRequest | FinishProcessRequest;
+type AudioProcessorRequest = SetClientPortMessage | SetParamsMessage;
+type AudioProcessorClientRequest = ResetRequest | ProcessSamplesRequest | FinishProcessRequest;
 
 class AudioProcessorWorker {
     private params: WorkerParams = {
@@ -73,7 +78,9 @@ class AudioProcessorWorker {
         }
         this.clientPort = clientPort;
         // Start the client event loop
-        this.clientPort.onmessage = (event: MessageEvent<AudioProcessorClientMessage>) => this.onMessage(event.data);
+        this.clientPort.onmessage = (event: MessageEvent<AudioProcessorClientRequest>) => {
+            this.onMessage(event.data);
+        };
     }
 
     setParams(newParams: WorkerParams): void {
@@ -81,8 +88,12 @@ class AudioProcessorWorker {
         this.paramsDirty = true;
     }
 
-    private onMessage(message: AudioProcessorClientMessage) {
+    private onMessage(message: AudioProcessorClientRequest) {
         switch (message.type) {
+            case 'resetRequest':
+                this.reset();
+                break;
+
             case 'processSamplesRequest':
                 this.processSamples(message.samples);
                 break;
@@ -95,6 +106,11 @@ class AudioProcessorWorker {
                 console.error('Player worker: Unknown message type:', message);
                 break;
         }
+    }
+
+    private reset() {
+        const processor = this.getProcessor();
+        processor.reset();
     }
 
     private processSamples(samples: Float32Array) {
@@ -185,7 +201,7 @@ async function init() {
     const workerImpl = new AudioProcessorWorker();
     await workerImpl.init();
     // Start manager event loop
-    onmessage = (event: MessageEvent<AudioProcessorMessage>) => {
+    onmessage = (event: MessageEvent<AudioProcessorRequest>) => {
         const message = event.data;
         switch (message.type) {
             case 'setClientPort':
