@@ -125,8 +125,9 @@ export class Player {
 
         this.workletNode.connect(this.audioContext.destination);
 
-        const { promise, resolve } = Promise.withResolvers<void>();
-        this.playResolve = resolve;
+        const promise = new Promise<void>((res) => {
+            this.playResolve = res;
+        });
         try {
             await promise;
         } finally {
@@ -150,8 +151,11 @@ export class Player {
             };
         }
 
-        const { promise, resolve } = Promise.withResolvers<PlayerStats>();
-        this.latestSamplesResolves.push(resolve);
+        let resolve: (value: PlayerStats) => void;
+        const promise = new Promise<PlayerStats>((res) => {
+            resolve = res;
+        });
+        this.latestSamplesResolves.push(resolve!);
 
         const message: PlayerGetStatsMessage = {
             type: 'getLatestSamples',

@@ -49,9 +49,10 @@ export class Recorder {
         // Reset state
         this.recordedChunks = [];
 
-        const { promise, resolve, reject } = Promise.withResolvers<InterleavedAudio>();
-        this.resolveRecording = resolve;
-        this.rejectRecording = reject;
+        const promise = new Promise<InterleavedAudio>((res, rej) => {
+            this.resolveRecording = res;
+            this.rejectRecording = rej;
+        });
 
         try {
             this.audioWorkletNode = new AudioWorkletNode(this.audioContext, recorderProcessorName);

@@ -124,7 +124,10 @@ describe('debounce', () => {
     test('new call during async execution does not hang', async () => {
         // Simulate an async callback that takes time to complete. A new debounced call arrives while the first callback
         // is still running. Both promises must settle (not hang forever).
-        const { promise, resolve } = Promise.withResolvers<void>();
+        let resolve;
+        const promise = new Promise<void>((res) => {
+            resolve = res;
+        });
         let callCount = 0;
         const debounced = debounce(100, async () => {
             callCount++;
@@ -142,7 +145,7 @@ describe('debounce', () => {
         vi.advanceTimersByTime(100);
 
         // Resolve the first async callback
-        resolve();
+        resolve!();
 
         // Both promises should resolve without hanging
         await expect(p1).resolves.toBeUndefined();

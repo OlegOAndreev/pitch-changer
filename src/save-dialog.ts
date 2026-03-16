@@ -66,8 +66,9 @@ export async function showSaveDialog(): Promise<[string | null, FileSystemFileHa
         saveDialogOverlay.style.display = 'flex';
         saveInput.focus();
         saveInput.select();
-        const { promise, resolve } = Promise.withResolvers<[string | null, FileSystemFileHandle | null]>();
-        saveDialogResolve = (filename) => resolve([filename, null]);
+        const promise = new Promise<[string | null, FileSystemFileHandle | null]>((res) => {
+            saveDialogResolve = (filename) => res([filename, null]);
+        });
         return promise;
     }
 }

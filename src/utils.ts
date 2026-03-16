@@ -19,14 +19,19 @@ export function debounce<T extends unknown[]>(
     // If curTimer is not undefined, the function is scheduled to be called.
     let curTimer: ReturnType<typeof setTimeout> | undefined;
     // We store the list of all resolves/rejects.
-    let curResolves: ((value: void | PromiseLike<void>) => void)[] = [];
+    let curResolves: ((value: void) => void)[] = [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let curRejects: ((reason?: any) => void)[] = [];
 
     return (...args: T): Promise<void> => {
-        const { promise, resolve, reject } = Promise.withResolvers<void>();
-        curResolves.push(resolve);
-        curRejects.push(reject);
+        let resolve: (value: void) => void;
+        let reject: (reason?: unknown) => void;
+        const promise = new Promise<void>((res, rej) => {
+            resolve = res;
+            reject = rej;
+        });
+        curResolves.push(resolve!);
+        curRejects.push(reject!);
         if (curTimer) {
             clearTimeout(curTimer);
         }
@@ -93,7 +98,10 @@ export function secondsToString(sec: number): string {
 
 // Return a promise which resolves in delay milliseconds.
 export async function sleep(delay: number): Promise<void> {
-    const { promise, resolve } = Promise.withResolvers<void>();
+    let resolve: (value?: void) => void;
+    const promise = new Promise<void>((res) => {
+        resolve = res;
+    });
     setTimeout(() => resolve(), delay);
     return promise;
 }

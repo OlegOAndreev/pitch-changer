@@ -26,7 +26,10 @@ export class AudioProcessorManager {
             console.error('AudioProcessorManager: Worker error:', error);
         };
 
-        const { promise, resolve } = Promise.withResolvers<void>();
+        let resolve: (value?: void) => void;
+        const promise = new Promise<void>((res) => {
+            resolve = res;
+        });
         this.worker.onmessage = (event: MessageEvent<AudioProcessorResponse>) => {
             const message = event.data;
             // We can get only one message type from worker.
@@ -83,7 +86,10 @@ export class AudioProcessorManager {
     // A helper which processes the data all at once.
     async processAudio(data: Float32Array): Promise<Float32Array> {
         const chunks: Float32Array[] = [];
-        const { promise, resolve } = Promise.withResolvers<Float32Array>();
+        let resolve: (value: Float32Array) => void;
+        const promise = new Promise<Float32Array>((res) => {
+            resolve = res;
+        });
 
         const port = this.createClientPort();
         const client = new AudioProcessorClient(port, (samples, finished) => {
