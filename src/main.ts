@@ -1,15 +1,14 @@
 import initWasmModule, { get_settings } from '../wasm/build/wasm_main_module';
-import { AudioProcessor } from './audio-processor';
 import { decodeAudioFromBlob } from './media-decoder';
 import { encodeAudioToBlob } from './media-encoder';
 import { Player } from './player';
 import { Recorder } from './recorder';
 import { saveFile, showSaveDialog } from './save-dialog';
 import { Spectrogram } from './spectrogram';
-import { drainRingBuffer, Float32RingBuffer } from './sync';
 import { getAudioLength, getAudioSeconds, type InterleavedAudio, type ProcessingMode } from './types';
 import { debounce, getById, secondsToString, sleep, withButtonsDisabled } from './utils';
 import { runBenchmark, type BenchmarkResults } from './benchmark';
+import { AudioProcessorManager } from './audio-processor';
 
 const MAX_PITCH_VALUE = 2.0;
 const MIN_PITCH_VALUE = 0.5;
@@ -20,6 +19,9 @@ const DEFAULT_PROCESSING_MODE = 'pitch';
 const SAVE_SETTINGS_DEBOUNCE = 500;
 
 const SETTINGS_KEY = 'pitch-changer-settings';
+
+// We will probably make this configurable in the future with 'quality' param
+const FFT_SIZE = 4096;
 
 //
 // Global app state
@@ -34,7 +36,6 @@ interface AppSettings {
 class AppState {
     // Audio data
     sourceAudio: InterleavedAudio | null = null;
-    processor: AudioProcessor = new AudioProcessor();
     spectrogram: Spectrogram | null = null;
     benchmarkTimes: BenchmarkResults | null = null;
 
@@ -48,11 +49,6 @@ class AppState {
 
     constructor() {
         this.settings = this.loadSettings();
-    }
-
-    async initProcessor(): Promise<void> {
-        await this.processor.init();
-        this.processor.setParams(this.settings.processingMode, this.settings.pitchValue);
     }
 
     private loadSettings(): AppSettings {
@@ -71,9 +67,10 @@ class AppState {
         return settings;
     }
 
-    updateSettings() {
+    async updateSettings() {
         this.saveSettings();
-        this.processor.setParams(this.settings.processingMode, this.settings.pitchValue);
+        const player = await this.getPlayer();
+        player.setParams(this.settings.processingMode, this.settings.pitchValue);
     }
 
     private saveSettings = debounce(SAVE_SETTINGS_DEBOUNCE, () => {
@@ -102,7 +99,7 @@ class AppState {
 
     async getPlayer(): Promise<Player> {
         if (!this.player) {
-            this.player = Player.create(this.getAudioContext());
+            this.player = Player.create(this.getAudioContext(), FFT_SIZE);
         }
         try {
             return await this.player;
@@ -227,41 +224,32 @@ async function runPlay(player: Player): Promise<void> {
 
     const sampleRate = appState.sourceAudio!.sampleRate;
     const numChannels = appState.sourceAudio!.numChannels;
-    // Use smaller ring buffer of 0.5s. This means we react faster to changes in ratio or processing mode.
-    const bufferSize = (sampleRate * numChannels) / 2;
 
-    console.log(`Start playing audio with buffer size ${bufferSize}`);
-    const buffer = Float32RingBuffer.withCapacity(bufferSize);
+    console.log(`Start playing audio with sample rate ${sampleRate}Hz, ${numChannels} channels`);
 
-    // Synchronization for playing is rather complicated:
-    //   1. Start the processor
-    //   2. Wait until the buffer is at least partially filled to prevent underruns
-    //   3. Only after that start playing audio
-    //   4. If all source data is processed, AudioProcessor closes the buffer
-    //   5. If a user clicks the stop button, Player closes the buffer
-    //   6. The Player promise completes once the AudioWorklet signals it has processed all data from the ring buffer
-    const processPromise = appState.processor.process(appState.sourceAudio!, buffer);
-    await buffer.waitPopAsync(bufferSize / 2);
-    const playerPromise = player.play(buffer, numChannels);
+    // Set player parameters before playing
+    player.setParams(appState.settings.processingMode, appState.settings.pitchValue);
 
-    const spectrogramTimer = setInterval(() => {
-        const latestData = player.getLatestSamples(appState.spectrogram!.getSamples(), numChannels);
-        appState.spectrogram!.draw(latestData, numChannels, sampleRate);
+    const playerPromise = player.play(appState.sourceAudio!);
+
+    const spectrogramTimer = setInterval(async () => {
+        try {
+            const latestData = await player.getLatestSamples(appState.spectrogram!.getSamples());
+            appState.spectrogram!.draw(latestData, numChannels, sampleRate);
+        } catch (error) {
+            console.error('Error getting latest samples:', error);
+        }
     }, SPECTROGRAM_INTERVAL);
 
-    // We do not need to wait for this promise, but let's do it for symmetry.
-    await processPromise;
     await playerPromise;
 
     clearInterval(spectrogramTimer);
     appState.spectrogram!.clear();
-
-    console.log('Stopped playing audio');
 }
 
 async function handlePlayClick(): Promise<void> {
     const player = await appState.getPlayer();
-    if (!player.isPlaying) {
+    if (!player.playing) {
         if (!appState.sourceAudio) {
             console.error('Error: no audio data to play');
             return;
@@ -316,22 +304,20 @@ async function handleFileInputChange(file: File): Promise<void> {
 }
 
 async function processAllAudio(): Promise<InterleavedAudio> {
-    // This is a background task, use larger buffers.
-    const BUFFER_SIZE = 1024 * 1024;
     const startTime = performance.now();
-
-    const output = Float32RingBuffer.withCapacity(BUFFER_SIZE);
-    const processPromise = appState.processor.process(appState.sourceAudio!, output);
-    const drainPromise = drainRingBuffer(output);
-
-    await processPromise;
-    //  processor.process() closes the output and forces drainRingBuffer completion.
-    const data = await drainPromise;
-
-    const deltaTime = performance.now() - startTime;
-    console.log(`Process all audio, got ${data.length} samples in ${deltaTime}ms`);
+    const manager = await AudioProcessorManager.create();
+    manager.setParams(
+        appState.settings.processingMode,
+        appState.settings.pitchValue,
+        appState.sourceAudio!.sampleRate,
+        appState.sourceAudio!.numChannels,
+        FFT_SIZE,
+    );
+    const processedData = await manager.processAudio(appState.sourceAudio!.data);
+    const endTime = performance.now();
+    console.log(`Processed ${getAudioSeconds(appState.sourceAudio!)}s of audio in ${endTime - startTime}ms`);
     return {
-        data,
+        data: processedData,
         sampleRate: appState.sourceAudio!.sampleRate,
         numChannels: appState.sourceAudio!.numChannels,
     };
@@ -476,7 +462,6 @@ async function init() {
     };
 
     await initWasmModule();
-    await appState.initProcessor();
 
     applySettingsToUI(appState.settings);
     appState.spectrogram = new Spectrogram(spectrogramCanvas);

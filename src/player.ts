@@ -1,101 +1,204 @@
-import playerProcessor from './player-processor.ts?worker&url';
+// Player starts a Worker for processing audio samples and an AudioWorklet for playing them.
+//   1. Player starts an AudioProcessorWorker in the constructor
+//   2. On play() the Player copies the data into PlayerProcessor
+//   3. The PlayerProcessor keeps a buffer of processed audio and requests new data from the worker via clientPort
+//
+// Why we use this design:
+//   * we can't share data because we want to support non-cross-origin-isolated environments
+//   * we can't transfer the source buffer away permanently because the user might click Save after Play
+//   * we want low-latency processing and immediate parameter updates
+//   * audio thread must not depend on UI thread scheduling
 
-import { CountDownLatch, Float32RingBuffer } from './sync';
+import { AudioProcessorManager } from './audio-processor';
+import {
+    playerProcessorName,
+    type PlayerProcessorOptions,
+    type PlayerResponse,
+    type PlayerInitMessage,
+    type GetLatestSamplesMessage,
+    type PlayerStopMessage,
+} from './player-types';
 
-// Exported only for player-processor.ts
-export const playerProcessorName = 'player-processor';
+import playerProcessorModule from './player-processor.ts?worker&url';
+import type { InterleavedAudio, ProcessingMode } from './types';
 
-// Options for configuring the player audio worklet processor
-export interface PlayerProcessorOptions {
-    ringBufferSab: SharedArrayBuffer;
-    latchSab: SharedArrayBuffer;
-    numChannels: number;
-}
-
-let moduleInitialized = false;
-
-// Player for streaming interleaved audio through AudioWorklet
 export class Player {
-    readonly audioContext: AudioContext;
-    private ringBuffer: Float32RingBuffer | null = null;
-    private stoppedLatch: CountDownLatch | null = null;
+    private readonly audioContext: AudioContext;
+    private readonly processorManager: AudioProcessorManager;
 
-    private constructor(audioContext: AudioContext) {
+    private processingMode: ProcessingMode = 'pitch';
+    private pitchValue = 1.0;
+    private fftSize: number;
+
+    private isPlaying = false;
+
+    private inputNumChannels = 1;
+
+    private workletNode: AudioWorkletNode | null = null;
+
+    private playResolve: ((value?: void) => void) | null = null;
+    private latestSamplesResolves: Array<(samples: Float32Array) => void> = [];
+
+    private constructor(audioContext: AudioContext, processorManager: AudioProcessorManager, fftSize: number) {
         this.audioContext = audioContext;
+        this.processorManager = processorManager;
+        this.fftSize = fftSize;
     }
 
-    // Workaround for lack of async constructors
-    static async create(audioContext: AudioContext): Promise<Player> {
-        if (!moduleInitialized) {
-            console.log(`Initializing processor player module`);
-            await audioContext.audioWorklet.addModule(playerProcessor);
-            moduleInitialized = true;
-        }
-        return new Player(audioContext);
+    // Workaround for lack of async constructors.
+    static async create(audioContext: AudioContext, fftSize: number): Promise<Player> {
+        console.log('Initializing player processor module');
+        await audioContext.audioWorklet.addModule(playerProcessorModule);
+        const processorManager = await AudioProcessorManager.create();
+        return new Player(audioContext, processorManager, fftSize);
     }
 
-    // Return true if playing is in progress.
-    get isPlaying(): boolean {
-        return this.ringBuffer != null;
+    get playing(): boolean {
+        return this.isPlaying;
     }
 
-    // Play interleaved data form ring buffer. When the promise completes, playing has completed. The method completes
-    // when either the buffer becomes closed or stoppedLatch is count down.
-    //
-    // Note: Player expectes ringBuffer to contain data in sample rate of AudioContext passed to constructor.
-    async play(ringBuffer: Float32RingBuffer, numChannels: number): Promise<void> {
-        if (this.isPlaying) {
+    setParams(processingMode: ProcessingMode, pitchValue: number): void {
+        this.processingMode = processingMode;
+        this.pitchValue = pitchValue;
+
+        if (!this.isPlaying) {
             return;
         }
 
-        this.ringBuffer = ringBuffer;
-        // At least Chrome requires this check
+        this.processorManager.setParams(
+            this.processingMode,
+            this.pitchValue,
+            this.audioContext.sampleRate,
+            this.inputNumChannels,
+            this.fftSize,
+        );
+    }
+
+    async play(input: InterleavedAudio): Promise<void> {
         if (this.audioContext.state === 'suspended') {
             await this.audioContext.resume();
         }
 
-        this.stoppedLatch = CountDownLatch.withCount(1);
-        const options: PlayerProcessorOptions = {
-            ringBufferSab: ringBuffer.buffer,
-            latchSab: this.stoppedLatch.buffer,
-            numChannels: numChannels,
-        };
-        const workletNode = new AudioWorkletNode(this.audioContext, playerProcessorName, {
-            processorOptions: options,
-            outputChannelCount: [numChannels],
-        });
-        workletNode.connect(this.audioContext.destination);
-
-        try {
-            // The latch is triggered either by PlayerProcessor or stop() method.
-            await this.stoppedLatch.waitAsync();
-        } finally {
-            workletNode.disconnect();
-            this.ringBuffer = null;
-            this.stoppedLatch = null;
-        }
-    }
-
-    // Stop the playback, forcing the current record() call to complete.
-    stop() {
-        if (!this.isPlaying) {
-            console.log('Player is already stopped');
+        if (this.isPlaying) {
+            console.error('play() called while playing');
             return;
         }
-        this.ringBuffer!.close();
-        this.stoppedLatch!.countDown();
+
+        this.isPlaying = true;
+        this.inputNumChannels = input.numChannels;
+
+        this.processorManager.setParams(
+            this.processingMode,
+            this.pitchValue,
+            this.audioContext.sampleRate,
+            this.inputNumChannels,
+            this.fftSize,
+        );
+
+        // We create a new port for new worklet
+        const clientPort = this.processorManager.createClientPort();
+
+        const options: PlayerProcessorOptions = {
+            numChannels: this.inputNumChannels,
+            sampleRate: this.audioContext.sampleRate,
+            bufferSamples: this.fftSize,
+        };
+
+        this.workletNode = new AudioWorkletNode(this.audioContext, playerProcessorName, {
+            processorOptions: options,
+            outputChannelCount: [this.inputNumChannels],
+        });
+
+        this.workletNode.port.onmessage = (event: MessageEvent<PlayerResponse>) => {
+            this.onWorkletMessage(event);
+        };
+
+        const initMessage: PlayerInitMessage = {
+            type: 'init',
+            input: input.data,
+            clientPort,
+        };
+        this.workletNode.port.postMessage(initMessage, [clientPort]);
+
+        this.workletNode.connect(this.audioContext.destination);
+
+        const { promise, resolve } = Promise.withResolvers<void>();
+        this.playResolve = resolve;
+        try {
+            await promise;
+        } finally {
+            this.cleanup();
+        }
     }
 
-    // Get the latest played audio samples from the player processor.
-    getLatestSamples(numSamples: number, numChannels: number): Float32Array {
-        if (!this.isPlaying) {
+    stop(): void {
+        if (!this.isPlaying || !this.workletNode) {
+            return;
+        }
+
+        this.finishPlay();
+    }
+
+    async getLatestSamples(numSamples: number): Promise<Float32Array> {
+        if (!this.isPlaying || !this.workletNode) {
             return new Float32Array(0);
         }
 
-        // This is inherently racy operation, but the probability of concurrent update is very low for sufficiently
-        // large buffer sizes.
-        const result = new Float32Array(numSamples * numChannels);
-        this.ringBuffer!.peek(result);
-        return result;
+        const { promise, resolve } = Promise.withResolvers<Float32Array>();
+        this.latestSamplesResolves.push(resolve);
+
+        const message: GetLatestSamplesMessage = {
+            type: 'getLatestSamples',
+            numSamples: numSamples,
+        };
+        this.workletNode.port.postMessage(message);
+
+        return promise;
+    }
+
+    private onWorkletMessage(event: MessageEvent<PlayerResponse>): void {
+        const message = event.data;
+
+        switch (message.type) {
+            case 'latestSamples':
+                while (this.latestSamplesResolves.length > 0) {
+                    const resolve = this.latestSamplesResolves.pop();
+                    resolve!(message.samples);
+                }
+                break;
+            case 'playbackFinished':
+                this.finishPlay();
+                break;
+        }
+    }
+
+    private finishPlay(): void {
+        if (this.playResolve) {
+            this.playResolve();
+        } else {
+            throw new Error('Impossible: playback finished without set futures');
+        }
+        this.playResolve = null;
+    }
+
+    private cleanup(): void {
+        if (this.workletNode) {
+            const stopMessage: PlayerStopMessage = {
+                type: 'stop',
+            };
+            this.workletNode.port.postMessage(stopMessage);
+            this.workletNode.port.close();
+            this.workletNode.disconnect();
+            this.workletNode = null;
+        }
+        this.isPlaying = false;
+
+        // Reject any pending getLatestSamples promises
+        while (this.latestSamplesResolves.length > 0) {
+            const resolve = this.latestSamplesResolves.shift();
+            if (resolve) {
+                resolve(new Float32Array(0));
+            }
+        }
     }
 }
