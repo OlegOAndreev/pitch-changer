@@ -6,7 +6,7 @@ import type {
     ProcessSamplesRequest,
     ProcessSamplesResponse,
     ResetRequest,
-} from './audio-processor-worker';
+} from './audio-processor-types';
 
 export class AudioProcessorClient {
     private port: MessagePort;
@@ -41,7 +41,7 @@ export class AudioProcessorClient {
             type: 'processSamplesRequest',
             samples,
         };
-        this.port.postMessage(message, [samples]);
+        this.port.postMessage(message, [samples.buffer]);
     }
 
     // Complete processing, previously sent samples will be flushed.

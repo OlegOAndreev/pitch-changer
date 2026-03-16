@@ -5,49 +5,13 @@ import initWasmModule, {
     MultiPitchShifter,
     PitchShiftParams,
 } from '../wasm/build/wasm_main_module';
-import type { ProcessingMode } from './types';
-
-// Message types for communication with the AudioProcessor
-export interface WorkerParams {
-    processingMode: ProcessingMode;
-    pitchValue: number;
-    sampleRate: number;
-    numChannels: number;
-    fftSize: number;
-}
-
-export interface SetClientPortMessage {
-    type: 'setClientPort';
-    clientPort: MessagePort;
-}
-
-export interface SetParamsMessage {
-    type: 'setParams';
-    params: WorkerParams;
-}
-
-export interface ResetRequest {
-    type: 'resetRequest';
-}
-
-export interface ProcessSamplesRequest {
-    type: 'processSamplesRequest';
-    samples: Float32Array;
-}
-
-export interface FinishProcessRequest {
-    type: 'finishRequest';
-}
-
-// This message is sent in response both to ProcessSamplesRequest and FinishProcessRequest
-export interface ProcessSamplesResponse {
-    type: 'processSamplesResponse';
-    samples: Float32Array;
-    finished: boolean;
-}
-
-type AudioProcessorRequest = SetClientPortMessage | SetParamsMessage;
-type AudioProcessorClientRequest = ResetRequest | ProcessSamplesRequest | FinishProcessRequest;
+import type {
+    AudioProcessorClientRequest,
+    AudioProcessorRequest,
+    ProcessSamplesResponse,
+    WorkerInitResponse,
+    WorkerParams,
+} from './audio-processor-types';
 
 class AudioProcessorWorker {
     private params: WorkerParams = {
@@ -57,33 +21,53 @@ class AudioProcessorWorker {
         numChannels: 1,
         fftSize: 4096,
     };
-    private paramsDirty: boolean = false;
-    private processor: MultiPitchShifter | null = null;
-    private processorNumChannels: number | null = null;
-    private inputVec: Float32Vec = new Float32Vec(0);
-    private processedVec: Float32Vec = new Float32Vec(0);
+    private workerInit = false;
+    private paramsDirty = false;
+    private processor: MultiPitchShifter | undefined;
+    private processorNumChannels: number | undefined;
+    private inputVec: Float32Vec | undefined;
+    private processedVec: Float32Vec | undefined;
     private clientPort: MessagePort | undefined;
 
-    // Initialize WASM module
-    async init(): Promise<void> {
+    // Worker requires a separate message for async initialization, we can't use top-level await for initialization,
+    // otherwise the messages get dropped:
+    // https://stackoverflow.com/questions/34409254/are-messages-sent-via-worker-postmessage-queued
+    // https://github.com/GoogleChromeLabs/comlink/issues/635
+    async init() {
         const module = await initWasmModule();
         const wasmMemory = module.memory;
-        console.debug(`Player worker: Wasm settings: ${get_settings()}`);
-        console.debug(`Player worker: Initial wasm memory size: ${wasmMemory.buffer.byteLength}`);
+        console.debug(`AudioProcessorWorker: Wasm settings: ${get_settings()}`);
+        console.debug(`AudioProcessorWorker: Initial wasm memory size: ${wasmMemory.buffer.byteLength}`);
+
+        this.workerInit = true;
+
+        const message: WorkerInitResponse = {
+            type: 'initDone',
+        };
+        postMessage(message);
     }
 
     setClientPort(clientPort: MessagePort) {
+        if (!this.workerInit) {
+            throw new Error('Worker not initialized before calling methods');
+        }
+
         if (this.clientPort) {
             this.clientPort.close();
         }
         this.clientPort = clientPort;
         // Start the client event loop
+        console.log(`Starting client loop`);
         this.clientPort.onmessage = (event: MessageEvent<AudioProcessorClientRequest>) => {
             this.onMessage(event.data);
         };
     }
 
     setParams(newParams: WorkerParams): void {
+        if (!this.workerInit) {
+            throw new Error('Worker not initialized before calling methods');
+        }
+
         this.params = newParams;
         this.paramsDirty = true;
     }
@@ -109,16 +93,31 @@ class AudioProcessorWorker {
     }
 
     private reset() {
+        if (!this.workerInit) {
+            throw new Error('Worker not initialized before calling methods');
+        }
+
         const processor = this.getProcessor();
         processor.reset();
     }
 
     private processSamples(samples: Float32Array) {
-        const processor = this.getProcessor();
+        if (!this.workerInit) {
+            throw new Error('Worker not initialized before calling methods');
+        }
+
+        if (!this.inputVec) {
+            this.inputVec = new Float32Vec(0);
+        }
         this.inputVec.set(samples);
+        if (!this.processedVec) {
+            this.processedVec = new Float32Vec(0);
+        }
         this.processedVec.clear();
+
+        const processor = this.getProcessor();
         processor.process(this.inputVec, this.processedVec);
-        // Clone the array: we will transfer the buffer back and allow processedVec to be reused.
+        // Clone the array: we will transfer the buffer back to the client and allow processedVec to be reused.
         const result = this.processedVec.array.slice();
         // console.debug(
         //     `AudioProcessorWorker: Processed ${samples.length} input samples into ${result.length} output samples`,
@@ -127,8 +126,16 @@ class AudioProcessorWorker {
     }
 
     private finish() {
-        const processor = this.getProcessor();
+        if (!this.workerInit) {
+            throw new Error('Worker not initialized before calling methods');
+        }
+
+        if (!this.processedVec) {
+            this.processedVec = new Float32Vec(0);
+        }
         this.processedVec.clear();
+
+        const processor = this.getProcessor();
         processor.finish(this.processedVec);
         const result = this.processedVec.array.slice();
         // console.debug(`AudioProcessorWorker: Finished into ${result.length} output samples`);
@@ -197,13 +204,16 @@ class AudioProcessorWorker {
     }
 }
 
-async function init() {
+function init() {
     const workerImpl = new AudioProcessorWorker();
-    await workerImpl.init();
     // Start manager event loop
     onmessage = (event: MessageEvent<AudioProcessorRequest>) => {
         const message = event.data;
         switch (message.type) {
+            case 'init':
+                workerImpl.init();
+                break;
+
             case 'setClientPort':
                 workerImpl.setClientPort(message.clientPort);
                 break;
