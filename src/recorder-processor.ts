@@ -1,6 +1,6 @@
 // This is a AudioWorklet processor for Recorder.
 
-import { recorderProcessorName, type RecordedSamplesMessage } from './recorder';
+import { recorderProcessorName, type RecordedSamplesMessage } from './recorder-types';
 
 class RecorderProcessor extends AudioWorkletProcessor {
     private isRecording: boolean = true;

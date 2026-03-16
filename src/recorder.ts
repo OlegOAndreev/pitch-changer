@@ -1,13 +1,7 @@
 import recorderProcessor from './recorder-processor.ts?worker&url';
+import { recorderProcessorName, type RecordedSamplesMessage } from './recorder-types';
 import type { InterleavedAudio } from './types';
-
-// Exported only for recorder-processor.ts
-export const recorderProcessorName = 'recorder-processor';
-
-// Message types for communication between Recorder and RecorderProcessor
-export interface RecordedSamplesMessage {
-    samples: Float32Array;
-}
+import { concatArrays } from './utils';
 
 let moduleInitialized = false;
 
@@ -60,7 +54,9 @@ export class Recorder {
 
         try {
             this.audioWorkletNode = new AudioWorkletNode(this.audioContext, recorderProcessorName);
-            this.audioWorkletNode.port.onmessage = this.onMessage;
+            this.audioWorkletNode.port.onmessage = (event: MessageEvent<RecordedSamplesMessage>) => {
+                this.recordedChunks.push(event.data.samples);
+            };
 
             console.log('Requesting microphone access...');
             this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -87,11 +83,6 @@ export class Recorder {
         this.completeRecording();
     }
 
-    private onMessage(event: MessageEvent<RecordedSamplesMessage>): void {
-        const message = event.data;
-        this.recordedChunks.push(message.samples);
-    }
-
     // Complete the recording and resolve the promise
     private completeRecording(): void {
         if (!this.resolveRecording) {
@@ -99,15 +90,7 @@ export class Recorder {
         }
 
         try {
-            // Concatenate all recorded chunks into a single Float32Array
-            const totalLength = this.recordedChunks.reduce((sum, chunk) => sum + chunk.length, 0);
-            const combinedData = new Float32Array(totalLength);
-            let offset = 0;
-            for (const chunk of this.recordedChunks) {
-                combinedData.set(chunk, offset);
-                offset += chunk.length;
-            }
-
+            const combinedData = concatArrays(this.recordedChunks);
             const audio: InterleavedAudio = {
                 data: combinedData,
                 sampleRate: this.audioContext.sampleRate,
