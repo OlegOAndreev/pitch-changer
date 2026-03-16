@@ -458,12 +458,12 @@ async function handleCopyDebugClick() {
 async function init() {
     window.onerror = (event: Event | string, source?: string, lineno?: number, colno?: number, error?: Error) => {
         console.error('Error:', event, source, lineno, colno, error);
-        alert(event);
+        alert(`Error: ${event}, ${source}:${lineno}, ${error}`);
     };
 
     window.onunhandledrejection = (event: PromiseRejectionEvent) => {
         console.error('Unhandled rejection:', event);
-        alert(event.reason);
+        alert(`Unhandled rejection: ${event.reason}`);
     };
 
     await initWasmModule();
