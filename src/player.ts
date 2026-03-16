@@ -10,16 +10,15 @@
 //   * audio thread must not depend on UI thread scheduling
 
 import { AudioProcessorManager } from './audio-processor';
+import playerProcessorModule from './player-processor.ts?worker&url';
 import {
     playerProcessorName,
+    type GetLatestSamplesMessage,
+    type PlayerInitMessage,
     type PlayerProcessorOptions,
     type PlayerResponse,
-    type PlayerInitMessage,
-    type GetLatestSamplesMessage,
     type PlayerStopMessage,
 } from './player-types';
-
-import playerProcessorModule from './player-processor.ts?worker&url';
 import type { InterleavedAudio, ProcessingMode } from './types';
 
 export class Player {

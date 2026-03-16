@@ -6,6 +6,7 @@ import type {
     SetParamsMessage,
     WorkerInitMessage,
 } from './audio-processor-types';
+import audioProcessorURL from './audio-processor-worker.ts?worker&url';
 import type { ProcessingMode } from './types';
 import { concatArrays } from './utils';
 
@@ -20,7 +21,7 @@ export class AudioProcessorManager {
     }
 
     private workerInit(): Promise<void> {
-        this.worker = new Worker(new URL('./audio-processor-worker.ts', import.meta.url), { type: 'module' });
+        this.worker = new Worker(audioProcessorURL, { type: 'module' });
         this.worker.onerror = (error) => {
             console.error('AudioProcessorManager: Worker error:', error);
         };

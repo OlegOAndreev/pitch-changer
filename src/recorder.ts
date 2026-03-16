@@ -34,8 +34,9 @@ export class Recorder {
     }
 
     // Start recording, wait until stop() is called and return the full recording when stop() is called. This method can
-    // be called from the main thread.
-    async record(): Promise<InterleavedAudio> {
+    // be called from the main thread. onStartRecord is called after all the preparation is done, this may be used to
+    // signal the user that the audio will actually be recorded.
+    async record(onStartRecord: () => void): Promise<InterleavedAudio> {
         if (this.isRecording) {
             throw new Error('Recorder is already recording');
         }
@@ -70,6 +71,8 @@ export class Recorder {
             this.rejectRecording!(error instanceof Error ? error : new Error(String(error)));
             this.cleanup();
         }
+
+        onStartRecord();
 
         return promise;
     }

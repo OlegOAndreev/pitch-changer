@@ -1,4 +1,6 @@
 import initWasmModule, { get_settings } from '../wasm/build/wasm_main_module';
+import { AudioProcessorManager } from './audio-processor';
+import { runBenchmark, type BenchmarkResults } from './benchmark';
 import { decodeAudioFromBlob } from './media-decoder';
 import { encodeAudioToBlob } from './media-encoder';
 import { Player } from './player';
@@ -7,8 +9,6 @@ import { saveFile, showSaveDialog } from './save-dialog';
 import { Spectrogram } from './spectrogram';
 import { getAudioLength, getAudioSeconds, type InterleavedAudio, type ProcessingMode } from './types';
 import { debounce, getById, secondsToString, sleep, withButtonsDisabled } from './utils';
-import { runBenchmark, type BenchmarkResults } from './benchmark';
-import { AudioProcessorManager } from './audio-processor';
 
 const MAX_PITCH_VALUE = 2.0;
 const MIN_PITCH_VALUE = 0.5;
@@ -198,14 +198,14 @@ async function handleRecordClick(): Promise<void> {
     if (!recorder.isRecording) {
         await onBeforeSourceAudioDataSet();
 
-        sourceLabel.textContent = 'Recording...';
-        recordBtn.disabled = false;
-        recordBtn.title = 'Stop';
-        recordBtn.classList.add('recording');
-        recordBtnEmoji.classList.remove(recordingBtnClass);
-        recordBtnEmoji.classList.add(stopBtnClass);
-
-        appState.sourceAudio = await recorder.record();
+        appState.sourceAudio = await recorder.record(() => {
+            sourceLabel.textContent = 'Recording...';
+            recordBtn.disabled = false;
+            recordBtn.title = 'Stop';
+            recordBtn.classList.add('recording');
+            recordBtnEmoji.classList.remove(recordingBtnClass);
+            recordBtnEmoji.classList.add(stopBtnClass);
+        });
 
         sourceLabel.textContent = `Recorded ${secondsToString(getAudioSeconds(appState.sourceAudio))}`;
         recordBtn.title = 'Record';
