@@ -13,13 +13,17 @@ import { AudioProcessorManager } from './audio-processor';
 import playerProcessorModule from './player-processor.ts?worker&url';
 import {
     playerProcessorName,
-    type GetLatestSamplesMessage,
+    type PlayerGetStatsMessage,
     type PlayerInitMessage,
     type PlayerProcessorOptions,
     type PlayerResponse,
+    type PlayerStats,
     type PlayerStopMessage,
 } from './player-types';
+
 import type { InterleavedAudio, ProcessingMode } from './types';
+
+export { type PlayerStats };
 
 export class Player {
     private readonly audioContext: AudioContext;
@@ -36,7 +40,7 @@ export class Player {
     private workletNode: AudioWorkletNode | null = null;
 
     private playResolve: ((value?: void) => void) | null = null;
-    private latestSamplesResolves: Array<(samples: Float32Array) => void> = [];
+    private latestSamplesResolves: Array<(stats: PlayerStats) => void> = [];
 
     private constructor(audioContext: AudioContext, processorManager: AudioProcessorManager, fftSize: number) {
         this.audioContext = audioContext;
@@ -138,15 +142,18 @@ export class Player {
         this.finishPlay();
     }
 
-    async getLatestSamples(numSamples: number): Promise<Float32Array> {
+    async getPlayerStats(numSamples: number): Promise<PlayerStats> {
         if (!this.isPlaying || !this.workletNode) {
-            return new Float32Array(0);
+            return {
+                latestSamples: new Float32Array(0),
+                numUnderruns: 0,
+            };
         }
 
-        const { promise, resolve } = Promise.withResolvers<Float32Array>();
+        const { promise, resolve } = Promise.withResolvers<PlayerStats>();
         this.latestSamplesResolves.push(resolve);
 
-        const message: GetLatestSamplesMessage = {
+        const message: PlayerGetStatsMessage = {
             type: 'getLatestSamples',
             numSamples: numSamples,
         };
@@ -162,7 +169,7 @@ export class Player {
             case 'latestSamples':
                 while (this.latestSamplesResolves.length > 0) {
                     const resolve = this.latestSamplesResolves.pop();
-                    resolve!(message.samples);
+                    resolve!(message.stats);
                 }
                 break;
             case 'playbackFinished':
@@ -191,13 +198,5 @@ export class Player {
             this.workletNode = null;
         }
         this.isPlaying = false;
-
-        // Reject any pending getLatestSamples promises
-        while (this.latestSamplesResolves.length > 0) {
-            const resolve = this.latestSamplesResolves.shift();
-            if (resolve) {
-                resolve(new Float32Array(0));
-            }
-        }
     }
 }

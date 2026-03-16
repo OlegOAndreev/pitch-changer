@@ -138,6 +138,7 @@ const processingSpinner = getById<HTMLDivElement>('processing-spinner');
 const processingLabel = getById<HTMLDivElement>('processing-label');
 const fileInput = getById<HTMLInputElement>('file-input');
 const spectrogramCanvas = getById<HTMLCanvasElement>('spectrogram-canvas');
+const underrunsLabel = getById<HTMLDivElement>('underruns-label');
 
 // Debug UI elements
 const debugToggleBtn = getById<HTMLButtonElement>('debug-toggle-btn');
@@ -225,6 +226,7 @@ async function runPlay(player: Player): Promise<void> {
     const sampleRate = appState.sourceAudio!.sampleRate;
     const numChannels = appState.sourceAudio!.numChannels;
 
+    underrunsLabel.textContent = '';
     console.log(`Start playing audio with sample rate ${sampleRate}Hz, ${numChannels} channels`);
 
     // Set player parameters before playing
@@ -234,8 +236,11 @@ async function runPlay(player: Player): Promise<void> {
 
     const spectrogramTimer = setInterval(async () => {
         try {
-            const latestData = await player.getLatestSamples(appState.spectrogram!.getSamples());
-            appState.spectrogram!.draw(latestData, numChannels, sampleRate);
+            const stats = await player.getPlayerStats(appState.spectrogram!.getSamples());
+            appState.spectrogram!.draw(stats.latestSamples, numChannels, sampleRate);
+            if (stats.numUnderruns > 0) {
+                underrunsLabel.textContent = `Got ${stats.numUnderruns} underruns`;
+            }
         } catch (error) {
             console.error('Error getting latest samples:', error);
         }

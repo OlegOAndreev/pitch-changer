@@ -3,7 +3,7 @@ import { AudioProcessorClient } from './audio-processor-client';
 import { PlayerProcessorQueue } from './player-processor-queue';
 import {
     playerProcessorName,
-    type LatestSamplesMessage,
+    type PlayerStatsMessage,
     type PlaybackFinishedMessage,
     type PlayerProcessorOptions,
     type PlayerRequest,
@@ -33,7 +33,9 @@ class PlayerProcessor extends AudioWorkletProcessor {
 
     private playbackFinished = false;
 
-    private lastConsoleLogTime = 0;
+    private lastConsoleLogTime = -CONSOLE_LOG_MIN_DELTA;
+
+    private numUnderruns = 0;
 
     constructor(options: AudioWorkletNodeOptions) {
         super();
@@ -59,7 +61,7 @@ class PlayerProcessor extends AudioWorkletProcessor {
         this.writeOutput(outputs[0]);
         // If we are low on processed samples, request processing new samples.
         if (this.processedQueue.length < this.bufferSamples && !this.inputConsumed && !this.processingInProgress) {
-            this.requestProcessSamples();
+            this.requestProcessSamples(this.bufferSamples);
         }
 
         // If we have consumed all processed samples, send finished message and request termination.
@@ -76,10 +78,11 @@ class PlayerProcessor extends AudioWorkletProcessor {
             case 'init':
                 this.doInit(message.input, message.clientPort);
                 break;
-            case 'getLatestSamples': {
+
+            case 'getLatestSamples':
                 this.sendLatestSamples(message.numSamples);
                 break;
-            }
+
             case 'stop':
                 this.playbackFinished = true;
                 break;
@@ -98,8 +101,9 @@ class PlayerProcessor extends AudioWorkletProcessor {
         this.client = new AudioProcessorClient(clientPort, this.onProcessedSamples.bind(this));
         // Reset the AudioProcessor, because the it may have been used by another player.
         this.client.reset();
-        // Prefill the buffer, next requestProcessSamples() will be called from process().
-        this.requestProcessSamples();
+        // Prefill the buffer, next requestProcessSamples() will be called from process(). We request more samples
+        // because of the delay between input and output in AudioProcessor.
+        this.requestProcessSamples(this.bufferSamples * 2);
         console.log('PlayerProcessor initialized');
     }
 
@@ -129,8 +133,9 @@ class PlayerProcessor extends AudioWorkletProcessor {
     private writeOutput(outputChannels: Float32Array[]): void {
         const underrun = this.processedQueue.popNonInterleaved(outputChannels);
         if (underrun > 0) {
+            this.numUnderruns++;
             // Rate-limit console logging
-            if (currentTime > this.lastConsoleLogTime + CONSOLE_LOG_MIN_DELTA) {
+            if (currentTime >= this.lastConsoleLogTime + CONSOLE_LOG_MIN_DELTA) {
                 this.lastConsoleLogTime = currentTime;
                 console.error(`Underrun of ${underrun} samples`);
             }
@@ -138,19 +143,7 @@ class PlayerProcessor extends AudioWorkletProcessor {
         // TODO: skipping the `underrun` samples next time?
     }
 
-    private sendLatestSamples(numSamples: number) {
-        const result = new Float32Array(numSamples * this.numChannels);
-
-        this.processedQueue.readNonInterleaved(result);
-
-        const message: LatestSamplesMessage = {
-            type: 'latestSamples',
-            samples: result,
-        };
-        this.port.postMessage(message);
-    }
-
-    private requestProcessSamples() {
+    private requestProcessSamples(numSamples: number) {
         if (!this.client || !this.input) {
             console.error('Request processing before init()');
             return;
@@ -164,7 +157,7 @@ class PlayerProcessor extends AudioWorkletProcessor {
         // NOTE: We request bufferSamples at once to process. This depends on the fact that (bufferSamples / maximum
         // timeStretch) is greater than the process() output chunks size (fixed 128 for now), otherwise we would refill
         // the processed queue slower than it is consumed.
-        const nextSamples = Math.min(this.bufferSamples, availableSamples);
+        const nextSamples = Math.min(numSamples, availableSamples);
         const nextChunk = this.input.slice(
             this.inputOffset * this.numChannels,
             (this.inputOffset + nextSamples) * this.numChannels,
@@ -176,6 +169,21 @@ class PlayerProcessor extends AudioWorkletProcessor {
             this.client.finish();
         }
         this.processingInProgress = true;
+    }
+
+    private sendLatestSamples(numSamples: number) {
+        const result = new Float32Array(numSamples * this.numChannels);
+
+        this.processedQueue.readNonInterleaved(result);
+
+        const message: PlayerStatsMessage = {
+            type: 'latestSamples',
+            stats: {
+                latestSamples: result,
+                numUnderruns: this.numUnderruns,
+            },
+        };
+        this.port.postMessage(message);
     }
 }
 

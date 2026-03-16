@@ -12,7 +12,7 @@ export interface PlayerInitMessage {
     clientPort: MessagePort;
 }
 
-export interface GetLatestSamplesMessage {
+export interface PlayerGetStatsMessage {
     type: 'getLatestSamples';
     numSamples: number;
 }
@@ -21,15 +21,21 @@ export interface PlayerStopMessage {
     type: 'stop';
 }
 
-export type PlayerRequest = PlayerInitMessage | GetLatestSamplesMessage | PlayerStopMessage;
+export type PlayerRequest = PlayerInitMessage | PlayerGetStatsMessage | PlayerStopMessage;
 
 export interface PlaybackFinishedMessage {
     type: 'playbackFinished';
 }
 
-export interface LatestSamplesMessage {
-    type: 'latestSamples';
-    samples: Float32Array;
+// This is a copy of PlayerStats from player.ts
+export interface PlayerStats {
+    latestSamples: Float32Array;
+    numUnderruns: number;
 }
 
-export type PlayerResponse = PlaybackFinishedMessage | LatestSamplesMessage;
+export interface PlayerStatsMessage {
+    type: 'latestSamples';
+    stats: PlayerStats;
+}
+
+export type PlayerResponse = PlaybackFinishedMessage | PlayerStatsMessage;

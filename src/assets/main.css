@@ -107,10 +107,15 @@ h1 {
 }
 
 #source-label,
-#processing-label {
+#processing-label,
+#underruns-label {
     font-size: 13px;
     overflow-wrap: break-word;
     line-height: 1;
+}
+
+#underruns-label {
+    color: #d00;
 }
 
 #processing-indicator {
