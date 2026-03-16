@@ -1,7 +1,7 @@
 import recorderProcessor from './recorder-processor.ts?worker&url';
 import { recorderProcessorName, type RecordedSamplesMessage } from './recorder-types';
 import type { InterleavedAudio } from './types';
-import { concatArrays } from './utils';
+import { concatArrays, logError } from './utils';
 
 let moduleInitialized = false;
 
@@ -56,6 +56,10 @@ export class Recorder {
 
         try {
             this.audioWorkletNode = new AudioWorkletNode(this.audioContext, recorderProcessorName);
+            this.audioWorkletNode.onprocessorerror = (event: ErrorEvent) => {
+                logError('RecorderProcessor', event);
+            };
+
             this.audioWorkletNode.port.onmessage = (event: MessageEvent<RecordedSamplesMessage>) => {
                 this.recordedChunks.push(event.data.samples);
             };

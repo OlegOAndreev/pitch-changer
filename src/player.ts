@@ -22,6 +22,7 @@ import {
 } from './player-types';
 
 import type { InterleavedAudio, ProcessingMode } from './types';
+import { logError } from './utils';
 
 export { type PlayerStats };
 
@@ -111,6 +112,9 @@ export class Player {
             processorOptions: options,
             outputChannelCount: [this.inputNumChannels],
         });
+        this.workletNode.onprocessorerror = (event: ErrorEvent) => {
+            logError('PlayerProcessor', event);
+        };
 
         this.workletNode.port.onmessage = (event: MessageEvent<PlayerResponse>) => {
             this.onWorkletMessage(event);

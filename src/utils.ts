@@ -106,6 +106,11 @@ export async function sleep(delay: number): Promise<void> {
     return promise;
 }
 
+export function logError(context: string, event: ErrorEvent) {
+    console.error(`Error from ${context}: ${event.message}, ${event.filename}:${event.lineno}, ${event.error}`);
+    alert(`Error from ${context}: ${event.message}, ${event.filename}:${event.lineno}, ${event.error}`);
+}
+
 export function concatArrays(arrays: Float32Array[]): Float32Array {
     const totalLength = arrays.reduce((sum, chunk) => sum + chunk.length, 0);
     const result = new Float32Array(totalLength);

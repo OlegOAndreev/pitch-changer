@@ -110,7 +110,7 @@ class AppState {
     }
 }
 
-const appState = new AppState();
+let appState: AppState;
 
 //
 // UI elements
@@ -456,6 +456,14 @@ async function handleCopyDebugClick() {
 }
 
 async function init() {
+    // Try initializing wasm before setting onerror as it breaks webviews for some reason.
+    try {
+        await initWasmModule();
+    } catch (error) {
+        alert(`WASM init failed: ${error}`);
+        throw error;
+    }
+
     window.onerror = (event: Event | string, source?: string, lineno?: number, colno?: number, error?: Error) => {
         console.error('Error:', event, source, lineno, colno, error);
         alert(`Error: ${event}, ${source}:${lineno}, ${error}`);
@@ -466,8 +474,7 @@ async function init() {
         alert(`Unhandled rejection: ${event.reason}`);
     };
 
-    await initWasmModule();
-
+    appState = new AppState();
     applySettingsToUI(appState.settings);
     appState.spectrogram = new Spectrogram(spectrogramCanvas);
 

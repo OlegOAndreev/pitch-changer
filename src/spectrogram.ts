@@ -17,7 +17,7 @@ export class Spectrogram {
         this.histogramInputVec = new Float32Vec(0);
         this.histogramOutputVec = new Float32Vec(0);
         this.resizeCanvas();
-        new ResizeObserver(() => this.resizeCanvas).observe(canvas);
+        new ResizeObserver(() => this.resizeCanvas()).observe(canvas);
         canvas.addEventListener('click', () => {
             this.showFrequencies = !this.showFrequencies;
         });
