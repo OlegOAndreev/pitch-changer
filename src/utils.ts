@@ -97,3 +97,14 @@ export async function sleep(delay: number): Promise<void> {
     setTimeout(() => resolve(), delay);
     return promise;
 }
+
+export function concatArrays(arrays: Float32Array[]): Float32Array {
+    const totalLength = arrays.reduce((sum, chunk) => sum + chunk.length, 0);
+    const result = new Float32Array(totalLength);
+    let offset = 0;
+    for (const arr of arrays) {
+        result.set(arr, offset);
+        offset += arr.length;
+    }
+    return result;
+}
