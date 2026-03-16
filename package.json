@@ -19,7 +19,6 @@
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.1.0",
     "@mediabunny/mp3-encoder": "^1.27.3",
-    "coi-serviceworker": "^0.1.7",
     "mediabunny": "^1.27.3"
   },
   "devDependencies": {

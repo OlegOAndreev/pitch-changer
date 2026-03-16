@@ -475,10 +475,6 @@ async function init() {
         alert(event.reason);
     };
 
-    if (!window.crossOriginIsolated) {
-        throw new Error('This app works only in cross-origin isolated environments, configure the web server');
-    }
-
     await initWasmModule();
     await appState.initProcessor();
 

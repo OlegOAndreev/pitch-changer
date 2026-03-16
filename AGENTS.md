@@ -23,7 +23,6 @@
 ## TypeScript rules
 
 - Use single quotes instead of double quotes for strings
-- Use SharedArrayBuffer for synchronization with workers and audio worklets
 - Do not write trivial comments inside function bodies, only comment the important decisions/algorithms
 
 ## Rust rules
