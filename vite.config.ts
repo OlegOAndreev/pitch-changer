@@ -13,17 +13,6 @@ export default {
         chunkSizeWarningLimit: 1500,
     },
 
-    plugins: [
-        viteStaticCopy({
-            targets: [
-                {
-                    src: 'node_modules/coi-serviceworker/coi-serviceworker.min.js',
-                    dest: '.',
-                },
-            ],
-        }),
-    ],
-
     server: {
         headers: {
             'Cross-Origin-Embedder-Policy': 'require-corp',
