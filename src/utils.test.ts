@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { debounce, secondsToString } from './utils';
+import { concatArrays, debounce, secondsToString } from './utils';
 
 describe('debounce', () => {
     beforeEach(() => {
@@ -174,5 +174,31 @@ describe('secondsToString', () => {
 
     test('handles large seconds', () => {
         expect(secondsToString(3661)).toBe('61m1s'); // 1 hour 1 minute 1 second
+    });
+});
+
+describe('concatArrays', () => {
+    test('concatenates empty array', () => {
+        const result = concatArrays([]);
+        expect(result).toBeInstanceOf(Float32Array);
+        expect(result.length).toBe(0);
+    });
+
+    test('concatenates single array', () => {
+        const input = [new Float32Array([1, 2, 3])];
+        const result = concatArrays(input);
+        expect(result).toEqual(new Float32Array([1, 2, 3]));
+    });
+
+    test('concatenates multiple arrays', () => {
+        const input = [new Float32Array([1, 2]), new Float32Array([3, 4, 5]), new Float32Array([6])];
+        const result = concatArrays(input);
+        expect(result).toEqual(new Float32Array([1, 2, 3, 4, 5, 6]));
+    });
+
+    test('concatenates arrays with empty arrays', () => {
+        const input = [new Float32Array([1, 2]), new Float32Array([]), new Float32Array([3, 4]), new Float32Array([])];
+        const result = concatArrays(input);
+        expect(result).toEqual(new Float32Array([1, 2, 3, 4]));
     });
 });
