@@ -1,4 +1,4 @@
-import { getById } from './utils';
+import { getById } from './common-utils';
 
 const saveDialogOverlay = getById<HTMLDivElement>('save-dialog-overlay');
 const saveInput = getById<HTMLInputElement>('save-filename-input');

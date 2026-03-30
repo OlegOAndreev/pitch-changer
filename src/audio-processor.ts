@@ -7,8 +7,9 @@ import type {
     WorkerInitMessage,
 } from './audio-processor-types';
 import audioProcessorURL from './audio-processor-worker.ts?worker&url';
+import { logError } from './common-utils';
 import type { ProcessingMode } from './types';
-import { concatArrays, logError } from './utils';
+import { concatArrays } from './utils';
 
 export class AudioProcessorManager {
     private worker: Worker | undefined;

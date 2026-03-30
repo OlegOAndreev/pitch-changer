@@ -4,9 +4,6 @@ This is a web interface to allow stretching time and shifting pitch of audio. Th
 or uploaded from a file. The core is written in Rust and implements a phase vocoder using STFT, the web frontend is
 written in TypeScript and uses Web Audio + WASM in Web Workers. All processing is done locally.
 
-## Browser support
-For now (Feb 2026) the up to date browser is required, see https://caniuse.com/wf-atomics-wait-async
-
 ## Development
 
 ### General instructions

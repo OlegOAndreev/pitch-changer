@@ -9,8 +9,6 @@
 ## Code location
 
 - TypeScript files are located in src/
-- HTML and CSS Files are located in public/
-- Build results are located in public/
 - Rust files are located in wasm/
 
 ## HTML/CSS rules

@@ -1,6 +1,7 @@
 import initWasmModule, { get_settings } from '../wasm/build/wasm_main_module';
 import { AudioProcessorManager } from './audio-processor';
 import { runBenchmark, type BenchmarkResults } from './benchmark';
+import { debounce, getById, setupWindowOnError, sleep, withButtonsDisabled } from './common-utils';
 import { decodeAudioFromBlob } from './media-decoder';
 import { encodeAudioToBlob } from './media-encoder';
 import { Player } from './player';
@@ -8,7 +9,7 @@ import { Recorder } from './recorder';
 import { saveFile, showSaveDialog } from './save-dialog';
 import { Spectrogram } from './spectrogram';
 import { getAudioLength, getAudioSeconds, type InterleavedAudio, type ProcessingMode } from './types';
-import { debounce, getById, secondsToString, sleep, withButtonsDisabled } from './utils';
+import { secondsToString } from './utils';
 
 const MAX_PITCH_VALUE = 2.0;
 const MIN_PITCH_VALUE = 0.5;
@@ -464,15 +465,7 @@ async function init() {
         throw error;
     }
 
-    window.onerror = (event: Event | string, source?: string, lineno?: number, colno?: number, error?: Error) => {
-        console.error('Error:', event, source, lineno, colno, error);
-        alert(`Error: ${event}, ${source}:${lineno}, ${error}`);
-    };
-
-    window.onunhandledrejection = (event: PromiseRejectionEvent) => {
-        console.error('Unhandled rejection:', event);
-        alert(`Unhandled rejection: ${event.reason}`);
-    };
+    setupWindowOnError();
 
     appState = new AppState();
     applySettingsToUI(appState.settings);

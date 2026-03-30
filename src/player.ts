@@ -21,8 +21,8 @@ import {
     type PlayerStopMessage,
 } from './player-types';
 
+import { logError } from './common-utils';
 import type { InterleavedAudio, ProcessingMode } from './types';
-import { logError } from './utils';
 
 export { type PlayerStats };
 

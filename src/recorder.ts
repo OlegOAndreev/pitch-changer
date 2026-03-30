@@ -1,7 +1,8 @@
+import { logError } from './common-utils';
 import recorderProcessor from './recorder-processor.ts?worker&url';
 import { recorderProcessorName, type RecordedSamplesMessage } from './recorder-types';
 import type { InterleavedAudio } from './types';
-import { concatArrays, logError } from './utils';
+import { concatArrays } from './utils';
 
 let moduleInitialized = false;
 
