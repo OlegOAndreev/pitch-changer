@@ -35,7 +35,7 @@ impl PhaseGradientBin {
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 struct CompactBin {
     // Upper bits: bits 15-30 from f32 representation (the f32 should be non-negative, so the sign bit should always be
-    // zero), lower bits: index. This trunctates the lower 15 bits of fraction, but it does not matter much: approximate
+    // zero), lower bits: index. This truncates the lower 15 bits of fraction, but it does not matter much: approximate
     // order by magnitude is ok.
     repr: u32,
 }
@@ -98,8 +98,8 @@ impl PhaseGradientTimeStretch {
         Self { fft_size, num_bins, bins, prev_sorted_bins }
     }
 
-    /// Process a single STFT frame.
-    pub fn process(
+    /// Process a single STFT frame of time stretching.
+    pub fn process_time_stretch(
         &mut self,
         ana_freq: &[Complex<f32>],
         ana_hop_size: usize,
@@ -111,7 +111,29 @@ impl PhaseGradientTimeStretch {
         assert_eq!(syn_freq.len(), num_bins);
 
         let min_magn = self.prepare_magnitude_and_phases(ana_freq);
-        self.assign_phases(ana_hop_size as f32, syn_hop_size as f32);
+        self.assign_phases_time_stretch(ana_hop_size as f32, syn_hop_size as f32);
+        self.convert_to_freq(ana_freq, syn_freq, min_magn);
+
+        // Save previous analysis data for next frame
+        for bin in &mut self.bins {
+            bin.prev_sqr_magnitude = bin.sqr_magnitude;
+            bin.prev_ana_phase = bin.ana_phase;
+        }
+    }
+
+    pub fn process_pitch_shift(
+        &mut self,
+        ana_freq: &[Complex<f32>],
+        _ana_hop_size: usize,
+        syn_freq: &mut [Complex<f32>],
+        _pitch_shift: f32,
+    ) {
+        let num_bins = self.num_bins;
+        assert_eq!(ana_freq.len(), num_bins);
+        assert_eq!(syn_freq.len(), num_bins);
+
+        let min_magn = self.prepare_magnitude_and_phases(ana_freq);
+        // self.assign_phases_pitch_shift(ana_hop_size as f32, pitch_shift);
         self.convert_to_freq(ana_freq, syn_freq, min_magn);
 
         // Save previous analysis data for next frame
@@ -186,7 +208,7 @@ impl PhaseGradientTimeStretch {
     fn prepare_magnitude_and_phases(&mut self, ana_freq: &[Complex<f32>]) -> f32 {
         let num_bins = self.num_bins;
 
-        // Find maximum magnitude for thresholding
+        // Find maximum magnitude for threshold
         let mut max_magn = 0.0f32;
         for k in 0..num_bins {
             // We compare squared magnitudes and call sqrt() only before computing the final value.
@@ -216,14 +238,13 @@ impl PhaseGradientTimeStretch {
             }
         }
         radsort::sort_by_key(&mut self.prev_sorted_bins, |bin| bin.repr);
-        // self.prev_sorted_bins.sort_unstable();
 
         min_magn
     }
 
     // Assign phases to syn_phases
     #[inline(never)]
-    fn assign_phases(&mut self, ana_hop_size: f32, syn_hop_size: f32) {
+    fn assign_phases_time_stretch(&mut self, ana_hop_size: f32, syn_hop_size: f32) {
         let num_bins = self.num_bins;
 
         // Original phase diff between frames for bin k = k * 2.0 * PI * ana_hop_size / fft_size.

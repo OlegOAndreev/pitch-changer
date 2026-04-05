@@ -73,7 +73,7 @@ fn benchmark_multiple_iterations(c: &mut Criterion) {
         b.iter(|| {
             let mut output_spectrum = vec![Complex::new(0.0, 0.0); sine_spectrum.len()];
             for _ in 0..1000 {
-                time_stretcher.process(&sine_spectrum, ana_hop_size, &mut output_spectrum, syn_hop_size);
+                time_stretcher.process_time_stretch(&sine_spectrum, ana_hop_size, &mut output_spectrum, syn_hop_size);
             }
         })
     });
@@ -82,7 +82,7 @@ fn benchmark_multiple_iterations(c: &mut Criterion) {
         b.iter(|| {
             let mut output_spectrum = vec![Complex::new(0.0, 0.0); random_spectrum.len()];
             for _ in 0..1000 {
-                time_stretcher.process(&random_spectrum, ana_hop_size, &mut output_spectrum, syn_hop_size);
+                time_stretcher.process_time_stretch(&random_spectrum, ana_hop_size, &mut output_spectrum, syn_hop_size);
                 let _ = black_box(&output_spectrum);
             }
         })

@@ -187,7 +187,7 @@ impl TimeStretcher {
         let output = self.stft.process(&self.input_buf, |ana_freq, syn_freq| {
             // syn_freq.copy_from_slice(ana_freq);
             self.phase_gradient_vocoder
-                .process(ana_freq, self.ana_hop_size, syn_freq, self.syn_hop_size);
+                .process_time_stretch(ana_freq, self.ana_hop_size, syn_freq, self.syn_hop_size);
             // Ensure conjugate symmetry for real-valued inverse FFT. The first bin and last bin should have zero
             // imaginary part. After processing, they may become non-zero (even if very small).
             syn_freq[0].im = 0.0;
