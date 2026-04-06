@@ -2,7 +2,7 @@ use std::f32::consts::PI;
 
 use realfft::num_complex::Complex;
 
-use crate::util::{approx_atan2, approx_sincos, get_disjoint_two_mut, normalize_phase};
+use crate::util::{approx_atan2, approx_sincos, get_disjoint_two_mut, normalize_phase, radix_sort_u32};
 
 /// PhaseGradientBin stores all per-bin data for phase gradient time stretching.
 #[derive(Debug, Clone)]
@@ -32,7 +32,7 @@ impl PhaseGradientBin {
 
 // CompactBin stores bin magnitude + bin index compacted into one u32 value. This allows much faster sorting of bins by
 // magnitude, because sorting takes a large chunk of time of process().
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
 struct CompactBin {
     // Upper bits: bits 15-30 from f32 representation (the f32 should be non-negative, so the sign bit should always be
     // zero), lower bits: index. This truncates the lower 15 bits of fraction, but it does not matter much: approximate
@@ -57,6 +57,11 @@ impl CompactBin {
     fn sqr_magnitude(&self) -> f32 {
         f32::from_bits((self.repr & 0xFFFF0000) >> 1)
     }
+
+    // We guarantee that the [CompactBin] can be interpreted as [u32]
+    fn as_u32_slice_mut(slice: &mut [Self]) -> &mut [u32] {
+        unsafe { std::mem::transmute(slice) }
+    }
 }
 
 /// Phase vocoder with the phase gradient implementation: the implementation of paper Phase Vocoder Done Right by
@@ -78,6 +83,7 @@ pub struct PhaseGradientTimeStretch {
     //
     // This results in almost the same phase assignment as the previous algorithm, but is considerably faster.
     prev_sorted_bins: Vec<CompactBin>,
+    prev_sorted_bins_scratch: Vec<u32>,
 }
 
 // The implementation uses inline(never) in a few places to make profiling easier.
@@ -94,8 +100,9 @@ impl PhaseGradientTimeStretch {
 
         let bins = vec![PhaseGradientBin::new(); num_bins];
         let prev_sorted_bins = Vec::with_capacity(num_bins);
+        let prev_sorted_bins_scratch = Vec::with_capacity(num_bins);
 
-        Self { fft_size, num_bins, bins, prev_sorted_bins }
+        Self { fft_size, num_bins, bins, prev_sorted_bins, prev_sorted_bins_scratch }
     }
 
     /// Process a single STFT frame of time stretching.
@@ -237,7 +244,7 @@ impl PhaseGradientTimeStretch {
                 bin.phase_assigned = true;
             }
         }
-        radsort::sort_by_key(&mut self.prev_sorted_bins, |bin| bin.repr);
+        radix_sort_u32(CompactBin::as_u32_slice_mut(&mut self.prev_sorted_bins), &mut self.prev_sorted_bins_scratch);
 
         min_magn
     }
