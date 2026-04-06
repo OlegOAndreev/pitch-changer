@@ -1,0 +1,3 @@
+[submodule "wasm/vendor/pffft"]
+	path = wasm/vendor/pffft
+	url = https://bitbucket.org/jpommier/pffft.git

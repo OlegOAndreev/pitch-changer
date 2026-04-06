@@ -17,6 +17,10 @@ harness = false
 name = "sort_benchmark"
 harness = false
 
+[[bench]]
+name = "realfft_benchmark"
+harness = false
+
 [dependencies]
 anyhow = "1.0"
 js-sys = "0.3"
@@ -34,12 +38,18 @@ plotters = { version = "0.3", default-features = false, features = ["line_series
 rand = "0.10"
 symphonia = { version = "0.5", features = ["aac", "isomp4", "mp3"] }
 
+[build-dependencies]
+cc = { version = "1.2", optional = true }
+
+[features]
+pffft = ["dep:cc"]
+
 [profile.release]
 # Disabled by default for better build times
 # debug = true
 
 [lints.clippy]
-# Reading .iter().zip() chains is considerably harder for me, while the resulting code is the same if we bound the
+# Reading .iter().zip() chains is considerably harder for me, while the generated code is the same if we bound the
 # iteration upper bound.
 manual_range_contains = "allow"
 needless-range-loop = "allow"

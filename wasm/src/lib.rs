@@ -1,6 +1,8 @@
 mod envelope_shifter;
 mod histogram;
 mod peak_corrector;
+#[cfg(feature = "pffft")]
+mod pffft;
 mod phase_gradient_time_stretch;
 mod pitch_shifter;
 mod resampler;
@@ -12,6 +14,8 @@ mod window;
 
 pub use envelope_shifter::EnvelopeShifter;
 pub use histogram::SpectralHistogram;
+#[cfg(feature = "pffft")]
+pub use pffft::{PffftComplexToReal, PffftRealToComplex};
 pub use phase_gradient_time_stretch::PhaseGradientTimeStretch;
 pub use pitch_shifter::{MultiPitchShifter, PitchShiftParams, PitchShifter};
 pub use time_stretcher::TimeStretchParams;

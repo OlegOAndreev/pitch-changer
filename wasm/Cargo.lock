@@ -1091,6 +1091,7 @@ dependencies = [
  "argh",
  "audioadapter",
  "audioadapter-buffers",
+ "cc",
  "criterion",
  "hound",
  "js-sys",
