@@ -271,9 +271,54 @@ pub fn approx_exp2(x: f32) -> f32 {
     f32::from_bits(v as u32)
 }
 
+/// Radix sort for u32. Requires a scratch vector.
+#[inline(never)]
+pub fn radix_sort_u32(slice: &mut [u32], scratch: &mut Vec<u32>) {
+    scratch.resize(slice.len(), 0);
+
+    let mut source = slice;
+    let mut target = scratch.as_mut_slice();
+
+    for pass in 0..4 {
+        let shift = pass * 8;
+        let mut counts = [0usize; 256];
+
+        // Count occurrences of each byte
+        for bin in source.iter() {
+            let byte = ((bin >> shift) & 0xFF) as usize;
+            unsafe {
+                *counts.get_unchecked_mut(byte) += 1;
+            }
+        }
+
+        // Compute prefix sums (starting indices for each byte)
+        let mut prefix_sum = 0;
+        for count in counts.iter_mut() {
+            let current = *count;
+            *count = prefix_sum;
+            prefix_sum += current;
+        }
+
+        // Place elements in target buffer
+        for bin in source.iter() {
+            let byte = ((bin >> shift) & 0xFF) as usize;
+            unsafe {
+                let pos = *counts.get_unchecked(byte);
+                *target.get_unchecked_mut(pos) = *bin;
+                *counts.get_unchecked_mut(byte) = pos + 1;
+            }
+        }
+
+        // Swap source and target for next pass. With 4 passes the final result stays in input slice.
+        std::mem::swap(&mut source, &mut target);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::rngs::SmallRng;
+    use rand::{RngExt, SeedableRng};
 
     #[test]
     fn test_get_disjoint_two_mut() {
@@ -494,6 +539,68 @@ mod tests {
                 (exp2 - expected_exp2).abs() < 1e-4,
                 "approx_exp2({x}).0 = {exp2}, expected exp2 = {expected_exp2}"
             );
+        }
+    }
+
+    #[test]
+    fn test_radix_sort_u32() {
+        // Test empty slice
+        let mut empty: [u32; 0] = [];
+        let mut scratch = Vec::new();
+        radix_sort_u32(&mut empty, &mut scratch);
+        assert_eq!(empty, []);
+
+        // Test single element
+        let mut single = [42];
+        scratch.clear();
+        radix_sort_u32(&mut single, &mut scratch);
+        assert_eq!(single, [42]);
+
+        // Test already sorted
+        let mut sorted = [1, 2, 3, 4, 5];
+        scratch.clear();
+        radix_sort_u32(&mut sorted, &mut scratch);
+        assert_eq!(sorted, [1, 2, 3, 4, 5]);
+
+        // Test reverse sorted
+        let mut reverse = [5, 4, 3, 2, 1];
+        scratch.clear();
+        radix_sort_u32(&mut reverse, &mut scratch);
+        assert_eq!(reverse, [1, 2, 3, 4, 5]);
+
+        // Test with duplicates
+        let mut duplicates = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3];
+        scratch.clear();
+        radix_sort_u32(&mut duplicates, &mut scratch);
+        assert_eq!(duplicates, [1, 1, 2, 3, 3, 4, 5, 5, 6, 9]);
+
+        // Test extreme values
+        let mut extremes = [u32::MAX - 1, 0u32, u32::MAX, 1];
+        scratch.clear();
+        radix_sort_u32(&mut extremes, &mut scratch);
+        assert_eq!(extremes, [0, 1, u32::MAX - 1, u32::MAX]);
+
+        // Test each byte position independently
+        for shift in 0..32 {
+            // Create 256 values with distinct bytes at the current shift position
+            let mut values: Vec<u32> = (0..256).map(|i| i << shift).collect();
+            let mut expected = values.clone();
+            expected.sort();
+            // Reverse to make unsorted
+            values.reverse();
+            scratch.clear();
+            radix_sort_u32(&mut values, &mut scratch);
+            assert_eq!(values, expected, "Failed at shift {}", shift);
+        }
+
+        scratch.clear();
+        for it in 0..1000 {
+            let rng = SmallRng::seed_from_u64(it);
+            let mut input: Vec<u32> = rng.random_iter().take(100).collect();
+            let mut expected = input.clone();
+            expected.sort();
+            radix_sort_u32(&mut input, &mut scratch);
+            assert_eq!(input, expected, "Failed at iteration {}", it);
         }
     }
 }
