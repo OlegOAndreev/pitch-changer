@@ -548,7 +548,7 @@ mod tests {
         let mut empty: [u32; 0] = [];
         let mut scratch = Vec::new();
         radix_sort_u32(&mut empty, &mut scratch);
-        assert_eq!(empty, []);
+        assert!(empty.is_empty());
 
         // Test single element
         let mut single = [42];
