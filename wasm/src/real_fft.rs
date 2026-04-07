@@ -44,34 +44,47 @@ impl FftRealToComplex {
             unsafe { std::slice::from_raw_parts_mut(input.as_mut_ptr() as *mut Complex<f32>, input.len() / 2) };
         self.fft.process_outofplace_with_scratch(fft_input, &mut output[..self.size / 2], scratch);
 
+        let output_f32 = complex_as_f32_slice_mut(output);
         unsafe {
-            let first = *output.get_unchecked(0);
-            *output.get_unchecked_mut(0) = Complex { re: first.re + first.im, im: 0.0 };
-            *output.get_unchecked_mut(self.size / 2) = Complex { re: first.re - first.im, im: 0.0 };
+            let re0 = *output_f32.get_unchecked(0);
+            let im0 = *output_f32.get_unchecked(1);
+            *output_f32.get_unchecked_mut(0) = re0 + im0;
+            *output_f32.get_unchecked_mut(1) = 0.0;
+            *output_f32.get_unchecked_mut(self.size) = re0 - im0;
+            *output_f32.get_unchecked_mut(self.size + 1) = 0.0;
 
             for i in 1..self.size / 4 {
-                let out = *output.get_unchecked(i);
-                let out_rev = *output.get_unchecked(self.size / 2 - i);
+                let re_idx = 2 * i;
+                let im_idx = 2 * i + 1;
+                let re_rev = self.size - 2 * i;
+                let im_rev = self.size - 2 * i + 1;
+
+                let out_re = *output_f32.get_unchecked(re_idx);
+                let out_im = *output_f32.get_unchecked(im_idx);
+                let out_rev_re = *output_f32.get_unchecked(re_rev);
+                let out_rev_im = *output_f32.get_unchecked(im_rev);
+
                 let twiddle = *self.twiddles.get_unchecked(i - 1);
-                let sum = out + out_rev;
-                let diff = out - out_rev;
 
-                let twiddled_re_sum = sum.im * twiddle.re;
-                let twiddled_im_sum = sum.im * twiddle.im;
-                let twiddled_re_diff = diff.re * twiddle.re;
-                let twiddled_im_diff = diff.re * twiddle.im;
-                let half_sum_re = 0.5 * sum.re;
-                let half_diff_im = 0.5 * diff.im;
+                let sum_re = out_re + out_rev_re;
+                let sum_im = out_im + out_rev_im;
+                let diff_re = out_re - out_rev_re;
+                let diff_im = out_im - out_rev_im;
 
-                let output_twiddled_real = twiddled_re_sum + twiddled_im_diff;
-                let output_twiddled_im = twiddled_im_sum - twiddled_re_diff;
+                let half_sum_re = 0.5 * sum_re;
+                let half_diff_im = 0.5 * diff_im;
 
-                *output.get_unchecked_mut(i) =
-                    Complex { re: half_sum_re + output_twiddled_real, im: half_diff_im + output_twiddled_im };
-                *output.get_unchecked_mut(self.size / 2 - i) =
-                    Complex { re: half_sum_re - output_twiddled_real, im: output_twiddled_im - half_diff_im };
+                let output_twiddled_real = sum_im * twiddle.re + diff_re * twiddle.im;
+                let output_twiddled_im = sum_im * twiddle.im - diff_re * twiddle.re;
+
+                *output_f32.get_unchecked_mut(re_idx) = half_sum_re + output_twiddled_real;
+                *output_f32.get_unchecked_mut(im_idx) = half_diff_im + output_twiddled_im;
+
+                *output_f32.get_unchecked_mut(re_rev) = half_sum_re - output_twiddled_real;
+                *output_f32.get_unchecked_mut(im_rev) = -half_diff_im + output_twiddled_im;
             }
-            output.get_unchecked_mut(self.size / 4).im = -output.get_unchecked(self.size / 4).im;
+
+            *output_f32.get_unchecked_mut(self.size / 2 + 1) = -*output_f32.get_unchecked(self.size / 2 + 1);
         }
 
         Ok(())
@@ -115,33 +128,43 @@ impl FftComplexToReal {
             bail!("Expected scratch size {}, got {}", self.size / 2, input.len());
         }
 
+        let input_f32 = complex_as_f32_slice_mut(input);
         unsafe {
-            let first_re = input.get_unchecked(0).re + input.get_unchecked(self.size / 2).re;
-            let first_im = input.get_unchecked(0).re - input.get_unchecked(self.size / 2).re;
-            *input.get_unchecked_mut(0) = Complex { re: first_re, im: first_im };
+            let first_re = *input_f32.get_unchecked(0) + *input_f32.get_unchecked(self.size);
+            let first_im = *input_f32.get_unchecked(0) - *input_f32.get_unchecked(self.size);
+            *input_f32.get_unchecked_mut(0) = first_re;
+            *input_f32.get_unchecked_mut(1) = first_im;
 
             for i in 1..self.size / 4 {
-                let out = *input.get_unchecked(i);
-                let out_rev = *input.get_unchecked(self.size / 2 - i);
+                let re_idx = 2 * i;
+                let im_idx = 2 * i + 1;
+                let re_rev = self.size - 2 * i;
+                let im_rev = self.size - 2 * i + 1;
+
+                let out_re = *input_f32.get_unchecked(re_idx);
+                let out_im = *input_f32.get_unchecked(im_idx);
+                let out_rev_re = *input_f32.get_unchecked(re_rev);
+                let out_rev_im = *input_f32.get_unchecked(im_rev);
+
                 let twiddle = *self.twiddles.get_unchecked(i - 1);
-                let sum = out + out_rev;
-                let diff = out - out_rev;
 
-                let twiddled_re_sum = sum.im * twiddle.re;
-                let twiddled_im_sum = sum.im * twiddle.im;
-                let twiddled_re_diff = diff.re * twiddle.re;
-                let twiddled_im_diff = diff.re * twiddle.im;
+                let sum_re = out_re + out_rev_re;
+                let sum_im = out_im + out_rev_im;
+                let diff_re = out_re - out_rev_re;
+                let diff_im = out_im - out_rev_im;
 
-                let output_twiddled_real = twiddled_re_sum + twiddled_im_diff;
-                let output_twiddled_im = twiddled_im_sum - twiddled_re_diff;
+                let output_twiddled_real = sum_im * twiddle.re + diff_re * twiddle.im;
+                let output_twiddled_im = sum_im * twiddle.im - diff_re * twiddle.re;
 
-                // We finally have all the data we need to write our preprocessed data back where we got it from.
-                *input.get_unchecked_mut(i) =
-                    Complex { re: sum.re - output_twiddled_real, im: diff.im - output_twiddled_im };
-                *input.get_unchecked_mut(self.size / 2 - i) =
-                    Complex { re: sum.re + output_twiddled_real, im: -output_twiddled_im - diff.im };
+                *input_f32.get_unchecked_mut(re_idx) = sum_re - output_twiddled_real;
+                *input_f32.get_unchecked_mut(im_idx) = diff_im - output_twiddled_im;
+
+                *input_f32.get_unchecked_mut(re_rev) = sum_re + output_twiddled_real;
+                *input_f32.get_unchecked_mut(im_rev) = -output_twiddled_im - diff_im;
             }
-            *input.get_unchecked_mut(self.size / 4) = (input.get_unchecked(self.size / 4) * 2.0).conj();
+
+            *input_f32.get_unchecked_mut(self.size / 2) *= 2.0;
+            *input_f32.get_unchecked_mut(self.size / 2 + 1) = -2.0 * *input_f32.get_unchecked(self.size / 2 + 1);
         }
 
         let fft_output =
@@ -162,6 +185,10 @@ fn compute_twiddle(i: usize, size: usize) -> Complex<f32> {
     Complex { re: angle.cos(), im: angle.sin() }
 }
 
+fn complex_as_f32_slice_mut(slice: &mut [Complex<f32>]) -> &mut [f32] {
+    unsafe { std::slice::from_raw_parts_mut(slice.as_mut_ptr() as *mut f32, slice.len() * 2) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,7 +197,7 @@ mod tests {
     use realfft::RealFftPlanner;
 
     #[test]
-    fn test_realfft_roundtrip() {
+    fn test_real_fft_roundtrip() {
         for size in [8, 16, 256, 512, 1024, 2048, 4096] {
             // Generate random input in [-5, 5)
             let rng = SmallRng::seed_from_u64(size as u64);
@@ -196,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn test_realfft_vs_real_fft_forward() {
+    fn test_real_fft_vs_realfft_forward() {
         for size in [8, 16, 256, 512, 1024, 2048, 4096] {
             // Generate random input in [-5, 5)
             let rng = SmallRng::seed_from_u64(size as u64);
