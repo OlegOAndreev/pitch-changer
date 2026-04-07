@@ -1099,6 +1099,7 @@ dependencies = [
  "rand",
  "realfft",
  "rubato",
+ "rustfft",
  "symphonia",
  "wasm-bindgen",
 ]

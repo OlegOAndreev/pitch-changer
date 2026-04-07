@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 
-/// PFFFT wrapper for real-to-complex and complex-to-real transforms. This module is only available when the `pffft`
+/// PFFFT wrapper for real-to-complex, complex-to-real, and complex-to-complex transforms. This module is only available when the `pffft`
 /// feature is enabled.
 use std::ffi::c_int;
 use std::os::raw::c_void;
@@ -24,7 +24,6 @@ enum PffftDirection {
 #[derive(Copy, Clone)]
 enum PffftTransform {
     Real = 0,
-    #[allow(dead_code)]
     Complex = 1,
 }
 
@@ -56,11 +55,11 @@ impl AlignedBuffer {
         if ptr.is_null() { None } else { Some(AlignedBuffer { ptr, len }) }
     }
 
-    unsafe fn as_slice_mut(&mut self) -> &mut [f32] {
+    fn as_slice_mut(&mut self) -> &mut [f32] {
         unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
     }
 
-    unsafe fn as_slice(&self) -> &[f32] {
+    fn as_slice(&self) -> &[f32] {
         unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
     }
 }
@@ -81,6 +80,14 @@ pub struct PffftRealToComplex {
 
 /// PFFFT wrapper for complex-to-real transforms.
 pub struct PffftComplexToReal {
+    setup: *mut PffftSetup,
+    size: usize,
+    aligned_input: AlignedBuffer,
+    aligned_output: AlignedBuffer,
+}
+
+/// PFFFT wrapper for complex-to-complex transforms.
+pub struct PffftComplex {
     setup: *mut PffftSetup,
     size: usize,
     aligned_input: AlignedBuffer,
@@ -113,10 +120,10 @@ impl PffftRealToComplex {
         assert_eq!(input.len(), self.size);
         assert_eq!(output.len(), self.size / 2 + 1);
 
-        unsafe {
-            let input_slice = self.aligned_input.as_slice_mut();
-            input_slice.copy_from_slice(input);
+        let input_slice = self.aligned_input.as_slice_mut();
+        input_slice.copy_from_slice(input);
 
+        unsafe {
             pffft_transform_ordered(
                 self.setup,
                 self.aligned_input.ptr,
@@ -124,16 +131,16 @@ impl PffftRealToComplex {
                 std::ptr::null_mut(),
                 PffftDirection::Forward,
             );
-
-            let out_slice = self.aligned_output.as_slice();
-            // DC component (real) is at index 0, Nyquist (real) is at index 1
-            *output.get_unchecked_mut(0) = Complex::new(*out_slice.get_unchecked(0), 0.0);
-            for i in 1..self.size / 2 {
-                *output.get_unchecked_mut(i) =
-                    Complex::new(*out_slice.get_unchecked(2 * i), *out_slice.get_unchecked(2 * i + 1));
-            }
-            *output.get_unchecked_mut(self.size / 2) = Complex::new(*out_slice.get_unchecked(1), 0.0);
         }
+
+        let output_f32 = complex_as_f32_slice_mut(output);
+        let out_slice = self.aligned_output.as_slice();
+        // DC component (real) is at index 0, Nyquist (real) is at index 1
+        output_f32[0] = out_slice[0];
+        output_f32[1] = 0.0;
+        output_f32[2..self.size].copy_from_slice(&out_slice[2..]);
+        output_f32[self.size] = out_slice[1];
+        output_f32[self.size + 1] = 0.0;
     }
 }
 
@@ -172,16 +179,12 @@ impl PffftComplexToReal {
         assert_eq!(output.len(), self.size);
 
         // Convert complex input to packed format in aligned buffer
-        unsafe {
-            let in_slice = self.aligned_input.as_slice_mut();
-            // DC component (real) goes to index 0, Nyquist (real) goes to index 1
-            *in_slice.get_unchecked_mut(0) = input.get_unchecked(0).re;
-            *in_slice.get_unchecked_mut(1) = input.get_unchecked(self.size / 2).re;
-            for i in 1..self.size / 2 {
-                *in_slice.get_unchecked_mut(2 * i) = input.get_unchecked(i).re;
-                *in_slice.get_unchecked_mut(2 * i + 1) = input.get_unchecked(i).im;
-            }
-        }
+        let input_f32 = complex_as_f32_slice(input);
+        let in_slice = self.aligned_input.as_slice_mut();
+        // DC component (real) goes to index 0, Nyquist (real) goes to index 1
+        in_slice[0] = input_f32[0];
+        in_slice[1] = input_f32[self.size];
+        in_slice[2..].copy_from_slice(&input_f32[2..self.size]);
 
         // Perform the backward transform
         unsafe {
@@ -195,9 +198,83 @@ impl PffftComplexToReal {
         }
 
         // Copy the result to output
+        output.copy_from_slice(self.aligned_output.as_slice());
+    }
+}
+
+impl PffftComplex {
+    /// Create a new complex-to-complex PFFFT transformer for the given size. The size must be power of two.
+    pub fn new(size: usize) -> Result<Self> {
+        if !size.is_power_of_two() {
+            bail!("{} is not a power of two", size);
+        }
+
+        let setup = unsafe {
+            // SAFETY: size is a positive integer, PffftTransform::Complex is a valid enum value.
+            pffft_new_setup(size as c_int, PffftTransform::Complex)
+        };
+        if setup.is_null() {
+            bail!("pffft_new_setup failed for size {}", size);
+        }
+
+        let aligned_input = AlignedBuffer::new(2 * size).expect("Failed to allocate aligned input buffer");
+        let aligned_output = AlignedBuffer::new(2 * size).expect("Failed to allocate aligned output buffer");
+
+        Ok(Self { setup, size, aligned_input, aligned_output })
+    }
+
+    /// Perform a forward complex-to-complex transform.
+    pub fn forward(&mut self, input: &[Complex<f32>], output: &mut [Complex<f32>]) {
+        assert_eq!(input.len(), self.size);
+        assert_eq!(output.len(), self.size);
+
+        let in_slice = self.aligned_input.as_slice_mut();
+        in_slice.copy_from_slice(complex_as_f32_slice(input));
+
         unsafe {
-            let out_slice = self.aligned_output.as_slice();
-            output.copy_from_slice(out_slice);
+            pffft_transform_ordered(
+                self.setup,
+                self.aligned_input.ptr,
+                self.aligned_output.ptr,
+                std::ptr::null_mut(),
+                PffftDirection::Forward,
+            );
+        }
+
+        // Convert interleaved output back to complex
+        let out_slice = self.aligned_output.as_slice();
+        let output_f32 = complex_as_f32_slice_mut(output);
+        output_f32.copy_from_slice(out_slice);
+    }
+
+    /// Perform a backward complex-to-complex transform.
+    pub fn backward(&mut self, input: &[Complex<f32>], output: &mut [Complex<f32>]) {
+        assert_eq!(input.len(), self.size);
+        assert_eq!(output.len(), self.size);
+
+        let input_f32 = complex_as_f32_slice(input);
+        let in_slice = self.aligned_input.as_slice_mut();
+        in_slice.copy_from_slice(input_f32);
+
+        unsafe {
+            pffft_transform_ordered(
+                self.setup,
+                self.aligned_input.ptr,
+                self.aligned_output.ptr,
+                std::ptr::null_mut(),
+                PffftDirection::Backward,
+            );
+        }
+
+        let output_f32 = complex_as_f32_slice_mut(output);
+        output_f32.copy_from_slice(self.aligned_output.as_slice());
+    }
+}
+
+impl Drop for PffftComplex {
+    fn drop(&mut self) {
+        unsafe {
+            pffft_destroy_setup(self.setup);
         }
     }
 }
@@ -215,6 +292,8 @@ mod tests {
     use super::*;
     use rand::rngs::SmallRng;
     use rand::{RngExt, SeedableRng};
+    use realfft::RealFftPlanner;
+    use rustfft::FftPlanner;
 
     #[test]
     fn test_pffft_roundtrip() {
@@ -241,4 +320,111 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_pffft_complex_roundtrip() {
+        // We only care about 2^N
+        for size in [256, 1024, 4096] {
+            // Generate random complex input
+            let rng = SmallRng::seed_from_u64(size as u64);
+            let input: Vec<Complex<f32>> = rng
+                .random_iter::<f32>()
+                .take(2 * size)
+                .map(|x| x * 10.0 - 5.0)
+                .collect::<Vec<f32>>()
+                .chunks_exact(2)
+                .map(|chunk| Complex::new(chunk[0], chunk[1]))
+                .collect();
+
+            let mut transform = PffftComplex::new(size).unwrap();
+            let mut spectrum = vec![Complex::new(0.0, 0.0); size];
+            transform.forward(&input, &mut spectrum);
+
+            let mut output = vec![Complex::new(0.0, 0.0); size];
+            transform.backward(&spectrum, &mut output);
+
+            let scale = 1.0 / size as f32;
+            for (i, (orig, out)) in input.iter().zip(output.iter()).enumerate() {
+                let scaled = *out * scale;
+                let diff = (*orig - scaled).norm();
+                // Allow for some floating point error
+                assert!(
+                    diff < 1e-4,
+                    "Mismatch at index {}: original {:?}, scaled {:?}, diff {}",
+                    i,
+                    orig,
+                    scaled,
+                    diff
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_pffft_vs_realfft_forward() {
+        for size in [256, 1024, 4096] {
+            let rng = SmallRng::seed_from_u64(size as u64);
+            let input: Vec<f32> = rng.random_iter::<f32>().take(size).map(|x| x * 10.0 - 5.0).collect();
+
+            let mut pffft_forward = PffftRealToComplex::new(size).unwrap();
+            let mut spectrum_pffft = vec![Complex::new(0.0, 0.0); size / 2 + 1];
+            pffft_forward.process(&input, &mut spectrum_pffft);
+
+            let mut planner = RealFftPlanner::new();
+            let r2c = planner.plan_fft_forward(size);
+            let mut in_buf = input.clone();
+            let mut spectrum_realfft = r2c.make_output_vec();
+            let mut scratch = r2c.make_scratch_vec();
+            r2c.process_with_scratch(&mut in_buf, &mut spectrum_realfft, &mut scratch).unwrap();
+
+            // Compare
+            for (p, r) in spectrum_pffft.iter().zip(spectrum_realfft.iter()) {
+                let diff_re = (p.re - r.re).abs();
+                let diff_im = (p.im - r.im).abs();
+                assert!(diff_re < 1e-4, "Real part mismatch: PFFFT {}, realfft {}, diff {}", p.re, r.re, diff_re);
+                assert!(diff_im < 1e-4, "Imag part mismatch: PFFFT {}, realfft {}, diff {}", p.im, r.im, diff_im);
+            }
+        }
+    }
+
+    #[test]
+    fn test_pffft_vs_rustfft_forward() {
+        for size in [256, 1024, 4096] {
+            let rng = SmallRng::seed_from_u64(size as u64);
+            let input: Vec<Complex<f32>> = rng
+                .random_iter::<f32>()
+                .take(2 * size)
+                .map(|x| x * 10.0 - 5.0)
+                .collect::<Vec<f32>>()
+                .chunks_exact(2)
+                .map(|chunk| Complex::new(chunk[0], chunk[1]))
+                .collect();
+
+            let mut pffft = PffftComplex::new(size).unwrap();
+            let mut spectrum_pffft = vec![Complex::new(0.0, 0.0); size];
+            pffft.forward(&input, &mut spectrum_pffft);
+
+            let mut planner = FftPlanner::new();
+            let fft = planner.plan_fft_forward(size);
+            let mut in_buf = input.clone();
+            let mut spectrum_rustfft = vec![Complex::new(0.0, 0.0); size];
+            let mut scratch = vec![Complex::new(0.0, 0.0); size];
+            fft.process_immutable_with_scratch(&mut in_buf, &mut spectrum_rustfft, &mut scratch);
+
+            for (p, r) in spectrum_pffft.iter().zip(spectrum_rustfft.iter()) {
+                let diff_re = (p.re - r.re).abs();
+                let diff_im = (p.im - r.im).abs();
+                assert!(diff_re < 1e-3, "Real part mismatch: PFFFT {}, rustfft {}, diff {}", p.re, r.re, diff_re);
+                assert!(diff_im < 1e-3, "Imag part mismatch: PFFFT {}, rustfft {}, diff {}", p.im, r.im, diff_im);
+            }
+        }
+    }
+}
+
+fn complex_as_f32_slice(slice: &[Complex<f32>]) -> &[f32] {
+    unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const f32, slice.len() * 2) }
+}
+
+fn complex_as_f32_slice_mut(slice: &mut [Complex<f32>]) -> &mut [f32] {
+    unsafe { std::slice::from_raw_parts_mut(slice.as_mut_ptr() as *mut f32, slice.len() * 2) }
 }
