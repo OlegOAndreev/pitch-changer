@@ -40,7 +40,7 @@ fn bench_realfft_forward_sizes(c: &mut Criterion) {
         let mut out_buf = r2c.make_output_vec();
         let mut scratch_buf = r2c.make_scratch_vec();
 
-        group.bench_with_input(BenchmarkId::new("forward_fft", size), &size, |b, &_size| {
+        group.bench_with_input(BenchmarkId::new("forward_fft", size), &size, |b, _| {
             b.iter(|| {
                 in_buf.copy_from_slice(&input);
                 r2c.process_with_scratch(&mut in_buf, &mut out_buf, &mut scratch_buf).unwrap();
@@ -65,7 +65,7 @@ fn bench_rustfft_forward_sizes(c: &mut Criterion) {
         let mut out_buf = vec![Complex::ZERO; size];
         let mut scratch_buf = vec![Complex::ZERO; size];
 
-        group.bench_with_input(BenchmarkId::new("forward_fft", size), &size, |b, &_size| {
+        group.bench_with_input(BenchmarkId::new("forward_fft", size), &size, |b, _| {
             b.iter(|| {
                 in_buf.copy_from_slice(&input);
                 fft.process_immutable_with_scratch(&mut in_buf, &mut out_buf, &mut scratch_buf);
@@ -89,7 +89,7 @@ fn bench_real_fft_forward_sizes(c: &mut Criterion) {
         let mut spectrum = vec![Complex::ZERO; size / 2 + 1];
         let mut scratch = vec![Complex::ZERO; size / 2];
 
-        group.bench_with_input(BenchmarkId::new("forward_fft", size), &size, |b, &_size| {
+        group.bench_with_input(BenchmarkId::new("forward_fft", size), &size, |b, _| {
             b.iter(|| {
                 in_buf.copy_from_slice(&input);
                 forward.process(&mut in_buf, &mut spectrum, &mut scratch).unwrap();
@@ -115,7 +115,7 @@ fn bench_pffft_real_forward_sizes(c: &mut Criterion) {
         let mut pffft = PffftRealToComplex::new(size).unwrap();
         let mut output_buf = vec![Complex::new(0.0, 0.0); size / 2 + 1];
 
-        group.bench_with_input(BenchmarkId::new("forward_fft", size), &size, |b, &_size| {
+        group.bench_with_input(BenchmarkId::new("forward_fft", size), &size, |b, _| {
             b.iter(|| {
                 pffft.process(&input, &mut output_buf);
                 black_box(&output_buf);
@@ -139,7 +139,7 @@ fn bench_pffft_complex_forward_sizes(c: &mut Criterion) {
         let mut pffft = PffftComplex::new(size).unwrap();
         let mut output_buf = vec![Complex::new(0.0, 0.0); size];
 
-        group.bench_with_input(BenchmarkId::new("forward_fft", size), &size, |b, &_size| {
+        group.bench_with_input(BenchmarkId::new("forward_fft", size), &size, |b, _| {
             b.iter(|| {
                 pffft.forward(&input, &mut output_buf);
                 black_box(&output_buf);
