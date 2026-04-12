@@ -3,6 +3,7 @@ mod histogram;
 mod peak_corrector;
 #[cfg(feature = "pffft")]
 mod pffft;
+mod pffft_rs;
 mod phase_gradient_time_stretch;
 mod pitch_shifter;
 mod real_fft;
