@@ -26,7 +26,6 @@ enum PffftTransform {
     Real = 0,
     Complex = 1,
 }
-
 #[link(name = "pffft", kind = "static")]
 unsafe extern "C" {
     fn pffft_new_setup(n: c_int, transform: PffftTransform) -> *mut PffftSetup;

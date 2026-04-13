@@ -2,7 +2,7 @@
 
 // Common trait for 4-element SIMD float vectors. Each platform then defines a V4sf implementation (the platforms
 // without SIMD use ScalarVector4). For better ergonomics, all V4sf functions are re-exported with prefix v4_.
-pub trait Vector4: Copy {
+pub(crate) trait Vector4: Copy {
     /// Zero vector
     fn zero() -> Self;
 
@@ -86,7 +86,7 @@ mod sse2 {
 
     #[repr(transparent)]
     #[derive(Copy, Clone)]
-    pub struct SSE2Vector4(__m128);
+    pub(crate) struct SSE2Vector4(__m128);
 
     impl Vector4 for SSE2Vector4 {
         #[inline(always)]
@@ -177,7 +177,7 @@ mod neon {
 
     #[repr(transparent)]
     #[derive(Copy, Clone)]
-    pub struct NEONVector4(float32x4_t);
+    pub(crate) struct NEONVector4(float32x4_t);
 
     impl Vector4 for NEONVector4 {
         #[inline(always)]
@@ -266,7 +266,7 @@ mod wasm_simd {
 
     #[repr(transparent)]
     #[derive(Copy, Clone)]
-    pub struct WASMVector4(v128);
+    pub(crate) struct WASMVector4(v128);
 
     impl Vector4 for WASMVector4 {
         #[inline(always)]
@@ -348,7 +348,7 @@ mod wasm_simd {
 // Scalar fallback implementation (when SIMD is not available)
 #[repr(transparent)]
 #[derive(Copy, Clone)]
-pub struct ScalarVector4([f32; 4]);
+pub(crate) struct ScalarVector4([f32; 4]);
 
 impl Vector4 for ScalarVector4 {
     #[inline(always)]
@@ -489,97 +489,97 @@ impl Vector4 for ScalarVector4 {
 
 // Export the appropriate type based on target architecture
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-pub use sse2::SSE2Vector4 as V4sf;
+pub(crate) use sse2::SSE2Vector4 as V4sf;
 
 #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-pub use neon::NEONVector4 as V4sf;
+pub(crate) use neon::NEONVector4 as V4sf;
 
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-pub use wasm_simd::WASMVector4 as V4sf;
+pub(crate) use wasm_simd::WASMVector4 as V4sf;
 
 #[cfg(not(any(
     all(target_arch = "x86_64", target_feature = "sse2"),
     all(target_arch = "aarch64", target_feature = "neon"),
     all(target_arch = "wasm32", target_feature = "simd128")
 )))]
-pub use ScalarVector4 as V4sf;
+pub(crate) use ScalarVector4 as V4sf;
 
 // Re-export all functions in V4sf as v4_*
 
 #[inline(always)]
-pub fn v4_zero() -> V4sf {
+pub(crate) fn v4_zero() -> V4sf {
     V4sf::zero()
 }
 
 #[inline(always)]
-pub fn v4_mul(a: V4sf, b: V4sf) -> V4sf {
+pub(crate) fn v4_mul(a: V4sf, b: V4sf) -> V4sf {
     V4sf::mul(a, b)
 }
 
 #[inline(always)]
-pub fn v4_add(a: V4sf, b: V4sf) -> V4sf {
+pub(crate) fn v4_add(a: V4sf, b: V4sf) -> V4sf {
     V4sf::add(a, b)
 }
 
 #[inline(always)]
-pub fn v4_fma(a: V4sf, b: V4sf, c: V4sf) -> V4sf {
+pub(crate) fn v4_fma(a: V4sf, b: V4sf, c: V4sf) -> V4sf {
     V4sf::fma(a, b, c)
 }
 
 #[inline(always)]
-pub fn v4_sub(a: V4sf, b: V4sf) -> V4sf {
+pub(crate) fn v4_sub(a: V4sf, b: V4sf) -> V4sf {
     V4sf::sub(a, b)
 }
 
 #[inline(always)]
-pub fn v4_splat(f: f32) -> V4sf {
+pub(crate) fn v4_splat(f: f32) -> V4sf {
     V4sf::splat(f)
 }
 
 #[inline(always)]
-pub fn v4_interleave2(a: V4sf, b: V4sf) -> (V4sf, V4sf) {
+pub(crate) fn v4_interleave2(a: V4sf, b: V4sf) -> (V4sf, V4sf) {
     V4sf::interleave2(a, b)
 }
 
 #[inline(always)]
-pub fn v4_uninterleave2(a: V4sf, b: V4sf) -> (V4sf, V4sf) {
+pub(crate) fn v4_uninterleave2(a: V4sf, b: V4sf) -> (V4sf, V4sf) {
     V4sf::uninterleave2(a, b)
 }
 
 #[inline(always)]
-pub fn v4_transpose(a: V4sf, b: V4sf, c: V4sf, d: V4sf) -> (V4sf, V4sf, V4sf, V4sf) {
+pub(crate) fn v4_transpose(a: V4sf, b: V4sf, c: V4sf, d: V4sf) -> (V4sf, V4sf, V4sf, V4sf) {
     V4sf::transpose(a, b, c, d)
 }
 
 #[inline(always)]
-pub fn v4_swaphl(a: V4sf, b: V4sf) -> V4sf {
+pub(crate) fn v4_swaphl(a: V4sf, b: V4sf) -> V4sf {
     V4sf::swaphl(a, b)
 }
 
 // offset is in V4sf values (i.e. 16 bytes)
 #[inline(always)]
-pub unsafe fn v4_load(ptr: *const f32, offset: usize) -> V4sf {
+pub(crate) unsafe fn v4_load(ptr: *const f32, offset: usize) -> V4sf {
     unsafe { V4sf::load(ptr.add(offset * 4)) }
 }
 
 // offset is in V4sf values (i.e. 16 bytes)
 #[inline(always)]
-pub unsafe fn v4_store(ptr: *mut f32, offset: usize, value: V4sf) {
+pub(crate) unsafe fn v4_store(ptr: *mut f32, offset: usize, value: V4sf) {
     unsafe { V4sf::store(ptr.add(offset * 4), value) }
 }
 
 #[inline(always)]
-pub fn v4_scalar_mul(f: f32, v: V4sf) -> V4sf {
+pub(crate) fn v4_scalar_mul(f: f32, v: V4sf) -> V4sf {
     V4sf::scalar_mul(f, v)
 }
 
 #[inline(always)]
-pub fn v4_cplx_mul(ar: V4sf, ai: V4sf, br: V4sf, bi: V4sf) -> (V4sf, V4sf) {
+pub(crate) fn v4_cplx_mul(ar: V4sf, ai: V4sf, br: V4sf, bi: V4sf) -> (V4sf, V4sf) {
     V4sf::cplx_mul(ar, ai, br, bi)
 }
 
 #[inline(always)]
-pub fn v4_cplx_mul_conj(ar: V4sf, ai: V4sf, br: V4sf, bi: V4sf) -> (V4sf, V4sf) {
+pub(crate) fn v4_cplx_mul_conj(ar: V4sf, ai: V4sf, br: V4sf, bi: V4sf) -> (V4sf, V4sf) {
     V4sf::cplx_mul_conj(ar, ai, br, bi)
 }
 
