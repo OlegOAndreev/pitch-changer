@@ -4,6 +4,7 @@ use realfft::num_complex::Complex;
 use rustfft::FftPlanner;
 use std::hint::black_box;
 use wasm_main_module::FftRealToComplex;
+use wasm_main_module::{PFFFTSetup, PffftDirection, PffftTransform};
 
 fn generate_input(size: usize) -> Vec<f32> {
     let mut input = vec![0.0f32; size];
@@ -102,6 +103,44 @@ fn bench_real_fft_forward_sizes(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_pffft_rs_real_forward_sizes(c: &mut Criterion) {
+    let mut group = c.benchmark_group("pffft_rs_real");
+
+    for size in [1024usize, 2048, 4096] {
+        let input = generate_input(size);
+        let setup = PFFFTSetup::new(size, PffftTransform::Real).unwrap();
+        let mut output = vec![0.0f32; size];
+
+        group.bench_with_input(BenchmarkId::new("forward_fft", size), &size, |b, _| {
+            b.iter(|| {
+                setup.transform_ordered(&input, &mut output, None, PffftDirection::Forward);
+                black_box(&output);
+            });
+        });
+    }
+
+    group.finish();
+}
+
+fn bench_pffft_rs_complex_forward_sizes(c: &mut Criterion) {
+    let mut group = c.benchmark_group("pffft_rs_complex");
+
+    for size in [512usize, 1024, 2048] {
+        let input: Vec<f32> = generate_complex_input(size).iter().flat_map(|c| [c.re, c.im]).collect();
+        let setup = PFFFTSetup::new(size, PffftTransform::Complex).unwrap();
+        let mut output = vec![0.0f32; 2 * size];
+
+        group.bench_with_input(BenchmarkId::new("forward_fft", size), &size, |b, _| {
+            b.iter(|| {
+                setup.transform_ordered(&input, &mut output, None, PffftDirection::Forward);
+                black_box(&output);
+            });
+        });
+    }
+
+    group.finish();
+}
+
 #[cfg(feature = "pffft")]
 fn bench_pffft_real_forward_sizes(c: &mut Criterion) {
     use realfft::num_complex::Complex;
@@ -155,12 +194,21 @@ criterion_group!(
     benches,
     bench_realfft_forward_sizes,
     bench_real_fft_forward_sizes,
+    bench_pffft_rs_real_forward_sizes,
     bench_pffft_real_forward_sizes,
     bench_rustfft_forward_sizes,
+    bench_pffft_rs_complex_forward_sizes,
     bench_pffft_complex_forward_sizes,
 );
 
 #[cfg(not(feature = "pffft"))]
-criterion_group!(benches, bench_realfft_forward_sizes, bench_real_fft_forward_sizes, bench_rustfft_forward_sizes);
+criterion_group!(
+    benches,
+    bench_realfft_forward_sizes,
+    bench_real_fft_forward_sizes,
+    bench_pffft_rs_real_forward_sizes,
+    bench_rustfft_forward_sizes,
+    bench_pffft_rs_complex_forward_sizes,
+);
 
 criterion_main!(benches);
