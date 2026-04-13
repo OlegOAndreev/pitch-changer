@@ -1,48 +1,25 @@
 #[allow(dead_code)]
 
-// Architecture-specific imports are within each module
-
-// Common trait for 4-element SIMD float vectors
+// Common trait for 4-element SIMD float vectors. Each platform then defines a V4sf implementation (the platforms
+// without SIMD use ScalarVector4). For better ergonomics, all V4sf functions are re-exported with prefix v4_.
 pub trait Vector4: Copy {
     /// Zero vector
-    fn vzero() -> Self;
+    fn zero() -> Self;
 
     /// Element-wise multiplication
-    fn vmul(a: Self, b: Self) -> Self;
+    fn mul(a: Self, b: Self) -> Self;
 
     /// Element-wise addition
-    fn vadd(a: Self, b: Self) -> Self;
+    fn add(a: Self, b: Self) -> Self;
 
     /// Fused multiply-add: a * b + c
-    fn vmadd(a: Self, b: Self, c: Self) -> Self;
+    fn fma(a: Self, b: Self, c: Self) -> Self;
 
     /// Element-wise subtraction
-    fn vsub(a: Self, b: Self) -> Self;
+    fn sub(a: Self, b: Self) -> Self;
 
     /// Broadcast scalar to all lanes
-    fn vldps1(f: f32) -> Self;
-
-    /// Scalar-vector multiplication: f * v
-    #[inline(always)]
-    fn svmul(f: f32, v: Self) -> Self {
-        Self::vmul(Self::vldps1(f), v)
-    }
-
-    /// Complex multiplication: (ar + i*ai) * (br + i*bi) -> (ar', ai')
-    #[inline(always)]
-    fn vcplxmul(ar: Self, ai: Self, br: Self, bi: Self) -> (Self, Self) {
-        let ar_result = Self::vsub(Self::vmul(ar, br), Self::vmul(ai, bi));
-        let ai_result = Self::vadd(Self::vmul(ai, br), Self::vmul(ar, bi));
-        (ar_result, ai_result)
-    }
-
-    /// Complex multiplication with conjugate: (ar + i*ai) * (br - i*bi) -> (ar', ai')
-    #[inline(always)]
-    fn vcplxmulconj(ar: Self, ai: Self, br: Self, bi: Self) -> (Self, Self) {
-        let ar_result = Self::vadd(Self::vmul(ar, br), Self::vmul(ai, bi));
-        let ai_result = Self::vsub(Self::vmul(ai, br), Self::vmul(ar, bi));
-        (ar_result, ai_result)
-    }
+    fn splat(f: f32) -> Self;
 
     /// Interleave two vectors (zips them). Returns (interleaved_low, interleaved_high)
     fn interleave2(a: Self, b: Self) -> (Self, Self);
@@ -54,26 +31,46 @@ pub trait Vector4: Copy {
     fn transpose(a: Self, b: Self, c: Self, d: Self) -> (Self, Self, Self, Self);
 
     /// Swap high and low halves: result[0..2] = b[0..2], result[2..4] = a[2..4]
-    fn vswaphl(a: Self, b: Self) -> Self;
+    fn swaphl(a: Self, b: Self) -> Self;
 
     /// Unaligned load from memory
-    unsafe fn vloadu(ptr: *const f32) -> Self;
+    unsafe fn load(ptr: *const f32) -> Self;
 
     /// Unaligned store to memory
-    unsafe fn vstoreu(ptr: *mut f32, value: Self);
+    unsafe fn store(ptr: *mut f32, value: Self);
 
     /// Safe load from an unaligned slice
     #[inline(always)]
     fn load_from_slice(slice: &[f32]) -> Self {
         assert!(slice.len() >= 4, "slice must have at least 4 elements for Vector4 load");
-        unsafe { Self::vloadu(slice.as_ptr()) }
+        unsafe { Self::load(slice.as_ptr()) }
     }
 
     /// Safe store to an unaligned slice
     #[inline(always)]
     fn store_to_slice(self, slice: &mut [f32]) {
         assert!(slice.len() >= 4, "slice must have at least 4 elements for Vector4 store");
-        unsafe { Self::vstoreu(slice.as_mut_ptr(), self) }
+        unsafe { Self::store(slice.as_mut_ptr(), self) }
+    }
+
+    fn scalar_mul(f: f32, v: Self) -> Self {
+        Self::mul(Self::splat(f), v)
+    }
+
+    /// Complex multiplication: (ar + i*ai) * (br + i*bi) -> (ar', ai')
+    #[inline(always)]
+    fn cplx_mul(ar: Self, ai: Self, br: Self, bi: Self) -> (Self, Self) {
+        let ar_result = Self::sub(Self::mul(ar, br), Self::mul(ai, bi));
+        let ai_result = Self::add(Self::mul(ai, br), Self::mul(ar, bi));
+        (ar_result, ai_result)
+    }
+
+    /// Complex multiplication with conjugate: (ar + i*ai) * (br - i*bi) -> (ar', ai')
+    #[inline(always)]
+    fn cplx_mul_conj(ar: Self, ai: Self, br: Self, bi: Self) -> (Self, Self) {
+        let ar_result = Self::add(Self::mul(ar, br), Self::mul(ai, bi));
+        let ai_result = Self::sub(Self::mul(ai, br), Self::mul(ar, bi));
+        (ar_result, ai_result)
     }
 }
 
@@ -93,32 +90,32 @@ mod sse2 {
 
     impl Vector4 for SSE2Vector4 {
         #[inline(always)]
-        fn vzero() -> Self {
+        fn zero() -> Self {
             unsafe { SSE2Vector4(_mm_setzero_ps()) }
         }
 
         #[inline(always)]
-        fn vmul(a: Self, b: Self) -> Self {
+        fn mul(a: Self, b: Self) -> Self {
             unsafe { SSE2Vector4(_mm_mul_ps(a.0, b.0)) }
         }
 
         #[inline(always)]
-        fn vadd(a: Self, b: Self) -> Self {
+        fn add(a: Self, b: Self) -> Self {
             unsafe { SSE2Vector4(_mm_add_ps(a.0, b.0)) }
         }
 
         #[inline(always)]
-        fn vmadd(a: Self, b: Self, c: Self) -> Self {
+        fn fma(a: Self, b: Self, c: Self) -> Self {
             unsafe { SSE2Vector4(_mm_add_ps(_mm_mul_ps(a.0, b.0), c.0)) }
         }
 
         #[inline(always)]
-        fn vsub(a: Self, b: Self) -> Self {
+        fn sub(a: Self, b: Self) -> Self {
             unsafe { SSE2Vector4(_mm_sub_ps(a.0, b.0)) }
         }
 
         #[inline(always)]
-        fn vldps1(f: f32) -> Self {
+        fn splat(f: f32) -> Self {
             unsafe { SSE2Vector4(_mm_set1_ps(f)) }
         }
 
@@ -147,20 +144,20 @@ mod sse2 {
         }
 
         #[inline(always)]
-        fn vswaphl(a: Self, b: Self) -> Self {
+        fn swaphl(a: Self, b: Self) -> Self {
             unsafe {
-                // _MM_SHUFFLE(3,2,1,0): result = [b0, b1, a2, a3] (matches VSWAPHL)
+                // _MM_SHUFFLE(3,2,1,0): result = [b0, b1, a2, a3] (matches swaphl)
                 SSE2Vector4(_mm_shuffle_ps(b.0, a.0, 0b11100100))
             }
         }
 
         #[inline(always)]
-        unsafe fn vloadu(ptr: *const f32) -> Self {
+        unsafe fn load(ptr: *const f32) -> Self {
             unsafe { SSE2Vector4(_mm_loadu_ps(ptr)) }
         }
 
         #[inline(always)]
-        unsafe fn vstoreu(ptr: *mut f32, value: Self) {
+        unsafe fn store(ptr: *mut f32, value: Self) {
             unsafe {
                 _mm_storeu_ps(ptr, value.0);
             }
@@ -184,32 +181,32 @@ mod neon {
 
     impl Vector4 for NEONVector4 {
         #[inline(always)]
-        fn vzero() -> Self {
+        fn zero() -> Self {
             unsafe { NEONVector4(vdupq_n_f32(0.0)) }
         }
 
         #[inline(always)]
-        fn vmul(a: Self, b: Self) -> Self {
+        fn mul(a: Self, b: Self) -> Self {
             unsafe { NEONVector4(vmulq_f32(a.0, b.0)) }
         }
 
         #[inline(always)]
-        fn vadd(a: Self, b: Self) -> Self {
+        fn add(a: Self, b: Self) -> Self {
             unsafe { NEONVector4(vaddq_f32(a.0, b.0)) }
         }
 
         #[inline(always)]
-        fn vmadd(a: Self, b: Self, c: Self) -> Self {
+        fn fma(a: Self, b: Self, c: Self) -> Self {
             unsafe { NEONVector4(vmlaq_f32(c.0, a.0, b.0)) }
         }
 
         #[inline(always)]
-        fn vsub(a: Self, b: Self) -> Self {
+        fn sub(a: Self, b: Self) -> Self {
             unsafe { NEONVector4(vsubq_f32(a.0, b.0)) }
         }
 
         #[inline(always)]
-        fn vldps1(f: f32) -> Self {
+        fn splat(f: f32) -> Self {
             unsafe { NEONVector4(vld1q_dup_f32(&f)) }
         }
 
@@ -241,7 +238,7 @@ mod neon {
         }
 
         #[inline(always)]
-        fn vswaphl(a: Self, b: Self) -> Self {
+        fn swaphl(a: Self, b: Self) -> Self {
             unsafe {
                 // Combine low half of b with high half of a
                 NEONVector4(vcombine_f32(vget_low_f32(b.0), vget_high_f32(a.0)))
@@ -249,12 +246,12 @@ mod neon {
         }
 
         #[inline(always)]
-        unsafe fn vloadu(ptr: *const f32) -> Self {
+        unsafe fn load(ptr: *const f32) -> Self {
             unsafe { NEONVector4(vld1q_f32(ptr)) }
         }
 
         #[inline(always)]
-        unsafe fn vstoreu(ptr: *mut f32, value: Self) {
+        unsafe fn store(ptr: *mut f32, value: Self) {
             unsafe { vst1q_f32(ptr, value.0) }
         }
     }
@@ -273,32 +270,32 @@ mod wasm_simd {
 
     impl Vector4 for WASMVector4 {
         #[inline(always)]
-        fn vzero() -> Self {
+        fn zero() -> Self {
             WASMVector4(f32x4_splat(0.0))
         }
 
         #[inline(always)]
-        fn vmul(a: Self, b: Self) -> Self {
+        fn mul(a: Self, b: Self) -> Self {
             WASMVector4(f32x4_mul(a.0, b.0))
         }
 
         #[inline(always)]
-        fn vadd(a: Self, b: Self) -> Self {
+        fn add(a: Self, b: Self) -> Self {
             WASMVector4(f32x4_add(a.0, b.0))
         }
 
         #[inline(always)]
-        fn vmadd(a: Self, b: Self, c: Self) -> Self {
+        fn fma(a: Self, b: Self, c: Self) -> Self {
             WASMVector4(f32x4_add(f32x4_mul(a.0, b.0), c.0))
         }
 
         #[inline(always)]
-        fn vsub(a: Self, b: Self) -> Self {
+        fn sub(a: Self, b: Self) -> Self {
             WASMVector4(f32x4_sub(a.0, b.0))
         }
 
         #[inline(always)]
-        fn vldps1(f: f32) -> Self {
+        fn splat(f: f32) -> Self {
             WASMVector4(f32x4_splat(f))
         }
 
@@ -331,18 +328,18 @@ mod wasm_simd {
         }
 
         #[inline(always)]
-        fn vswaphl(a: Self, b: Self) -> Self {
+        fn swaphl(a: Self, b: Self) -> Self {
             // result: [b0, b1, a2, a3]
             WASMVector4(i32x4_shuffle::<4, 5, 2, 3>(a.0, b.0))
         }
 
         #[inline(always)]
-        unsafe fn vloadu(ptr: *const f32) -> Self {
+        unsafe fn load(ptr: *const f32) -> Self {
             unsafe { WASMVector4(v128_load(ptr as *const v128)) }
         }
 
         #[inline(always)]
-        unsafe fn vstoreu(ptr: *mut f32, value: Self) {
+        unsafe fn store(ptr: *mut f32, value: Self) {
             unsafe { v128_store(ptr as *mut v128, value.0) }
         }
     }
@@ -355,12 +352,12 @@ pub struct ScalarVector4([f32; 4]);
 
 impl Vector4 for ScalarVector4 {
     #[inline(always)]
-    fn vzero() -> Self {
+    fn zero() -> Self {
         ScalarVector4([0.0; 4])
     }
 
     #[inline(always)]
-    fn vmul(a: Self, b: Self) -> Self {
+    fn mul(a: Self, b: Self) -> Self {
         let mut result = [0.0; 4];
         for i in 0..4 {
             result[i] = a.0[i] * b.0[i];
@@ -369,7 +366,7 @@ impl Vector4 for ScalarVector4 {
     }
 
     #[inline(always)]
-    fn vadd(a: Self, b: Self) -> Self {
+    fn add(a: Self, b: Self) -> Self {
         let mut result = [0.0; 4];
         for i in 0..4 {
             result[i] = a.0[i] + b.0[i];
@@ -378,7 +375,7 @@ impl Vector4 for ScalarVector4 {
     }
 
     #[inline(always)]
-    fn vmadd(a: Self, b: Self, c: Self) -> Self {
+    fn fma(a: Self, b: Self, c: Self) -> Self {
         let mut result = [0.0; 4];
         for i in 0..4 {
             result[i] = a.0[i] * b.0[i] + c.0[i];
@@ -387,7 +384,7 @@ impl Vector4 for ScalarVector4 {
     }
 
     #[inline(always)]
-    fn vsub(a: Self, b: Self) -> Self {
+    fn sub(a: Self, b: Self) -> Self {
         let mut result = [0.0; 4];
         for i in 0..4 {
             result[i] = a.0[i] - b.0[i];
@@ -396,7 +393,7 @@ impl Vector4 for ScalarVector4 {
     }
 
     #[inline(always)]
-    fn vldps1(f: f32) -> Self {
+    fn splat(f: f32) -> Self {
         ScalarVector4([f; 4])
     }
 
@@ -467,7 +464,7 @@ impl Vector4 for ScalarVector4 {
     }
 
     #[inline(always)]
-    fn vswaphl(a: Self, b: Self) -> Self {
+    fn swaphl(a: Self, b: Self) -> Self {
         let mut result = [0.0; 4];
         result[0] = b.0[0];
         result[1] = b.0[1];
@@ -477,7 +474,7 @@ impl Vector4 for ScalarVector4 {
     }
 
     #[inline(always)]
-    unsafe fn vloadu(ptr: *const f32) -> Self {
+    unsafe fn load(ptr: *const f32) -> Self {
         // Note: scalar load doesn't care about alignment
         let mut arr = [0.0; 4];
         unsafe { std::ptr::copy_nonoverlapping(ptr, arr.as_mut_ptr(), 4) }
@@ -485,31 +482,110 @@ impl Vector4 for ScalarVector4 {
     }
 
     #[inline(always)]
-    unsafe fn vstoreu(ptr: *mut f32, value: Self) {
+    unsafe fn store(ptr: *mut f32, value: Self) {
         unsafe { std::ptr::copy_nonoverlapping(value.0.as_ptr(), ptr, 4) }
     }
 }
 
 // Export the appropriate type based on target architecture
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-pub use sse2::SSE2Vector4 as SimdVector4;
+pub use sse2::SSE2Vector4 as V4sf;
 
 #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
-pub use neon::NEONVector4 as SimdVector4;
+pub use neon::NEONVector4 as V4sf;
 
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-pub use wasm_simd::WASMVector4 as SimdVector4;
+pub use wasm_simd::WASMVector4 as V4sf;
 
 #[cfg(not(any(
     all(target_arch = "x86_64", target_feature = "sse2"),
     all(target_arch = "aarch64", target_feature = "neon"),
     all(target_arch = "wasm32", target_feature = "simd128")
 )))]
-pub use ScalarVector4 as SimdVector4;
+pub use ScalarVector4 as V4sf;
+
+// Re-export all functions in V4sf as v4_*
+
+#[inline(always)]
+pub fn v4_zero() -> V4sf {
+    V4sf::zero()
+}
+
+#[inline(always)]
+pub fn v4_mul(a: V4sf, b: V4sf) -> V4sf {
+    V4sf::mul(a, b)
+}
+
+#[inline(always)]
+pub fn v4_add(a: V4sf, b: V4sf) -> V4sf {
+    V4sf::add(a, b)
+}
+
+#[inline(always)]
+pub fn v4_fma(a: V4sf, b: V4sf, c: V4sf) -> V4sf {
+    V4sf::fma(a, b, c)
+}
+
+#[inline(always)]
+pub fn v4_sub(a: V4sf, b: V4sf) -> V4sf {
+    V4sf::sub(a, b)
+}
+
+#[inline(always)]
+pub fn v4_splat(f: f32) -> V4sf {
+    V4sf::splat(f)
+}
+
+#[inline(always)]
+pub fn v4_interleave2(a: V4sf, b: V4sf) -> (V4sf, V4sf) {
+    V4sf::interleave2(a, b)
+}
+
+#[inline(always)]
+pub fn v4_uninterleave2(a: V4sf, b: V4sf) -> (V4sf, V4sf) {
+    V4sf::uninterleave2(a, b)
+}
+
+#[inline(always)]
+pub fn v4_transpose(a: V4sf, b: V4sf, c: V4sf, d: V4sf) -> (V4sf, V4sf, V4sf, V4sf) {
+    V4sf::transpose(a, b, c, d)
+}
+
+#[inline(always)]
+pub fn v4_swaphl(a: V4sf, b: V4sf) -> V4sf {
+    V4sf::swaphl(a, b)
+}
+
+// offset is in V4sf values (i.e. 16 bytes)
+#[inline(always)]
+pub unsafe fn v4_load(ptr: *const f32, offset: usize) -> V4sf {
+    unsafe { V4sf::load(ptr.add(offset * 4)) }
+}
+
+// offset is in V4sf values (i.e. 16 bytes)
+#[inline(always)]
+pub unsafe fn v4_store(ptr: *mut f32, offset: usize, value: V4sf) {
+    unsafe { V4sf::store(ptr.add(offset * 4), value) }
+}
+
+#[inline(always)]
+pub fn v4_scalar_mul(f: f32, v: V4sf) -> V4sf {
+    V4sf::scalar_mul(f, v)
+}
+
+#[inline(always)]
+pub fn v4_cplx_mul(ar: V4sf, ai: V4sf, br: V4sf, bi: V4sf) -> (V4sf, V4sf) {
+    V4sf::cplx_mul(ar, ai, br, bi)
+}
+
+#[inline(always)]
+pub fn v4_cplx_mul_conj(ar: V4sf, ai: V4sf, br: V4sf, bi: V4sf) -> (V4sf, V4sf) {
+    V4sf::cplx_mul_conj(ar, ai, br, bi)
+}
 
 #[cfg(test)]
 mod tests {
-    use super::{ScalarVector4, SimdVector4, Vector4};
+    use super::{ScalarVector4, V4sf, Vector4};
 
     fn to_array<T: Vector4>(v: T) -> [f32; 4] {
         let mut arr = [0.0; 4];
@@ -521,55 +597,55 @@ mod tests {
     fn validate_simd_operations() {
         // Data from the C test
         let f: [f32; 16] = [0., 1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15.];
-        let a0 = SimdVector4::load_from_slice(&f[0..]);
-        let a1 = SimdVector4::load_from_slice(&f[4..]);
-        let a2 = SimdVector4::load_from_slice(&f[8..]);
-        let a3 = SimdVector4::load_from_slice(&f[12..]);
+        let a0 = V4sf::load_from_slice(&f[0..]);
+        let a1 = V4sf::load_from_slice(&f[4..]);
+        let a2 = V4sf::load_from_slice(&f[8..]);
+        let a3 = V4sf::load_from_slice(&f[12..]);
 
-        // Test VZERO
-        let t = SimdVector4::vzero();
+        // Test zero
+        let t = V4sf::zero();
         let t_arr = to_array(t);
-        assert_eq!(t_arr, [0., 0., 0., 0.], "VZERO failed");
+        assert_eq!(t_arr, [0., 0., 0., 0.], "zero failed");
 
-        // Test VADD
-        let t = SimdVector4::vadd(a1, a2);
+        // Test add
+        let t = V4sf::add(a1, a2);
         let t_arr = to_array(t);
         let expected = [12., 14., 16., 18.];
         for (i, (a, b)) in t_arr.iter().zip(expected.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-5, "VADD failed at index {}: expected {}, got {}", i, b, a);
+            assert!((a - b).abs() < 1e-5, "add failed at index {}: expected {}, got {}", i, b, a);
         }
 
-        // Test VMUL
-        let t = SimdVector4::vmul(a1, a2);
+        // Test mul
+        let t = V4sf::mul(a1, a2);
         let t_arr = to_array(t);
         let expected = [32., 45., 60., 77.];
         for (i, (a, b)) in t_arr.iter().zip(expected.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-5, "VMUL failed at index {}: expected {}, got {}", i, b, a);
+            assert!((a - b).abs() < 1e-5, "mul failed at index {}: expected {}, got {}", i, b, a);
         }
 
-        // Test VMADD
-        let t = SimdVector4::vmadd(a1, a2, a0);
+        // Test fma
+        let t = V4sf::fma(a1, a2, a0);
         let t_arr = to_array(t);
         let expected = [32., 46., 62., 80.];
         for (i, (a, b)) in t_arr.iter().zip(expected.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-5, "VMADD failed at index {}: expected {}, got {}", i, b, a);
+            assert!((a - b).abs() < 1e-5, "fma failed at index {}: expected {}, got {}", i, b, a);
         }
 
-        // Test INTERLEAVE2
-        let (t, u) = SimdVector4::interleave2(a1, a2);
+        // Test interleave2
+        let (t, u) = V4sf::interleave2(a1, a2);
         let t_arr = to_array(t);
         let u_arr = to_array(u);
         let expected_t = [4., 8., 5., 9.];
         let expected_u = [6., 10., 7., 11.];
         for (i, (a, b)) in t_arr.iter().zip(expected_t.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-5, "INTERLEAVE2 first output failed at index {}: expected {}, got {}", i, b, a);
+            assert!((a - b).abs() < 1e-5, "interleave2 first output failed at index {}: expected {}, got {}", i, b, a);
         }
         for (i, (a, b)) in u_arr.iter().zip(expected_u.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-5, "INTERLEAVE2 second output failed at index {}: expected {}, got {}", i, b, a);
+            assert!((a - b).abs() < 1e-5, "interleave2 second output failed at index {}: expected {}, got {}", i, b, a);
         }
 
-        // Test UNINTERLEAVE2
-        let (t, u) = SimdVector4::uninterleave2(a1, a2);
+        // Test uninterleave2
+        let (t, u) = V4sf::uninterleave2(a1, a2);
         let t_arr = to_array(t);
         let u_arr = to_array(u);
         let expected_t = [4., 6., 8., 10.];
@@ -577,7 +653,7 @@ mod tests {
         for (i, (a, b)) in t_arr.iter().zip(expected_t.iter()).enumerate() {
             assert!(
                 (a - b).abs() < 1e-5,
-                "UNINTERLEAVE2 first output failed at index {}: expected {}, got {}",
+                "uninterleave2 first output failed at index {}: expected {}, got {}",
                 i,
                 b,
                 a
@@ -586,39 +662,38 @@ mod tests {
         for (i, (a, b)) in u_arr.iter().zip(expected_u.iter()).enumerate() {
             assert!(
                 (a - b).abs() < 1e-5,
-                "UNINTERLEAVE2 second output failed at index {}: expected {}, got {}",
+                "uninterleave2 second output failed at index {}: expected {}, got {}",
                 i,
                 b,
                 a
             );
         }
 
-        // Test vldps1 (broadcast)
-        let t = SimdVector4::vldps1(15.);
+        // Test splat (broadcast)
+        let t = V4sf::splat(15.);
         let t_arr = to_array(t);
         let expected = [15., 15., 15., 15.];
         for (i, (a, b)) in t_arr.iter().zip(expected.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-5, "vldps1 failed at index {}: expected {}, got {}", i, b, a);
+            assert!((a - b).abs() < 1e-5, "splat failed at index {}: expected {}, got {}", i, b, a);
         }
 
-        // Test SVMUL (scalar-vector multiplication)
-        let t = SimdVector4::svmul(2.0, a1);
+        let t = V4sf::scalar_mul(2.0, a1);
         let t_arr = to_array(t);
         let expected = [8., 10., 12., 14.]; // a1 is [4.,5.,6.,7.] * 2
         for (i, (a, b)) in t_arr.iter().zip(expected.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-5, "SVMUL failed at index {}: expected {}, got {}", i, b, a);
+            assert!((a - b).abs() < 1e-5, "scalar_mul failed at index {}: expected {}, got {}", i, b, a);
         }
 
-        // Test VSWAPHL
-        let t = SimdVector4::vswaphl(a1, a2);
+        // Test swaphl
+        let t = V4sf::swaphl(a1, a2);
         let t_arr = to_array(t);
         let expected = [8., 9., 6., 7.];
         for (i, (a, b)) in t_arr.iter().zip(expected.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-5, "VSWAPHL failed at index {}: expected {}, got {}", i, b, a);
+            assert!((a - b).abs() < 1e-5, "swaphl failed at index {}: expected {}, got {}", i, b, a);
         }
 
-        // Test VTRANSPOSE4 (transpose)
-        let (x0, x1, x2, x3) = SimdVector4::transpose(a0, a1, a2, a3);
+        // Test transpose
+        let (x0, x1, x2, x3) = V4sf::transpose(a0, a1, a2, a3);
         let x0_arr = to_array(x0);
         let x1_arr = to_array(x1);
         let x2_arr = to_array(x2);
@@ -628,42 +703,42 @@ mod tests {
         let expected_x2 = [2., 6., 10., 14.];
         let expected_x3 = [3., 7., 11., 15.];
         for (i, (a, b)) in x0_arr.iter().zip(expected_x0.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-5, "VTRANSPOSE4 x0 failed at index {}: expected {}, got {}", i, b, a);
+            assert!((a - b).abs() < 1e-5, "transpose x0 failed at index {}: expected {}, got {}", i, b, a);
         }
         for (i, (a, b)) in x1_arr.iter().zip(expected_x1.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-5, "VTRANSPOSE4 x1 failed at index {}: expected {}, got {}", i, b, a);
+            assert!((a - b).abs() < 1e-5, "transpose x1 failed at index {}: expected {}, got {}", i, b, a);
         }
         for (i, (a, b)) in x2_arr.iter().zip(expected_x2.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-5, "VTRANSPOSE4 x2 failed at index {}: expected {}, got {}", i, b, a);
+            assert!((a - b).abs() < 1e-5, "transpose x2 failed at index {}: expected {}, got {}", i, b, a);
         }
         for (i, (a, b)) in x3_arr.iter().zip(expected_x3.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-5, "VTRANSPOSE4 x3 failed at index {}: expected {}, got {}", i, b, a);
+            assert!((a - b).abs() < 1e-5, "transpose x3 failed at index {}: expected {}, got {}", i, b, a);
         }
 
-        // Test VCPLXMUL
-        let (ar, ai) = SimdVector4::vcplxmul(a1, a2, a3, a0);
+        // Test cplx_mul
+        let (ar, ai) = V4sf::cplx_mul(a1, a2, a3, a0);
         let ar_arr = to_array(ar);
         let ai_arr = to_array(ai);
         let expected_ar = [48., 56., 64., 72.];
         let expected_ai = [96., 122., 152., 186.];
         for (i, (a, b)) in ar_arr.iter().zip(expected_ar.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-5, "VCPLXMUL real part failed at index {}: expected {}, got {}", i, b, a);
+            assert!((a - b).abs() < 1e-5, "cplx_mul real part failed at index {}: expected {}, got {}", i, b, a);
         }
         for (i, (a, b)) in ai_arr.iter().zip(expected_ai.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-5, "VCPLXMUL imag part failed at index {}: expected {}, got {}", i, b, a);
+            assert!((a - b).abs() < 1e-5, "cplx_mul imag part failed at index {}: expected {}, got {}", i, b, a);
         }
 
-        // Test VCPLXMULCONJ
-        let (ar, ai) = SimdVector4::vcplxmulconj(a1, a2, a3, a0);
+        // Test cplx_mul_conj
+        let (ar, ai) = V4sf::cplx_mul_conj(a1, a2, a3, a0);
         let ar_arr = to_array(ar);
         let ai_arr = to_array(ai);
         let expected_ar = [48., 74., 104., 138.];
         let expected_ai = [96., 112., 128., 144.];
         for (i, (a, b)) in ar_arr.iter().zip(expected_ar.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-5, "VCPLXMULCONJ real part failed at index {}: expected {}, got {}", i, b, a);
+            assert!((a - b).abs() < 1e-5, "cplx_mul_conj real part failed at index {}: expected {}, got {}", i, b, a);
         }
         for (i, (a, b)) in ai_arr.iter().zip(expected_ai.iter()).enumerate() {
-            assert!((a - b).abs() < 1e-5, "VCPLXMULCONJ imag part failed at index {}: expected {}, got {}", i, b, a);
+            assert!((a - b).abs() < 1e-5, "cplx_mul_conj imag part failed at index {}: expected {}, got {}", i, b, a);
         }
     }
 
@@ -671,20 +746,20 @@ mod tests {
     #[should_panic(expected = "slice must have at least 4 elements for Vector4 load")]
     fn test_load_from_slice_too_short() {
         let data = [1.0, 2.0, 3.0];
-        let _ = SimdVector4::load_from_slice(&data);
+        let _ = V4sf::load_from_slice(&data);
     }
 
     #[test]
     #[should_panic(expected = "slice must have at least 4 elements for Vector4 store")]
     fn test_store_to_slice_too_short() {
-        let v = SimdVector4::vzero();
+        let v = V4sf::zero();
         let mut out = [0.0; 3];
         v.store_to_slice(&mut out);
     }
 
     #[test]
     fn test_simd_scalar_equivalence() {
-        // Test that SimdVector4 and ScalarVector4 produce identical results for all operations
+        // Test that V4sf and ScalarVector4 produce identical results for all operations
         use super::Vector4;
 
         // Test data
@@ -694,10 +769,10 @@ mod tests {
         let a2_arr = [f[8], f[9], f[10], f[11]];
         let a3_arr = [f[12], f[13], f[14], f[15]];
 
-        let simd_a0 = SimdVector4::load_from_slice(&a0_arr);
-        let simd_a1 = SimdVector4::load_from_slice(&a1_arr);
-        let simd_a2 = SimdVector4::load_from_slice(&a2_arr);
-        let simd_a3 = SimdVector4::load_from_slice(&a3_arr);
+        let simd_a0 = V4sf::load_from_slice(&a0_arr);
+        let simd_a1 = V4sf::load_from_slice(&a1_arr);
+        let simd_a2 = V4sf::load_from_slice(&a2_arr);
+        let simd_a3 = V4sf::load_from_slice(&a3_arr);
 
         let scalar_a0 = ScalarVector4::load_from_slice(&a0_arr);
         let scalar_a1 = ScalarVector4::load_from_slice(&a1_arr);
@@ -721,35 +796,31 @@ mod tests {
         }
 
         // Test each operation
-        compare(SimdVector4::vzero(), ScalarVector4::vzero(), "vzero");
-        compare(SimdVector4::vadd(simd_a1, simd_a2), ScalarVector4::vadd(scalar_a1, scalar_a2), "vadd");
-        compare(SimdVector4::vmul(simd_a1, simd_a2), ScalarVector4::vmul(scalar_a1, scalar_a2), "vmul");
-        compare(
-            SimdVector4::vmadd(simd_a1, simd_a2, simd_a0),
-            ScalarVector4::vmadd(scalar_a1, scalar_a2, scalar_a0),
-            "vmadd",
-        );
-        compare(SimdVector4::vsub(simd_a1, simd_a2), ScalarVector4::vsub(scalar_a1, scalar_a2), "vsub");
-        compare(SimdVector4::vldps1(15.0), ScalarVector4::vldps1(15.0), "vldps1");
-        compare(SimdVector4::svmul(2.0, simd_a1), ScalarVector4::svmul(2.0, scalar_a1), "svmul");
+        compare(V4sf::zero(), ScalarVector4::zero(), "zero");
+        compare(V4sf::add(simd_a1, simd_a2), ScalarVector4::add(scalar_a1, scalar_a2), "add");
+        compare(V4sf::mul(simd_a1, simd_a2), ScalarVector4::mul(scalar_a1, scalar_a2), "mul");
+        compare(V4sf::fma(simd_a1, simd_a2, simd_a0), ScalarVector4::fma(scalar_a1, scalar_a2, scalar_a0), "fma");
+        compare(V4sf::sub(simd_a1, simd_a2), ScalarVector4::sub(scalar_a1, scalar_a2), "sub");
+        compare(V4sf::splat(15.0), ScalarVector4::splat(15.0), "vldps1");
+        compare(V4sf::scalar_mul(2.0, simd_a1), ScalarVector4::scalar_mul(2.0, scalar_a1), "scalar_mul");
 
         // Interleave2
-        let (simd_t, simd_u) = SimdVector4::interleave2(simd_a1, simd_a2);
+        let (simd_t, simd_u) = V4sf::interleave2(simd_a1, simd_a2);
         let (scalar_t, scalar_u) = ScalarVector4::interleave2(scalar_a1, scalar_a2);
         compare(simd_t, scalar_t, "interleave2 first");
         compare(simd_u, scalar_u, "interleave2 second");
 
         // Uninterleave2
-        let (simd_t, simd_u) = SimdVector4::uninterleave2(simd_a1, simd_a2);
+        let (simd_t, simd_u) = V4sf::uninterleave2(simd_a1, simd_a2);
         let (scalar_t, scalar_u) = ScalarVector4::uninterleave2(scalar_a1, scalar_a2);
         compare(simd_t, scalar_t, "uninterleave2 first");
         compare(simd_u, scalar_u, "uninterleave2 second");
 
-        // VSWAPHL
-        compare(SimdVector4::vswaphl(simd_a1, simd_a2), ScalarVector4::vswaphl(scalar_a1, scalar_a2), "vswaphl");
+        // swaphl
+        compare(V4sf::swaphl(simd_a1, simd_a2), ScalarVector4::swaphl(scalar_a1, scalar_a2), "swaphl");
 
         // Transpose
-        let (simd_x0, simd_x1, simd_x2, simd_x3) = SimdVector4::transpose(simd_a0, simd_a1, simd_a2, simd_a3);
+        let (simd_x0, simd_x1, simd_x2, simd_x3) = V4sf::transpose(simd_a0, simd_a1, simd_a2, simd_a3);
         let (scalar_x0, scalar_x1, scalar_x2, scalar_x3) =
             ScalarVector4::transpose(scalar_a0, scalar_a1, scalar_a2, scalar_a3);
         compare(simd_x0, scalar_x0, "transpose x0");
