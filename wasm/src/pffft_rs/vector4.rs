@@ -3,9 +3,6 @@
 // Common trait for 4-element SIMD float vectors. Each platform then defines a V4sf implementation (the platforms
 // without SIMD use ScalarVector4). For better ergonomics, all V4sf functions are re-exported with prefix v4_.
 pub(crate) trait Vector4: Copy {
-    /// Zero vector
-    fn zero() -> Self;
-
     /// Element-wise multiplication
     fn mul(a: Self, b: Self) -> Self;
 
@@ -80,8 +77,8 @@ mod sse2 {
     use super::*;
     use core::arch::x86_64::__m128;
     use core::arch::x86_64::{
-        _MM_TRANSPOSE4_PS, _mm_add_ps, _mm_loadu_ps, _mm_mul_ps, _mm_set1_ps, _mm_setzero_ps, _mm_shuffle_ps,
-        _mm_storeu_ps, _mm_sub_ps, _mm_unpackhi_ps, _mm_unpacklo_ps,
+        _MM_TRANSPOSE4_PS, _mm_add_ps, _mm_loadu_ps, _mm_mul_ps, _mm_set1_ps, _mm_shuffle_ps, _mm_storeu_ps,
+        _mm_sub_ps, _mm_unpackhi_ps, _mm_unpacklo_ps,
     };
 
     #[repr(transparent)]
@@ -89,11 +86,6 @@ mod sse2 {
     pub(crate) struct SSE2Vector4(__m128);
 
     impl Vector4 for SSE2Vector4 {
-        #[inline(always)]
-        fn zero() -> Self {
-            unsafe { SSE2Vector4(_mm_setzero_ps()) }
-        }
-
         #[inline(always)]
         fn mul(a: Self, b: Self) -> Self {
             unsafe { SSE2Vector4(_mm_mul_ps(a.0, b.0)) }
@@ -171,8 +163,8 @@ mod neon {
     use super::*;
     use core::arch::aarch64::float32x4_t;
     use core::arch::aarch64::{
-        vaddq_f32, vcombine_f32, vdupq_n_f32, vget_high_f32, vget_low_f32, vld1q_dup_f32, vld1q_f32, vmlaq_f32,
-        vmulq_f32, vst1q_f32, vsubq_f32, vuzpq_f32, vzipq_f32,
+        vaddq_f32, vcombine_f32, vget_high_f32, vget_low_f32, vld1q_dup_f32, vld1q_f32, vmlaq_f32, vmulq_f32,
+        vst1q_f32, vsubq_f32, vuzpq_f32, vzipq_f32,
     };
 
     #[repr(transparent)]
@@ -180,11 +172,6 @@ mod neon {
     pub(crate) struct NEONVector4(float32x4_t);
 
     impl Vector4 for NEONVector4 {
-        #[inline(always)]
-        fn zero() -> Self {
-            unsafe { NEONVector4(vdupq_n_f32(0.0)) }
-        }
-
         #[inline(always)]
         fn mul(a: Self, b: Self) -> Self {
             unsafe { NEONVector4(vmulq_f32(a.0, b.0)) }
@@ -270,11 +257,6 @@ mod wasm_simd {
 
     impl Vector4 for WASMVector4 {
         #[inline(always)]
-        fn zero() -> Self {
-            WASMVector4(f32x4_splat(0.0))
-        }
-
-        #[inline(always)]
         fn mul(a: Self, b: Self) -> Self {
             WASMVector4(f32x4_mul(a.0, b.0))
         }
@@ -351,11 +333,6 @@ mod wasm_simd {
 pub(crate) struct ScalarVector4([f32; 4]);
 
 impl Vector4 for ScalarVector4 {
-    #[inline(always)]
-    fn zero() -> Self {
-        ScalarVector4([0.0; 4])
-    }
-
     #[inline(always)]
     fn mul(a: Self, b: Self) -> Self {
         let mut result = [0.0; 4];
@@ -507,11 +484,6 @@ pub(crate) use ScalarVector4 as V4sf;
 // Re-export all functions in V4sf as v4_*
 
 #[inline(always)]
-pub(crate) fn v4_zero() -> V4sf {
-    V4sf::zero()
-}
-
-#[inline(always)]
 pub(crate) fn v4_mul(a: V4sf, b: V4sf) -> V4sf {
     V4sf::mul(a, b)
 }
@@ -601,11 +573,6 @@ mod tests {
         let a1 = V4sf::load_from_slice(&f[4..]);
         let a2 = V4sf::load_from_slice(&f[8..]);
         let a3 = V4sf::load_from_slice(&f[12..]);
-
-        // Test zero
-        let t = V4sf::zero();
-        let t_arr = to_array(t);
-        assert_eq!(t_arr, [0., 0., 0., 0.], "zero failed");
 
         // Test add
         let t = V4sf::add(a1, a2);
@@ -752,7 +719,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "slice must have at least 4 elements for Vector4 store")]
     fn test_store_to_slice_too_short() {
-        let v = V4sf::zero();
+        let v = V4sf::splat(1.0);
         let mut out = [0.0; 3];
         v.store_to_slice(&mut out);
     }
@@ -796,7 +763,6 @@ mod tests {
         }
 
         // Test each operation
-        compare(V4sf::zero(), ScalarVector4::zero(), "zero");
         compare(V4sf::add(simd_a1, simd_a2), ScalarVector4::add(scalar_a1, scalar_a2), "add");
         compare(V4sf::mul(simd_a1, simd_a2), ScalarVector4::mul(scalar_a1, scalar_a2), "mul");
         compare(V4sf::fma(simd_a1, simd_a2, simd_a0), ScalarVector4::fma(scalar_a1, scalar_a2, scalar_a0), "fma");

@@ -3,8 +3,8 @@ mod vector4;
 use std::f32::consts::PI;
 
 use vector4::{
-    v4_add, v4_cplx_mul, v4_cplx_mul_conj, v4_interleave2, v4_load, v4_mul, v4_scalar_mul, v4_splat, v4_store, v4_sub,
-    v4_swaphl, v4_transpose, v4_uninterleave2,
+    v4_add, v4_cplx_mul, v4_cplx_mul_conj, v4_fma, v4_interleave2, v4_load, v4_mul, v4_scalar_mul, v4_splat, v4_store,
+    v4_sub, v4_swaphl, v4_transpose, v4_uninterleave2,
 };
 
 // We use 4-wide vectors
@@ -156,7 +156,13 @@ impl PFFFTSetup {
     }
 
     /// Transform using packed (internal) PFFFT layout.
-    pub fn transform_packed(&self, input: &[f32], output: &mut [f32], work: Option<&mut [f32]>, direction: PffftDirection) {
+    pub fn transform_packed(
+        &self,
+        input: &[f32],
+        output: &mut [f32],
+        work: Option<&mut [f32]>,
+        direction: PffftDirection,
+    ) {
         let required_len = match self.transform {
             PffftTransform::Real => self.n,
             PffftTransform::Complex => self.n * 2,
@@ -1497,7 +1503,13 @@ unsafe fn pffft_cplx_preprocess(ncvec: usize, input: *const f32, output: *mut f3
 }
 
 #[inline(never)]
-unsafe fn pffft_real_finalize_4x4(in0: vector4::V4sf, in1: vector4::V4sf, input: *const f32, e: *const f32, output: *mut f32) {
+unsafe fn pffft_real_finalize_4x4(
+    in0: vector4::V4sf,
+    in1: vector4::V4sf,
+    input: *const f32,
+    e: *const f32,
+    output: *mut f32,
+) {
     unsafe {
         let mut r0 = in0;
         let mut i0 = in1;
@@ -1679,12 +1691,7 @@ unsafe fn pffft_real_preprocess(ncvec: usize, input: *const f32, output: *mut f3
 
         pffft_real_preprocess_4x4(input, e, output.add(4), true);
         for k in 1..dk {
-            pffft_real_preprocess_4x4(
-                input.add((8 * k) * 4),
-                e.add((k * 6) * 4),
-                output.add(((k * 8) - 1) * 4),
-                false,
-            );
+            pffft_real_preprocess_4x4(input.add((8 * k) * 4), e.add((k * 6) * 4), output.add(((k * 8) - 1) * 4), false);
         }
 
         cr[0] = (xr[0] + xi[0]) + 2.0 * xr[2];
@@ -1783,12 +1790,7 @@ pub unsafe fn pffft_transform_internal(
                 ib ^= 1;
             }
             if ordered {
-                pffft_zreorder(
-                    setup,
-                    vinput,
-                    if ib == 0 { buff0 } else { buff1 },
-                    PffftDirection::Backward,
-                );
+                pffft_zreorder(setup, vinput, if ib == 0 { buff0 } else { buff1 }, PffftDirection::Backward);
                 vinput = if ib == 0 { buff0 } else { buff1 };
                 ib ^= 1;
             }
@@ -1845,13 +1847,7 @@ pub unsafe fn pffft_transform_internal(
 }
 
 #[inline(never)]
-pub unsafe fn pffft_zconvolve_accumulate(
-    setup: &PFFFTSetup,
-    a: *const f32,
-    b: *const f32,
-    ab: *mut f32,
-    scaling: f32,
-) {
+pub unsafe fn pffft_zconvolve_accumulate(setup: &PFFFTSetup, a: *const f32, b: *const f32, ab: *mut f32, scaling: f32) {
     let ncvec = setup.ncvec;
     let vscal = v4_splat(scaling);
 
@@ -1869,16 +1865,16 @@ pub unsafe fn pffft_zconvolve_accumulate(
             let br = v4_load(b, 2 * i);
             let bi = v4_load(b, 2 * i + 1);
             (ar, ai) = v4_cplx_mul(ar, ai, br, bi);
-            v4_store(ab, 2 * i, v4_add(v4_mul(ar, vscal), v4_load(ab, 2 * i)));
-            v4_store(ab, 2 * i + 1, v4_add(v4_mul(ai, vscal), v4_load(ab, 2 * i + 1)));
+            v4_store(ab, 2 * i, v4_fma(ar, vscal, v4_load(ab, 2 * i)));
+            v4_store(ab, 2 * i + 1, v4_fma(ai, vscal, v4_load(ab, 2 * i + 1)));
 
             let mut ar2 = v4_load(a, 2 * i + 2);
             let mut ai2 = v4_load(a, 2 * i + 3);
             let br2 = v4_load(b, 2 * i + 2);
             let bi2 = v4_load(b, 2 * i + 3);
             (ar2, ai2) = v4_cplx_mul(ar2, ai2, br2, bi2);
-            v4_store(ab, 2 * i + 2, v4_add(v4_mul(ar2, vscal), v4_load(ab, 2 * i + 2)));
-            v4_store(ab, 2 * i + 3, v4_add(v4_mul(ai2, vscal), v4_load(ab, 2 * i + 3)));
+            v4_store(ab, 2 * i + 2, v4_fma(ar2, vscal, v4_load(ab, 2 * i + 2)));
+            v4_store(ab, 2 * i + 3, v4_fma(ai2, vscal, v4_load(ab, 2 * i + 3)));
         }
     }
 
@@ -2286,13 +2282,7 @@ mod tests {
         rs_setup.zreorder(input.as_slice(), &mut rs_output, direction);
 
         let diff = max_abs_diff(c_output.as_slice(), &rs_output);
-        assert!(
-            diff < 1e-6,
-            "real zreorder mismatch n={}, direction={:?}, max_abs_diff={}",
-            n,
-            direction,
-            diff
-        );
+        assert!(diff < 1e-6, "real zreorder mismatch n={}, direction={:?}, max_abs_diff={}", n, direction, diff);
 
         unsafe { pffft_destroy_setup(c_setup) };
     }
@@ -2325,13 +2315,7 @@ mod tests {
         rs_setup.zreorder(input.as_slice(), &mut rs_output, direction);
 
         let diff = max_abs_diff(c_output.as_slice(), &rs_output);
-        assert!(
-            diff < 1e-6,
-            "complex zreorder mismatch n={}, direction={:?}, max_abs_diff={}",
-            n,
-            direction,
-            diff
-        );
+        assert!(diff < 1e-6, "complex zreorder mismatch n={}, direction={:?}, max_abs_diff={}", n, direction, diff);
 
         unsafe { pffft_destroy_setup(c_setup) };
     }
@@ -2399,16 +2383,7 @@ mod tests {
         assert_eq!(a.len(), b.len(), "{}: length mismatch {} vs {}", context, a.len(), b.len());
         for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
             let diff = (x - y).abs();
-            assert!(
-                diff < tol,
-                "{}: mismatch at index {}: {} vs {}, diff={} (tol={})",
-                context,
-                i,
-                x,
-                y,
-                diff,
-                tol
-            );
+            assert!(diff < tol, "{}: mismatch at index {}: {} vs {}, diff={} (tol={})", context, i, x, y, diff, tol);
         }
     }
 
@@ -2544,12 +2519,7 @@ mod tests {
             let mut reordered = vec![0.0f32; n];
             setup.zreorder(&packed, &mut reordered, PffftDirection::Forward);
 
-            assert_close(
-                &ordered,
-                &reordered,
-                1e-5,
-                &format!("real ordered vs packed+zreorder n={}", n),
-            );
+            assert_close(&ordered, &reordered, 1e-5, &format!("real ordered vs packed+zreorder n={}", n));
         }
     }
 
@@ -2568,12 +2538,7 @@ mod tests {
             let mut reordered = vec![0.0f32; len];
             setup.zreorder(&packed, &mut reordered, PffftDirection::Forward);
 
-            assert_close(
-                &ordered,
-                &reordered,
-                1e-5,
-                &format!("complex ordered vs packed+zreorder n={}", n),
-            );
+            assert_close(&ordered, &reordered, 1e-5, &format!("complex ordered vs packed+zreorder n={}", n));
         }
     }
 
@@ -2592,22 +2557,11 @@ mod tests {
             // Ordered real layout: [DC_re, Nyquist_re, bin1_re, bin1_im, bin2_re, bin2_im, ...]
             let dc_re = spectrum[0];
             let expected_dc = dc_val * n as f32;
-            assert!(
-                (dc_re - expected_dc).abs() < 1e-3,
-                "real DC n={}: expected DC={}, got {}",
-                n,
-                expected_dc,
-                dc_re
-            );
+            assert!((dc_re - expected_dc).abs() < 1e-3, "real DC n={}: expected DC={}, got {}", n, expected_dc, dc_re);
 
             // Nyquist should be zero for a constant signal (even n)
             let nyquist_re = spectrum[1];
-            assert!(
-                nyquist_re.abs() < 1e-3,
-                "real DC n={}: Nyquist should be ~0, got {}",
-                n,
-                nyquist_re
-            );
+            assert!(nyquist_re.abs() < 1e-3, "real DC n={}: Nyquist should be ~0, got {}", n, nyquist_re);
 
             // All other bins should be ~0
             for i in 1..n / 2 {
@@ -2652,12 +2606,7 @@ mod tests {
                 expected_dc,
                 bin0_re
             );
-            assert!(
-                bin0_im.abs() < 1e-3,
-                "complex DC n={}: expected bin0 im=0, got {}",
-                n,
-                bin0_im
-            );
+            assert!(bin0_im.abs() < 1e-3, "complex DC n={}: expected bin0 im=0, got {}", n, bin0_im);
 
             // All other bins should be ~0
             for k in 1..n {
@@ -2690,12 +2639,7 @@ mod tests {
             setup.transform_ordered(&input, &mut spectrum, None, PffftDirection::Forward);
 
             // DC bin should be 1.0
-            assert!(
-                (spectrum[0] - 1.0).abs() < 1e-5,
-                "real impulse n={}: DC expected 1.0, got {}",
-                n,
-                spectrum[0]
-            );
+            assert!((spectrum[0] - 1.0).abs() < 1e-5, "real impulse n={}: DC expected 1.0, got {}", n, spectrum[0]);
             // Nyquist bin should be 1.0
             assert!(
                 (spectrum[1] - 1.0).abs() < 1e-5,
@@ -2707,20 +2651,8 @@ mod tests {
             for i in 1..n / 2 {
                 let re = spectrum[2 * i];
                 let im = spectrum[2 * i + 1];
-                assert!(
-                    (re - 1.0).abs() < 1e-5,
-                    "real impulse n={}: bin {} re expected 1.0, got {}",
-                    n,
-                    i,
-                    re
-                );
-                assert!(
-                    im.abs() < 1e-5,
-                    "real impulse n={}: bin {} im expected 0.0, got {}",
-                    n,
-                    i,
-                    im
-                );
+                assert!((re - 1.0).abs() < 1e-5, "real impulse n={}: bin {} re expected 1.0, got {}", n, i, re);
+                assert!(im.abs() < 1e-5, "real impulse n={}: bin {} im expected 0.0, got {}", n, i, im);
             }
         }
     }
@@ -2739,20 +2671,8 @@ mod tests {
             for k in 0..n {
                 let re = spectrum[2 * k];
                 let im = spectrum[2 * k + 1];
-                assert!(
-                    (re - 1.0).abs() < 1e-5,
-                    "complex impulse n={}: bin {} re expected 1.0, got {}",
-                    n,
-                    k,
-                    re
-                );
-                assert!(
-                    im.abs() < 1e-5,
-                    "complex impulse n={}: bin {} im expected 0.0, got {}",
-                    n,
-                    k,
-                    im
-                );
+                assert!((re - 1.0).abs() < 1e-5, "complex impulse n={}: bin {} re expected 1.0, got {}", n, k, re);
+                assert!(im.abs() < 1e-5, "complex impulse n={}: bin {} im expected 0.0, got {}", n, k, im);
             }
         }
     }
@@ -2763,9 +2683,7 @@ mod tests {
     fn test_real_pure_sinusoid() {
         for &n in &REAL_SIZES {
             let bin_index = 3usize;
-            let input: Vec<f32> = (0..n)
-                .map(|i| (2.0 * PI * bin_index as f32 * i as f32 / n as f32).cos())
-                .collect();
+            let input: Vec<f32> = (0..n).map(|i| (2.0 * PI * bin_index as f32 * i as f32 / n as f32).cos()).collect();
             let setup = PFFFTSetup::new(n, PffftTransform::Real).unwrap();
 
             let mut spectrum = vec![0.0f32; n];
@@ -2795,13 +2713,7 @@ mod tests {
                         mag
                     );
                 } else {
-                    assert!(
-                        mag < 1e-2,
-                        "real sinusoid n={}: bin {} should be ~0, got {}",
-                        n,
-                        i,
-                        mag
-                    );
+                    assert!(mag < 1e-2, "real sinusoid n={}: bin {} should be ~0, got {}", n, i, mag);
                 }
             }
         }
@@ -2838,13 +2750,7 @@ mod tests {
                         mag
                     );
                 } else {
-                    assert!(
-                        mag < 1e-2,
-                        "complex sinusoid n={}: bin {} should be ~0, got {}",
-                        n,
-                        k,
-                        mag
-                    );
+                    assert!(mag < 1e-2, "complex sinusoid n={}: bin {} should be ~0, got {}", n, k, mag);
                 }
             }
         }
@@ -2901,8 +2807,7 @@ mod tests {
             let time_energy: f32 = input.chunks_exact(2).map(|c| c[0] * c[0] + c[1] * c[1]).sum();
 
             // Frequency-domain energy: sum(|X[k]|^2) / n
-            let freq_energy: f32 =
-                spectrum.chunks_exact(2).map(|c| c[0] * c[0] + c[1] * c[1]).sum::<f32>() / n as f32;
+            let freq_energy: f32 = spectrum.chunks_exact(2).map(|c| c[0] * c[0] + c[1] * c[1]).sum::<f32>() / n as f32;
 
             let relative_err = (time_energy - freq_energy).abs() / time_energy.max(1e-10);
             assert!(
@@ -3118,12 +3023,7 @@ mod tests {
             setup.zconvolve_accumulate(&packed, &packed, &mut result_scale_half, 0.5);
 
             let halved: Vec<f32> = result_scale1.iter().map(|v| v * 0.5).collect();
-            assert_close(
-                &result_scale_half,
-                &halved,
-                1e-4,
-                &format!("zconvolve scaling n={}", n),
-            );
+            assert_close(&result_scale_half, &halved, 1e-4, &format!("zconvolve scaling n={}", n));
         }
     }
 
