@@ -1709,7 +1709,7 @@ unsafe fn pffft_real_preprocess(ncvec: usize, input: *const f32, output: *mut f3
 }
 
 #[inline(never)]
-pub unsafe fn pffft_transform_internal(
+unsafe fn pffft_transform_internal(
     setup: &PFFFTSetup,
     finput: *const f32,
     foutput: *mut f32,
@@ -1847,7 +1847,7 @@ pub unsafe fn pffft_transform_internal(
 }
 
 #[inline(never)]
-pub unsafe fn pffft_zconvolve_accumulate(setup: &PFFFTSetup, a: *const f32, b: *const f32, ab: *mut f32, scaling: f32) {
+unsafe fn pffft_zconvolve_accumulate(setup: &PFFFTSetup, a: *const f32, b: *const f32, ab: *mut f32, scaling: f32) {
     let ncvec = setup.ncvec;
     let vscal = v4_splat(scaling);
 
@@ -1887,7 +1887,7 @@ pub unsafe fn pffft_zconvolve_accumulate(setup: &PFFFTSetup, a: *const f32, b: *
 }
 
 #[inline(never)]
-pub unsafe fn pffft_transform(
+unsafe fn pffft_transform(
     setup: &PFFFTSetup,
     input: *const f32,
     output: *mut f32,
@@ -1900,7 +1900,7 @@ pub unsafe fn pffft_transform(
 }
 
 #[inline(never)]
-pub unsafe fn pffft_transform_ordered(
+unsafe fn pffft_transform_ordered(
     setup: &PFFFTSetup,
     input: *const f32,
     output: *mut f32,
@@ -1912,7 +1912,7 @@ pub unsafe fn pffft_transform_ordered(
     }
 }
 
-pub unsafe fn pffft_zreorder(setup: &PFFFTSetup, input: *const f32, output: *mut f32, direction: PffftDirection) {
+unsafe fn pffft_zreorder(setup: &PFFFTSetup, input: *const f32, output: *mut f32, direction: PffftDirection) {
     unsafe {
         assert!(input != output as *const f32);
         let n = setup.n;
@@ -1983,7 +1983,7 @@ pub unsafe fn pffft_zreorder(setup: &PFFFTSetup, input: *const f32, output: *mut
     }
 }
 
-pub(crate) unsafe fn decompose(n: usize, ifac: *mut usize, ntryh: *const usize) -> usize {
+unsafe fn decompose(n: usize, ifac: *mut usize, ntryh: *const usize) -> usize {
     unsafe {
         let mut nl = n;
         let mut nf: usize = 0;
@@ -2017,7 +2017,7 @@ pub(crate) unsafe fn decompose(n: usize, ifac: *mut usize, ntryh: *const usize) 
     }
 }
 
-pub(crate) unsafe fn rffti1_ps(n: usize, wa: *mut f32, ifac: *mut usize) {
+unsafe fn rffti1_ps(n: usize, wa: *mut f32, ifac: *mut usize) {
     unsafe {
         static NTRYH: [usize; 5] = [4, 2, 3, 5, 0];
         let nf = decompose(n, ifac, NTRYH.as_ptr());
@@ -2049,7 +2049,7 @@ pub(crate) unsafe fn rffti1_ps(n: usize, wa: *mut f32, ifac: *mut usize) {
     }
 }
 
-pub(crate) unsafe fn cffti1_ps(n: usize, wa: *mut f32, ifac: *mut usize) {
+unsafe fn cffti1_ps(n: usize, wa: *mut f32, ifac: *mut usize) {
     unsafe {
         static NTRYH: [usize; 5] = [5, 3, 4, 2, 0];
         let nf = decompose(n, ifac, NTRYH.as_ptr());
