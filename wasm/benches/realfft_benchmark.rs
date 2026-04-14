@@ -64,7 +64,7 @@ fn bench_rustfft_forward_sizes(c: &mut Criterion) {
         let input = generate_complex_input(size);
         let mut in_buf = input.clone();
         let mut out_buf = vec![Complex::ZERO; size];
-        let mut scratch_buf = vec![Complex::ZERO; size];
+        let mut scratch_buf = vec![Complex::ZERO; fft.get_immutable_scratch_len()];
 
         group.bench_with_input(BenchmarkId::new("forward_fft", size), &size, |b, _| {
             b.iter(|| {
