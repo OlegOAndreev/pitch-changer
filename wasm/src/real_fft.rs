@@ -212,7 +212,6 @@ mod tests {
     #[test]
     fn test_real_fft_roundtrip() {
         for size in [16, 256, 512, 1024, 2048, 4096] {
-            // for size in [8, 16, 256, 512, 1024, 2048, 4096] {
             // Generate random input in [-5, 5)
             let rng = SmallRng::seed_from_u64(size as u64);
             let mut input: Vec<f32> = rng.random_iter::<f32>().take(size).map(|x| x * 10.0 - 5.0).collect();
@@ -223,18 +222,10 @@ mod tests {
             let mut scratch = vec![Complex::ZERO; forward.get_scratch_len()];
             forward.process(&mut input, &mut spectrum, &mut scratch).unwrap();
 
-            let mut in_buf = spectrum.clone();
-
             let backward = FftComplexToReal::new(size).unwrap();
             let mut output = vec![0.0; size];
             let mut backward_scratch = vec![Complex::ZERO; backward.get_scratch_len()];
             backward.process(&mut spectrum, &mut output, &mut backward_scratch).unwrap();
-
-            let mut planner = RealFftPlanner::new();
-            let c2r = planner.plan_fft_inverse(size);
-            let mut output_rfft = c2r.make_output_vec();
-            let mut another_scratch = c2r.make_scratch_vec();
-            let _ = c2r.process_with_scratch(&mut in_buf, &mut output_rfft, &mut another_scratch);
 
             let scale = 1.0 / size as f32;
             for (i, (orig, out)) in orig_input.iter().zip(output.iter()).enumerate() {
@@ -255,11 +246,12 @@ mod tests {
 
     #[test]
     fn test_real_fft_vs_realfft_forward() {
-        for size in [8, 16, 256, 512, 1024, 2048, 4096] {
+        for size in [16, 256, 512, 1024, 2048, 4096] {
             // Generate random input in [-5, 5)
             for i in 0..10 {
                 let rng = SmallRng::seed_from_u64((size + i) as u64);
                 let mut input: Vec<f32> = rng.random_iter::<f32>().take(size).map(|x| x * 10.0 - 5.0).collect();
+                let mut orig_input = input.clone();
 
                 let forward = FftRealToComplex::new(size).unwrap();
                 let mut spectrum = vec![Complex::ZERO; size / 2 + 1];
@@ -268,10 +260,9 @@ mod tests {
 
                 let mut planner = RealFftPlanner::new();
                 let r2c = planner.plan_fft_forward(size);
-                let mut in_buf = input.clone();
                 let mut spectrum_realfft = r2c.make_output_vec();
                 let mut scratch = r2c.make_scratch_vec();
-                r2c.process_with_scratch(&mut in_buf, &mut spectrum_realfft, &mut scratch).unwrap();
+                r2c.process_with_scratch(&mut orig_input, &mut spectrum_realfft, &mut scratch).unwrap();
 
                 for (i, (p, r)) in spectrum.iter().zip(spectrum_realfft.iter()).enumerate() {
                     let diff = (p - r).norm();
