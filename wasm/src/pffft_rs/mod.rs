@@ -1590,7 +1590,7 @@ unsafe fn pffft_real_finalize(ncvec: usize, input: *const f32, output: *mut f32,
         xr[3] = ci[0] - s * (ci[1] - ci[3]);
         xi[3] = ci[2] - s * (ci[1] + ci[3]);
 
-        let mut out_scalar = output as *mut f32;
+        let out_scalar = output as *mut f32;
         *out_scalar.add(0) = xr[0];
         *out_scalar.add(4) = xi[0];
         *out_scalar.add(16) = xr[2];
@@ -1730,8 +1730,8 @@ unsafe fn pffft_transform_internal(
         let mut ib = if nf_odd ^ ordered { 1usize } else { 0usize };
         let mut vinput = finput;
 
-        let mut buff0 = foutput;
-        let mut buff1 = scratch_ptr;
+        let buff0 = foutput;
+        let buff1 = scratch_ptr;
 
         if direction == PffftDirection::Forward {
             ib ^= 1;
@@ -1883,32 +1883,6 @@ unsafe fn pffft_zconvolve_accumulate(setup: &PFFFTSetup, a: *const f32, b: *cons
             *ab.add(0) = abr0 + ar0 * br0 * scaling;
             *ab.add(4) = abi0 + ai0 * bi0 * scaling;
         }
-    }
-}
-
-#[inline(never)]
-unsafe fn pffft_transform(
-    setup: &PFFFTSetup,
-    input: *const f32,
-    output: *mut f32,
-    work: *mut f32,
-    direction: PffftDirection,
-) {
-    unsafe {
-        pffft_transform_internal(setup, input, output, work, direction, false);
-    }
-}
-
-#[inline(never)]
-unsafe fn pffft_transform_ordered(
-    setup: &PFFFTSetup,
-    input: *const f32,
-    output: *mut f32,
-    work: *mut f32,
-    direction: PffftDirection,
-) {
-    unsafe {
-        pffft_transform_internal(setup, input, output, work, direction, true);
     }
 }
 
