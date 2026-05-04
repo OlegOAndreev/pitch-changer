@@ -384,6 +384,8 @@ mod tests {
     use super::*;
     use crate::util::{compute_dominant_frequency, compute_magnitude, generate_sine_wave, interleave_samples};
     use anyhow::Result;
+    use rand::SeedableRng;
+    use rand::rngs::SmallRng;
 
     fn process_all(shifter: &mut PitchShifter, input: &[f32]) -> Vec<f32> {
         const PREFIX_SIZE: usize = 1000;
@@ -423,7 +425,7 @@ mod tests {
         // Test that we do not crash with random params + data.
         use rand::RngExt;
 
-        let mut rng = rand::rng();
+        let mut rng = SmallRng::seed_from_u64(1);
         const ITERATIONS: usize = 100;
 
         for _ in 0..ITERATIONS {

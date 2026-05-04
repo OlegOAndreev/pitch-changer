@@ -33,10 +33,10 @@ audioadapter-buffers = "2.0"
 
 [dev-dependencies]
 argh = "0.1"
-criterion = "0.8"
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 hound = "3.5.0"
 plotters = { version = "0.3", default-features = false, features = ["line_series", "svg_backend"] }
-rand = "0.10"
+rand = { version = "0.10", default-features = false, features = [] }
 symphonia = { version = "0.5", features = ["aac", "isomp4", "mp3"] }
 
 [build-dependencies]

@@ -208,7 +208,8 @@ mod tests {
     use crate::util::{compute_dominant_frequency, compute_magnitude, generate_sine_wave};
 
     use super::*;
-    use rand::RngExt;
+    use rand::rngs::SmallRng;
+    use rand::{RngExt, SeedableRng};
 
     fn process_all(stretcher: &mut TimeStretcher, input: &[f32]) -> Vec<f32> {
         const PREFIX_SIZE: usize = 1000;
@@ -246,9 +247,7 @@ mod tests {
     #[test]
     fn test_randomized_time_stretcher_no_crash() {
         // Test that we do not crash with random params + data.
-        use rand;
-
-        let mut rng = rand::rng();
+        let mut rng = SmallRng::seed_from_u64(1);
         const ITERATIONS: usize = 100;
 
         for _ in 0..ITERATIONS {
