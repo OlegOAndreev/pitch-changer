@@ -1,5 +1,6 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use rand::RngExt;
+use rand::rngs::SmallRng;
+use rand::{RngExt, SeedableRng};
 use std::hint::black_box;
 
 // Test sorting two-element struct
@@ -40,7 +41,7 @@ impl CompressedPair {
 }
 
 fn generate_random_vec(size: usize) -> Vec<Pair> {
-    let mut rng = rand::rng();
+    let mut rng = SmallRng::seed_from_u64(1);
     let mut arr = Vec::with_capacity(size);
     for i in 0..size {
         let key = rng.random_range(0.0..1.0);

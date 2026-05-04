@@ -1,5 +1,6 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use rand::RngExt;
+use rand::rngs::SmallRng;
+use rand::{RngExt, SeedableRng};
 use realfft::RealFftPlanner;
 use realfft::num_complex::Complex;
 use std::f32::consts::PI;
@@ -25,7 +26,7 @@ fn make_spectrum(input: &mut [f32]) -> Vec<Complex<f32>> {
 
 /// Generate FFT spectrum of random audio data
 fn generate_random_fft_spectrum(fft_size: usize) -> Vec<Complex<f32>> {
-    let mut rng = rand::rng();
+    let mut rng = SmallRng::seed_from_u64(1);
     let mut input = vec![0.0f32; fft_size];
     for sample in &mut input {
         *sample = rng.random_range(-1.0..1.0);
