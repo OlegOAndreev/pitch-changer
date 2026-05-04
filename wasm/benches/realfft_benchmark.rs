@@ -108,12 +108,14 @@ fn bench_pffft_rs_real_forward_sizes(c: &mut Criterion) {
 
     for size in [1024usize, 2048, 4096] {
         let input = generate_input(size);
+        let mut in_buf = input.clone();
         let setup = PFFFTSetup::new(size, PffftTransform::Real).unwrap();
         let mut output = vec![0.0f32; size];
 
         group.bench_with_input(BenchmarkId::new("forward_fft", size), &size, |b, _| {
             b.iter(|| {
-                setup.transform_ordered(&input, &mut output, None, PffftDirection::Forward);
+                in_buf.copy_from_slice(&input);
+                setup.transform_ordered(&in_buf, &mut output, None, PffftDirection::Forward);
                 black_box(&output);
             });
         });
@@ -127,12 +129,14 @@ fn bench_pffft_rs_complex_forward_sizes(c: &mut Criterion) {
 
     for size in [512usize, 1024, 2048] {
         let input: Vec<f32> = generate_complex_input(size).iter().flat_map(|c| [c.re, c.im]).collect();
+        let mut in_buf = input.clone();
         let setup = PFFFTSetup::new(size, PffftTransform::Complex).unwrap();
         let mut output = vec![0.0f32; 2 * size];
 
         group.bench_with_input(BenchmarkId::new("forward_fft", size), &size, |b, _| {
             b.iter(|| {
-                setup.transform_ordered(&input, &mut output, None, PffftDirection::Forward);
+                in_buf.copy_from_slice(&input);
+                setup.transform_ordered(&in_buf, &mut output, None, PffftDirection::Forward);
                 black_box(&output);
             });
         });
@@ -150,13 +154,16 @@ fn bench_pffft_real_forward_sizes(c: &mut Criterion) {
 
     for size in [1024usize, 2048, 4096] {
         let input = generate_input(size);
+        // Separate in_buf is not required for pffft, but it we still use it for fair comparison with realfft
+        let mut in_buf = input.clone();
 
         let mut pffft = PffftRealToComplex::new(size).unwrap();
         let mut output_buf = vec![Complex::new(0.0, 0.0); size / 2 + 1];
 
         group.bench_with_input(BenchmarkId::new("forward_fft", size), &size, |b, _| {
             b.iter(|| {
-                pffft.process(&input, &mut output_buf);
+                in_buf.copy_from_slice(&input);
+                pffft.process(&in_buf, &mut output_buf);
                 black_box(&output_buf);
             });
         });
@@ -174,13 +181,16 @@ fn bench_pffft_complex_forward_sizes(c: &mut Criterion) {
 
     for size in [512usize, 1024, 2048] {
         let input = generate_complex_input(size);
+        // Separate in_buf is not required for pffft, but it we still use it for fair comparison with rustfft
+        let mut in_buf = input.clone();
 
         let mut pffft = PffftComplex::new(size).unwrap();
         let mut output_buf = vec![Complex::new(0.0, 0.0); size];
 
         group.bench_with_input(BenchmarkId::new("forward_fft", size), &size, |b, _| {
             b.iter(|| {
-                pffft.forward(&input, &mut output_buf);
+                in_buf.copy_from_slice(&input);
+                pffft.forward(&in_buf, &mut output_buf);
                 black_box(&output_buf);
             });
         });
