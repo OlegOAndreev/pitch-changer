@@ -81,10 +81,10 @@ mod sse2 {
         }
 
         #[inline(always)]
-        unsafe fn reverse(a: Self) -> Self {
+        fn reverse(a: Self) -> Self {
             unsafe {
                 // _MM_SHUFFLE(3,2,1,0): result = [a3, a2, a1, a0]
-                SSE2Float4(_mm_shuffle_ps(a, a, 0b11100100))
+                SSE2Float4(_mm_shuffle_ps(a.0, a.0, 0b11100100))
             }
         }
 
@@ -117,7 +117,7 @@ mod sse2 {
         unsafe fn store_interleave2(ptr: *mut f32, even: Self, odd: Self) {
             unsafe {
                 let shuf1 = _mm_unpacklo_ps(even.0, odd.0);
-                let shuf2 = _mm_unpackhi_ps(a.0, b.0);
+                let shuf2 = _mm_unpackhi_ps(even.0, odd.0);
                 _mm_storeu_ps(ptr, shuf1);
                 _mm_storeu_ps(ptr.add(4), shuf2);
             }
