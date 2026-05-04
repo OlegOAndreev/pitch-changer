@@ -84,7 +84,7 @@ mod sse2 {
         fn reverse(a: Self) -> Self {
             unsafe {
                 // _MM_SHUFFLE(3,2,1,0): result = [a3, a2, a1, a0]
-                SSE2Float4(_mm_shuffle_ps(a.0, a.0, 0b11100100))
+                SSE2Float4(_mm_shuffle_ps(a.0, a.0, 0b00011011))
             }
         }
 
