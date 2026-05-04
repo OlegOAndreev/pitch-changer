@@ -1,5 +1,5 @@
-/// Replacement for realfft crate, which supports only 2^N powers. Ported from
-/// https://github.com/HEnquist/realfft/blob/master/src/lib.rs
+/// real_fft is a replacement for realfft crate, which supports only 2^N sizes and uses SIMD instructions for better
+/// performance. Ported from https://github.com/HEnquist/realfft/blob/master/src/lib.rs
 use std::f32;
 use std::sync::Arc;
 
@@ -7,6 +7,8 @@ use anyhow::{Result, bail};
 
 use rustfft::Fft;
 use rustfft::num_complex::Complex;
+
+use crate::float4::{Float4, SimdFloat4};
 
 pub struct FftRealToComplex {
     fft: Arc<dyn Fft<f32>>,
@@ -17,7 +19,7 @@ pub struct FftRealToComplex {
 impl FftRealToComplex {
     /// Create new FftRealToComplex
     pub fn new(size: usize) -> Result<FftRealToComplex> {
-        if !size.is_power_of_two() || !size.is_multiple_of(4) {
+        if !size.is_power_of_two() || !size.is_multiple_of(16) {
             bail!("FftRealToComplex size must be power of two, is {}", size);
         }
         let mut planner = rustfft::FftPlanner::new();
@@ -34,6 +36,7 @@ impl FftRealToComplex {
 
     /// Process input and store the result in output. Output is sized the same way as realfft does: the first element
     /// is DC and the last element is Nyqist, both have zero immediate component. The input is used as a scratch buffer.
+    #[inline(never)]
     pub fn process(&self, input: &mut [f32], output: &mut [Complex<f32>], scratch: &mut [Complex<f32>]) -> Result<()> {
         if input.len() != self.size {
             bail!("Expected input size {}, got {}", self.size, input.len());
@@ -48,56 +51,91 @@ impl FftRealToComplex {
         let fft_input = f32_as_complex_slice_mut(input);
         self.fft.process_outofplace_with_scratch(fft_input, &mut output[..self.size / 2], scratch);
 
-        let output_f32 = complex_as_f32_slice_mut(output);
-        unsafe {
-            let re0 = output_f32[0];
-            let im0 = output_f32[1];
-            output_f32[0] = re0 + im0;
-            output_f32[1] = 0.0;
-            output_f32[self.size] = re0 - im0;
-            output_f32[self.size + 1] = 0.0;
+        let re0 = output[0].re;
+        let im0 = output[0].im;
+        output[0].re = re0 + im0;
+        output[0].im = 0.0;
+        output[self.size / 2].re = re0 - im0;
+        output[self.size / 2].im = 0.0;
 
-            for i in 1..self.size / 4 {
-                let re_idx = 2 * i;
-                let im_idx = 2 * i + 1;
-                let re_rev = self.size - 2 * i;
-                let im_rev = self.size - 2 * i + 1;
+        let twiddle_f32_ptr = self.twiddles.as_ptr() as *const f32;
+        let output_f32_ptr = output.as_mut_ptr() as *mut f32;
+        let simd_half = SimdFloat4::splat(0.5);
+        // See remainder plain loop to see how the original loop looks like.
+        for i in (1..(self.size / 4 - 3)).step_by(4) {
+            let (out_re, out_im) = unsafe { SimdFloat4::load_deinterleave2(output_f32_ptr.add(2 * i)) };
+            let (out_rev_re, out_rev_im) =
+                unsafe { SimdFloat4::load_deinterleave2(output_f32_ptr.add(self.size - 2 * i - 6)) };
+            let (twiddle_re, twiddle_im) = unsafe { SimdFloat4::load_deinterleave2(twiddle_f32_ptr.add(2 * i - 2)) };
+            let out_rev_re = SimdFloat4::reverse(out_rev_re);
+            let out_rev_im = SimdFloat4::reverse(out_rev_im);
 
-                let out_re = *output_f32.get_unchecked(re_idx);
-                let out_im = *output_f32.get_unchecked(im_idx);
-                let out_rev_re = *output_f32.get_unchecked(re_rev);
-                let out_rev_im = *output_f32.get_unchecked(im_rev);
+            let sum_re = SimdFloat4::add(out_re, out_rev_re);
+            let sum_im = SimdFloat4::add(out_im, out_rev_im);
+            let diff_re = SimdFloat4::sub(out_re, out_rev_re);
+            let diff_im = SimdFloat4::sub(out_im, out_rev_im);
 
-                let twiddle = *self.twiddles.get_unchecked(i - 1);
+            let half_sum_re = SimdFloat4::mul(simd_half, sum_re);
+            let half_diff_im = SimdFloat4::mul(simd_half, diff_im);
 
-                let sum_re = out_re + out_rev_re;
-                let sum_im = out_im + out_rev_im;
-                let diff_re = out_re - out_rev_re;
-                let diff_im = out_im - out_rev_im;
+            let output_twiddled_re =
+                SimdFloat4::add(SimdFloat4::mul(sum_im, twiddle_re), SimdFloat4::mul(diff_re, twiddle_im));
+            let output_twiddled_im =
+                SimdFloat4::sub(SimdFloat4::mul(sum_im, twiddle_im), SimdFloat4::mul(diff_re, twiddle_re));
 
-                let half_sum_re = 0.5 * sum_re;
-                let half_diff_im = 0.5 * diff_im;
-
-                let output_twiddled_real = sum_im * twiddle.re + diff_re * twiddle.im;
-                let output_twiddled_im = sum_im * twiddle.im - diff_re * twiddle.re;
-
-                *output_f32.get_unchecked_mut(re_idx) = half_sum_re + output_twiddled_real;
-                *output_f32.get_unchecked_mut(im_idx) = half_diff_im + output_twiddled_im;
-                *output_f32.get_unchecked_mut(re_rev) = half_sum_re - output_twiddled_real;
-                *output_f32.get_unchecked_mut(im_rev) = -half_diff_im + output_twiddled_im;
+            let out_re = SimdFloat4::add(half_sum_re, output_twiddled_re);
+            let out_im = SimdFloat4::add(half_diff_im, output_twiddled_im);
+            unsafe {
+                SimdFloat4::store_interleave2(output_f32_ptr.add(2 * i), out_re, out_im);
             }
-
-            output_f32[self.size / 2 + 1] *= -1.0;
+            let out_rev_re = SimdFloat4::reverse(SimdFloat4::sub(half_sum_re, output_twiddled_re));
+            let out_rev_im = SimdFloat4::reverse(SimdFloat4::sub(output_twiddled_im, half_diff_im));
+            unsafe {
+                SimdFloat4::store_interleave2(output_f32_ptr.add(self.size - 2 * i - 6), out_rev_re, out_rev_im);
+            }
         }
+
+        // Remainder plain loop
+        for i in (self.size / 4 - 3)..(self.size / 4) {
+            let out = output[i];
+            let out_rev = output[self.size / 2 - i];
+            let twiddle = self.twiddles[i - 1];
+
+            let sum = out + out_rev;
+            let diff = out - out_rev;
+
+            let half_sum_re = 0.5 * sum.re;
+            let half_diff_im = 0.5 * diff.im;
+
+            let output_twiddled_re = sum.im * twiddle.re + diff.re * twiddle.im;
+            let output_twiddled_im = sum.im * twiddle.im - diff.re * twiddle.re;
+
+            output[i].re = half_sum_re + output_twiddled_re;
+            output[i].im = half_diff_im + output_twiddled_im;
+            output[self.size / 2 - i].re = half_sum_re - output_twiddled_re;
+            output[self.size / 2 - i].im = -half_diff_im + output_twiddled_im;
+        }
+
+        output[self.size / 4].im *= -1.0;
 
         Ok(())
     }
 
     /// Create a vector suitable for passing as scratch parameter to process.
+    #[inline(never)]
     pub fn make_scratch_vec(&self) -> Vec<Complex<f32>> {
         vec![Complex::ZERO; self.size / 2]
     }
 }
+
+// fn simd_assert_eq(v: SimdFloat4, s0: f32, s1: f32, s2: f32, s3: f32) {
+//     let mut arr = [0.0f32; 4];
+//     SimdFloat4::store_to_slice(v, &mut arr);
+//     assert_eq!(arr[0], s0, "0");
+//     assert_eq!(arr[1], s1, "1");
+//     assert_eq!(arr[2], s2, "2");
+//     assert_eq!(arr[3], s3, "3");
+// }
 
 pub struct FftComplexToReal {
     fft: Arc<dyn Fft<f32>>,
@@ -126,6 +164,7 @@ impl FftComplexToReal {
     /// Process input and store the result in output. Input is sized the same way as realfft does: the first element is
     /// DC and the last element is Nyqist, both have zero immediate component (unlike realfft, we simply ignore the
     /// immediate components). The input is used as a scratch buffer.
+    #[inline(never)]
     pub fn process(&self, input: &mut [Complex<f32>], output: &mut [f32], scratch: &mut [Complex<f32>]) -> Result<()> {
         if input.len() != self.size / 2 + 1 {
             bail!("Expected input size {}, got {}", self.size / 2 + 1, input.len());
@@ -145,15 +184,10 @@ impl FftComplexToReal {
             input_f32[1] = first_im;
 
             for i in 1..self.size / 4 {
-                let re_idx = 2 * i;
-                let im_idx = 2 * i + 1;
-                let re_rev = self.size - 2 * i;
-                let im_rev = self.size - 2 * i + 1;
-
-                let out_re = *input_f32.get_unchecked(re_idx);
-                let out_im = *input_f32.get_unchecked(im_idx);
-                let out_rev_re = *input_f32.get_unchecked(re_rev);
-                let out_rev_im = *input_f32.get_unchecked(im_rev);
+                let out_re = *input_f32.get_unchecked(2 * i);
+                let out_im = *input_f32.get_unchecked(2 * i + 1);
+                let out_rev_re = *input_f32.get_unchecked(self.size - 2 * i);
+                let out_rev_im = *input_f32.get_unchecked(self.size - 2 * i + 1);
 
                 let twiddle = *self.twiddles.get_unchecked(i - 1);
 
@@ -165,11 +199,11 @@ impl FftComplexToReal {
                 let output_twiddled_real = sum_im * twiddle.re + diff_re * twiddle.im;
                 let output_twiddled_im = sum_im * twiddle.im - diff_re * twiddle.re;
 
-                *input_f32.get_unchecked_mut(re_idx) = sum_re - output_twiddled_real;
-                *input_f32.get_unchecked_mut(im_idx) = diff_im - output_twiddled_im;
+                *input_f32.get_unchecked_mut(2 * i) = sum_re - output_twiddled_real;
+                *input_f32.get_unchecked_mut(2 * i + 1) = diff_im - output_twiddled_im;
 
-                *input_f32.get_unchecked_mut(re_rev) = sum_re + output_twiddled_real;
-                *input_f32.get_unchecked_mut(im_rev) = -output_twiddled_im - diff_im;
+                *input_f32.get_unchecked_mut(self.size - 2 * i) = sum_re + output_twiddled_real;
+                *input_f32.get_unchecked_mut(self.size - 2 * i + 1) = -output_twiddled_im - diff_im;
             }
 
             input_f32[self.size / 2] *= 2.0;
@@ -183,11 +217,13 @@ impl FftComplexToReal {
     }
 
     /// Create a vector suitable for passing as scratch parameter to process.
+    #[inline(never)]
     pub fn make_scratch_vec(&self) -> Vec<Complex<f32>> {
         vec![Complex::ZERO; self.size / 2]
     }
 }
 
+#[inline(always)]
 fn compute_twiddle(i: usize, size: usize) -> Complex<f32> {
     let angle = -2.0 * f32::consts::PI * i as f32 / size as f32;
     Complex { re: angle.cos(), im: angle.sin() }

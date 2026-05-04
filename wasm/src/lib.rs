@@ -1,4 +1,5 @@
 mod envelope_shifter;
+mod float4;
 mod histogram;
 mod peak_corrector;
 #[cfg(feature = "pffft")]
