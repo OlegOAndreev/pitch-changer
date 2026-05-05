@@ -139,8 +139,8 @@ mod sse2 {
                 let rev0 = _mm_shuffle_ps(even.0, even.0, 0b00011011);
                 // _MM_SHUFFLE(3,2,1,0): rev1 = [o3, o2, o1, o0]
                 let rev1 = _mm_shuffle_ps(odd.0, odd.0, 0b00011011);
-                let high = _mm_unpacklo_ps(rev0, rev1);
-                let low = _mm_unpackhi_ps(rev0, rev1);
+                let low = _mm_unpacklo_ps(rev0, rev1);
+                let high = _mm_unpackhi_ps(rev0, rev1);
                 _mm_storeu_ps(ptr, low);
                 _mm_storeu_ps(ptr.add(4), high);
             }
