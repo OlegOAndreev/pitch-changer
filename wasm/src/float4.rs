@@ -135,13 +135,14 @@ mod sse2 {
         #[inline(always)]
         unsafe fn store_interleave2_rev(ptr: *mut f32, even: Self, odd: Self) {
             unsafe {
-                let shuf0 = _mm_unpacklo_ps(even.0, odd.0);
-                let shuf1 = _mm_unpackhi_ps(even.0, odd.0);
-                // _MM_SHUFFLE(3,2,1,0): result = [a3, a2, a1, a0]
-                let rev0 = _mm_shuffle_ps(shuf0, shuf0, 0b00011011);
-                let rev1 = _mm_shuffle_ps(shuf1, shuf1, 0b00011011);
-                _mm_storeu_ps(ptr, rev0);
-                _mm_storeu_ps(ptr.add(4), rev1);
+                // _MM_SHUFFLE(3,2,1,0): rev0 = [e3, e2, e1, e0]
+                let rev0 = _mm_shuffle_ps(even, even, 0b00011011);
+                // _MM_SHUFFLE(3,2,1,0): rev1 = [o3, o2, o1, o0]
+                let rev1 = _mm_shuffle_ps(odd, odd, 0b00011011);
+                let high = _mm_unpacklo_ps(rev0, rev1);
+                let low = _mm_unpackhi_ps(rev0, rev1);
+                _mm_storeu_ps(ptr, low);
+                _mm_storeu_ps(ptr.add(4), high);
             }
         }
     }
