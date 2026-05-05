@@ -65,10 +65,8 @@ impl FftRealToComplex {
         for i in (1..(self.size / 4 - 3)).step_by(4) {
             let (out_re, out_im) = unsafe { SimdFloat4::load_deinterleave2(output_f32_ptr.add(2 * i)) };
             let (out_rev_re, out_rev_im) =
-                unsafe { SimdFloat4::load_deinterleave2(output_f32_ptr.add(self.size - 2 * i - 6)) };
+                unsafe { SimdFloat4::load_deinterleave2_rev(output_f32_ptr.add(self.size - 2 * i - 6)) };
             let (twiddle_re, twiddle_im) = unsafe { SimdFloat4::load_deinterleave2(twiddle_f32_ptr.add(2 * i - 2)) };
-            let out_rev_re = SimdFloat4::reverse(out_rev_re);
-            let out_rev_im = SimdFloat4::reverse(out_rev_im);
 
             let sum_re = SimdFloat4::add(out_re, out_rev_re);
             let sum_im = SimdFloat4::add(out_im, out_rev_im);
@@ -88,10 +86,10 @@ impl FftRealToComplex {
             unsafe {
                 SimdFloat4::store_interleave2(output_f32_ptr.add(2 * i), out_re, out_im);
             }
-            let out_rev_re = SimdFloat4::reverse(SimdFloat4::sub(half_sum_re, output_twiddled_re));
-            let out_rev_im = SimdFloat4::reverse(SimdFloat4::sub(output_twiddled_im, half_diff_im));
+            let out_rev_re = SimdFloat4::sub(half_sum_re, output_twiddled_re);
+            let out_rev_im = SimdFloat4::sub(output_twiddled_im, half_diff_im);
             unsafe {
-                SimdFloat4::store_interleave2(output_f32_ptr.add(self.size - 2 * i - 6), out_rev_re, out_rev_im);
+                SimdFloat4::store_interleave2_rev(output_f32_ptr.add(self.size - 2 * i - 6), out_rev_re, out_rev_im);
             }
         }
 

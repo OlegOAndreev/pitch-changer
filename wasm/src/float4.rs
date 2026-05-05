@@ -15,9 +15,6 @@ pub(crate) trait Float4: Copy {
     /// Broadcast scalar to all lanes
     fn splat(f: f32) -> Self;
 
-    /// Reverse values: result[0] = a[3], result[1] = a[2], result[2] = a[1], result[3] = a[0]
-    fn reverse(a: Self) -> Self;
-
     /// Unaligned load from memory
     unsafe fn load(ptr: *const f32) -> Self;
 
@@ -27,8 +24,15 @@ pub(crate) trait Float4: Copy {
     /// Unaligned load from memory of two vectors with deinterleaving, returns (even, odd)
     unsafe fn load_deinterleave2(ptr: *const f32) -> (Self, Self);
 
+    /// Unaligned load from memory of two vectors with deinterleaving and reversing, returns (reverse(even),
+    /// reverse(odd)), where reverse(a) = [a[3], a[2], a[1], a[0]]
+    unsafe fn load_deinterleave2_rev(ptr: *const f32) -> (Self, Self);
+
     /// Unaligned store to memory of two vectors with interleaving
     unsafe fn store_interleave2(ptr: *mut f32, even: Self, odd: Self);
+
+    /// Unaligned store to memory of two vectors with reversing and interleaving
+    unsafe fn store_interleave2_rev(ptr: *mut f32, even: Self, odd: Self);
 
     /// Safe load from an unaligned slice
     #[inline(always)]
@@ -81,14 +85,6 @@ mod sse2 {
         }
 
         #[inline(always)]
-        fn reverse(a: Self) -> Self {
-            unsafe {
-                // _MM_SHUFFLE(3,2,1,0): result = [a3, a2, a1, a0]
-                SSE2Float4(_mm_shuffle_ps(a.0, a.0, 0b00011011))
-            }
-        }
-
-        #[inline(always)]
         unsafe fn load(ptr: *const f32) -> Self {
             unsafe { SSE2Float4(_mm_loadu_ps(ptr)) }
         }
@@ -103,23 +99,49 @@ mod sse2 {
         #[inline(always)]
         unsafe fn load_deinterleave2(ptr: *const f32) -> (Self, Self) {
             unsafe {
-                let a = _mm_loadu_ps(ptr);
-                let b = _mm_loadu_ps(ptr.add(4));
+                let low = _mm_loadu_ps(ptr);
+                let high = _mm_loadu_ps(ptr.add(4));
                 // _MM_SHUFFLE(2,0,2,0): result = [a0, a2, b0, b2]
-                let shuf1 = _mm_shuffle_ps(a, b, 0b10001000);
+                let even = _mm_shuffle_ps(low, high, 0b10001000);
                 // _MM_SHUFFLE(3,1,3,1): result = [a1, a3, b1, b3]
-                let shuf2 = _mm_shuffle_ps(a, b, 0b11011101);
-                (SSE2Float4(shuf1), SSE2Float4(shuf2))
+                let odd = _mm_shuffle_ps(low, high, 0b11011101);
+                (SSE2Float4(even), SSE2Float4(odd))
             }
         }
 
         #[inline(always)]
         unsafe fn store_interleave2(ptr: *mut f32, even: Self, odd: Self) {
             unsafe {
-                let shuf1 = _mm_unpacklo_ps(even.0, odd.0);
-                let shuf2 = _mm_unpackhi_ps(even.0, odd.0);
-                _mm_storeu_ps(ptr, shuf1);
-                _mm_storeu_ps(ptr.add(4), shuf2);
+                let shuf0 = _mm_unpacklo_ps(even.0, odd.0);
+                let shuf1 = _mm_unpackhi_ps(even.0, odd.0);
+                _mm_storeu_ps(ptr, shuf0);
+                _mm_storeu_ps(ptr.add(4), shuf1);
+            }
+        }
+
+        #[inline(always)]
+        unsafe fn load_deinterleave2_rev(ptr: *const f32) -> (Self, Self) {
+            unsafe {
+                let low = _mm_loadu_ps(ptr);
+                let high = _mm_loadu_ps(ptr.add(4));
+                // _MM_SHUFFLE(0,2,0,2): result = [b2, b0, a2, a0]
+                let even = _mm_shuffle_ps(high, low, 0b100010);
+                // _MM_SHUFFLE(1,3,1,3): result = [b3, b1, a3, a1]
+                let odd = _mm_shuffle_ps(high, low, 0b01110111);
+                (SSE2Float4(even), SSE2Float4(odd))
+            }
+        }
+
+        #[inline(always)]
+        unsafe fn store_interleave2_rev(ptr: *mut f32, even: Self, odd: Self) {
+            unsafe {
+                let shuf0 = _mm_unpacklo_ps(even.0, odd.0);
+                let shuf1 = _mm_unpackhi_ps(even.0, odd.0);
+                // _MM_SHUFFLE(3,2,1,0): result = [a3, a2, a1, a0]
+                let rev0 = _mm_shuffle_ps(shuf0, 0b00011011);
+                let rev1 = _mm_shuffle_ps(shuf1, 0b00011011);
+                _mm_storeu_ps(ptr, rev0);
+                _mm_storeu_ps(ptr.add(4), rev1);
             }
         }
     }
@@ -130,8 +152,8 @@ mod sse2 {
 mod neon {
     use super::*;
     use core::arch::aarch64::{
-        float32x4_t, float32x4x2_t, vaddq_f32, vextq_f32, vld1q_dup_f32, vld1q_f32, vld2q_f32, vmulq_f32, vrev64q_f32,
-        vst1q_f32, vst2q_f32, vsubq_f32,
+        float32x4_t, float32x4x2_t, vaddq_f32, vextq_f32, vld1q_dup_f32, vld1q_f32, vld1q_f32_x2, vld2q_f32, vmulq_f32,
+        vst1q_f32, vst1q_f32_x2, vst2q_f32, vsubq_f32, vuzpq_f32, vzipq_f32,
     };
 
     #[repr(transparent)]
@@ -160,14 +182,6 @@ mod neon {
         }
 
         #[inline(always)]
-        fn reverse(a: Self) -> Self {
-            unsafe {
-                let rev = vrev64q_f32(a.0);
-                NEONFloat4(vextq_f32(rev, rev, 2))
-            }
-        }
-
-        #[inline(always)]
         unsafe fn load(ptr: *const f32) -> Self {
             unsafe { NEONFloat4(vld1q_f32(ptr)) }
         }
@@ -186,8 +200,36 @@ mod neon {
         }
 
         #[inline(always)]
+        unsafe fn load_deinterleave2_rev(ptr: *const f32) -> (Self, Self) {
+            unsafe {
+                // pair = [e0 o0 e1 o1] [e2 o2 e3 o3]
+                let pair = vld1q_f32_x2(ptr);
+                // rev0 = [e1 o1 e0 o0]
+                let rev0 = vextq_f32(pair.0, pair.0, 2);
+                // rev1 = [e3 o3 e2 o2]
+                let rev1 = vextq_f32(pair.1, pair.1, 2);
+                // unzipped = [e3 e2 e1 e0] [o3 o2 o1 o0]
+                let unzipped = vuzpq_f32(rev1, rev0);
+                (NEONFloat4(unzipped.0), NEONFloat4(unzipped.1))
+            }
+        }
+
+        #[inline(always)]
         unsafe fn store_interleave2(ptr: *mut f32, even: Self, odd: Self) {
             unsafe { vst2q_f32(ptr, float32x4x2_t(even.0, odd.0)) }
+        }
+
+        #[inline(always)]
+        unsafe fn store_interleave2_rev(ptr: *mut f32, even: Self, odd: Self) {
+            unsafe {
+                // zipped = [e0 o0 e1 o0] [e2 o2 e3 o3]
+                let zipped = vzipq_f32(even.0, odd.0);
+                // rev0 = [e1 o1 e0 o0]
+                let rev0 = vextq_f32(zipped.0, zipped.0, 2);
+                // rev1 = [e3 o3 e2 o2]
+                let rev1 = vextq_f32(zipped.1, zipped.1, 2);
+                vst1q_f32_x2(ptr, float32x4x2_t(rev1, rev0))
+            }
         }
     }
 }
@@ -261,6 +303,31 @@ mod wasm_simd {
                 v128_store(ptr.add(4) as *mut v128, high);
             }
         }
+
+        #[inline(always)]
+        unsafe fn load_deinterleave2_rev(ptr: *const f32) -> (Self, Self) {
+            unsafe {
+                let low = unsafe { v128_load(ptr as *const v128) };
+                let high = unsafe { v128_load(ptr.add(4) as *const v128) };
+                // even: [high2, high0, low2, low0]
+                let even = i32x4_shuffle::<6, 4, 2, 0>(low, high);
+                // odd: [high3, high1, low3, low1]
+                let odd = i32x4_shuffle::<7, 5, 3, 1>(low, high);
+                (SSE2Float4(even), SSE2Float4(odd))
+            }
+        }
+
+        #[inline(always)]
+        unsafe fn store_interleave2_rev(ptr: *mut f32, even: Self, odd: Self) {
+            // low: [even3, odd3, even2, odd2]
+            let low = i32x4_shuffle::<3, 7, 2, 6>(even.0, odd.0);
+            // high: [even0, odd0, even0, odd0]
+            let high = i32x4_shuffle::<1, 5, 0, 4>(even.0, odd.0);
+            unsafe {
+                v128_store(ptr as *mut v128, low);
+                v128_store(ptr.add(4) as *mut v128, high);
+            }
+        }
     }
 }
 
@@ -303,16 +370,6 @@ impl Float4 for ScalarFloat4 {
     }
 
     #[inline(always)]
-    fn reverse(a: Self) -> Self {
-        let mut result = [0.0; 4];
-        result[0] = a.0[3];
-        result[1] = a.0[2];
-        result[2] = a.0[1];
-        result[3] = a.0[0];
-        ScalarFloat4(result)
-    }
-
-    #[inline(always)]
     unsafe fn load(ptr: *const f32) -> Self {
         // Note: scalar load doesn't care about alignment
         let mut arr = [0.0; 4];
@@ -345,6 +402,29 @@ impl Float4 for ScalarFloat4 {
             *ptr.add(5) = odd.0[2];
             *ptr.add(6) = even.0[3];
             *ptr.add(7) = odd.0[3];
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn load_deinterleave2_rev(ptr: *const f32) -> (Self, Self) {
+        unsafe {
+            let arr0 = [*ptr.add(6), *ptr.add(4), *ptr.add(2), *ptr];
+            let arr1 = [*ptr.add(7), *ptr.add(5), *ptr.add(3), *ptr.add(1)];
+            (ScalarFloat4(arr0), ScalarFloat4(arr1))
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn store_interleave2_rev(ptr: *mut f32, even: Self, odd: Self) {
+        unsafe {
+            *ptr = even.0[3];
+            *ptr.add(1) = odd.0[3];
+            *ptr.add(2) = even.0[2];
+            *ptr.add(3) = odd.0[2];
+            *ptr.add(4) = even.0[1];
+            *ptr.add(5) = odd.0[1];
+            *ptr.add(6) = even.0[0];
+            *ptr.add(7) = odd.0[0];
         }
     }
 }
@@ -395,7 +475,6 @@ mod tests {
         compare(SimdFloat4::add(a1, a2), 12., 14., 16., 18., "add");
         compare(SimdFloat4::sub(a1, a2), -4., -4., -4., -4., "sub");
         compare(SimdFloat4::splat(15.), 15., 15., 15., 15., "splat");
-        compare(SimdFloat4::reverse(a1), 7., 6., 5., 4., "reverse");
 
         let (t, u) = unsafe { SimdFloat4::load_deinterleave2(f.as_ptr()) };
         compare(t, 4., 6., 8., 10., "load_deinterleave2 first");
@@ -404,6 +483,14 @@ mod tests {
         let mut f_out = [0.0f32; 8];
         unsafe { SimdFloat4::store_interleave2(f_out.as_mut_ptr(), a2, a1) };
         assert_eq!(f_out, [8., 4., 9., 5., 10., 6., 11., 7.], "store_interleave2");
+
+        let (t, u) = unsafe { SimdFloat4::load_deinterleave2_rev(f.as_ptr()) };
+        compare(t, 10., 8., 6., 4., "load_deinterleave2_rev first");
+        compare(u, 11., 9., 7., 5., "load_deinterleave2_rev second");
+
+        let mut f_out = [0.0f32; 8];
+        unsafe { SimdFloat4::store_interleave2_rev(f_out.as_mut_ptr(), a2, a1) };
+        assert_eq!(f_out, [11., 7., 10., 6., 9., 5., 8., 4.], "store_interleave2_rev");
     }
 
     #[test]
@@ -447,6 +534,5 @@ mod tests {
         compare(SimdFloat4::mul(simd_a1, simd_a2), ScalarFloat4::mul(scalar_a1, scalar_a2), "mul");
         compare(SimdFloat4::sub(simd_a1, simd_a2), ScalarFloat4::sub(scalar_a1, scalar_a2), "sub");
         compare(SimdFloat4::splat(15.0), ScalarFloat4::splat(15.0), "splat");
-        compare(SimdFloat4::reverse(simd_a1), ScalarFloat4::reverse(scalar_a1), "reverse");
     }
 }
