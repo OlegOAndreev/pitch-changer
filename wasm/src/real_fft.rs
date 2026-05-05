@@ -31,7 +31,7 @@ impl FftRealToComplex {
 
     /// Return the size of scratch buffer that must be passed to process().
     pub fn get_scratch_len(&self) -> usize {
-        return self.fft.get_outofplace_scratch_len();
+        self.fft.get_outofplace_scratch_len()
     }
 
     /// Return the Vec suitable for passing as scratch to process()
@@ -47,10 +47,10 @@ impl FftRealToComplex {
             bail!("Expected input size {}, got {}", self.size, input.len());
         }
         if output.len() != self.size / 2 + 1 {
-            bail!("Expected output size {}, got {}", self.size / 2 + 1, input.len());
+            bail!("Expected output size {}, got {}", self.size / 2 + 1, output.len());
         }
         if scratch.len() < self.get_scratch_len() {
-            bail!("Expected scratch size {}, got {}", self.get_scratch_len(), input.len());
+            bail!("Expected scratch size {}, got {}", self.get_scratch_len(), scratch.len());
         }
 
         let fft_input = f32_as_complex_slice_mut(input);
@@ -134,8 +134,8 @@ pub struct FftComplexToReal {
 impl FftComplexToReal {
     /// Create new FftComplexToReal
     pub fn new(size: usize) -> Result<FftComplexToReal> {
-        if !size.is_power_of_two() || !size.is_multiple_of(4) {
-            bail!("FftComplexToReal size must be power of two and multiple of 4, is {}", size);
+        if !size.is_power_of_two() || !size.is_multiple_of(16) {
+            bail!("FftComplexToReal size must be power of two and multiple of 16, is {}", size);
         }
         let mut planner = rustfft::FftPlanner::new();
         let fft = planner.plan_fft_inverse(size / 2);
@@ -146,7 +146,7 @@ impl FftComplexToReal {
 
     /// Return the size of scratch buffer that must be passed to process().
     pub fn get_scratch_len(&self) -> usize {
-        return self.fft.get_outofplace_scratch_len();
+        self.fft.get_outofplace_scratch_len()
     }
 
     /// Return the Vec suitable for passing as scratch to process()
@@ -163,10 +163,10 @@ impl FftComplexToReal {
             bail!("Expected input size {}, got {}", self.size / 2 + 1, input.len());
         }
         if output.len() != self.size {
-            bail!("Expected output size {}, got {}", self.size, input.len());
+            bail!("Expected output size {}, got {}", self.size, output.len());
         }
         if scratch.len() < self.get_scratch_len() {
-            bail!("Expected scratch size {}, got {}", self.get_scratch_len(), input.len());
+            bail!("Expected scratch size {}, got {}", self.get_scratch_len(), scratch.len());
         }
 
         let re0 = input[0].re + input[self.size / 2].re;
@@ -216,12 +216,12 @@ impl FftComplexToReal {
             let diff = out - out_rev;
 
             let output_twiddled_re = sum.im * twiddle.re + diff.re * twiddle.im;
-            let output_twiddled_im = sum.im * twiddle.im - diff.re * twiddle.re;
+            let output_twiddled_im = -sum.im * twiddle.im + diff.re * twiddle.re;
 
             input[i].re = sum.re - output_twiddled_re;
-            input[i].im = diff.im - output_twiddled_im;
+            input[i].im = diff.im + output_twiddled_im;
             input[self.size / 2 - i].re = sum.re + output_twiddled_re;
-            input[self.size / 2 - i].im = -output_twiddled_im - diff.im;
+            input[self.size / 2 - i].im = output_twiddled_im - diff.im;
         }
 
         input[self.size / 4].re *= 2.0;

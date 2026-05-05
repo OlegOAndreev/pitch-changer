@@ -315,7 +315,7 @@ mod wasm_simd {
         unsafe fn store_interleave2_rev(ptr: *mut f32, even: Self, odd: Self) {
             // low: [even3, odd3, even2, odd2]
             let low = i32x4_shuffle::<3, 7, 2, 6>(even.0, odd.0);
-            // high: [even0, odd0, even0, odd0]
+            // high: [even1, odd1, even0, odd0]
             let high = i32x4_shuffle::<1, 5, 0, 4>(even.0, odd.0);
             unsafe {
                 v128_store(ptr as *mut v128, low);
