@@ -112,10 +112,10 @@ mod sse2 {
         #[inline(always)]
         unsafe fn store_interleave2(ptr: *mut f32, even: Self, odd: Self) {
             unsafe {
-                let shuf0 = _mm_unpacklo_ps(even.0, odd.0);
-                let shuf1 = _mm_unpackhi_ps(even.0, odd.0);
-                _mm_storeu_ps(ptr, shuf0);
-                _mm_storeu_ps(ptr.add(4), shuf1);
+                let low = _mm_unpacklo_ps(even.0, odd.0);
+                _mm_storeu_ps(ptr, low);
+                let high = _mm_unpackhi_ps(even.0, odd.0);
+                _mm_storeu_ps(ptr.add(4), high);
             }
         }
 
@@ -140,8 +140,8 @@ mod sse2 {
                 // _MM_SHUFFLE(3,2,1,0): rev1 = [o3, o2, o1, o0]
                 let rev1 = _mm_shuffle_ps(odd.0, odd.0, 0b00011011);
                 let low = _mm_unpacklo_ps(rev0, rev1);
-                let high = _mm_unpackhi_ps(rev0, rev1);
                 _mm_storeu_ps(ptr, low);
+                let high = _mm_unpackhi_ps(rev0, rev1);
                 _mm_storeu_ps(ptr.add(4), high);
             }
         }
@@ -292,10 +292,12 @@ mod wasm_simd {
         unsafe fn store_interleave2(ptr: *mut f32, even: Self, odd: Self) {
             // low: [even0, odd0, even1, odd1]
             let low = i32x4_shuffle::<0, 4, 1, 5>(even.0, odd.0);
+            unsafe {
+                v128_store(ptr as *mut v128, low);
+            }
             // high: [even2, odd2, even3, odd3]
             let high = i32x4_shuffle::<2, 6, 3, 7>(even.0, odd.0);
             unsafe {
-                v128_store(ptr as *mut v128, low);
                 v128_store(ptr.add(4) as *mut v128, high);
             }
         }
@@ -315,10 +317,12 @@ mod wasm_simd {
         unsafe fn store_interleave2_rev(ptr: *mut f32, even: Self, odd: Self) {
             // low: [even3, odd3, even2, odd2]
             let low = i32x4_shuffle::<3, 7, 2, 6>(even.0, odd.0);
+            unsafe {
+                v128_store(ptr as *mut v128, low);
+            }
             // high: [even1, odd1, even0, odd0]
             let high = i32x4_shuffle::<1, 5, 0, 4>(even.0, odd.0);
             unsafe {
-                v128_store(ptr as *mut v128, low);
                 v128_store(ptr.add(4) as *mut v128, high);
             }
         }
