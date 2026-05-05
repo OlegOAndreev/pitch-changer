@@ -20,7 +20,7 @@ impl FftRealToComplex {
     /// Create new FftRealToComplex
     pub fn new(size: usize) -> Result<FftRealToComplex> {
         if !size.is_power_of_two() || !size.is_multiple_of(16) {
-            bail!("FftRealToComplex size must be power of two, is {}", size);
+            bail!("FftRealToComplex size must be power of two and multiple of 16, is {}", size);
         }
         let mut planner = rustfft::FftPlanner::new();
         let fft = planner.plan_fft_forward(size / 2);

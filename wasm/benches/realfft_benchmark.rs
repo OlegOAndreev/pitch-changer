@@ -4,7 +4,6 @@ use realfft::num_complex::Complex;
 use rustfft::FftPlanner;
 use std::hint::black_box;
 use wasm_main_module::FftRealToComplex;
-use wasm_main_module::{PFFFTSetup, PffftDirection, PffftTransform};
 
 fn generate_input(size: usize) -> Vec<f32> {
     let mut input = vec![0.0f32; size];
