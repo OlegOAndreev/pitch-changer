@@ -106,7 +106,7 @@ impl PhaseGradientTimeStretch {
     }
 
     /// Process a single STFT frame of time stretching.
-    pub fn process_time_stretch(
+    pub fn process(
         &mut self,
         ana_freq: &[Complex<f32>],
         ana_hop_size: usize,
@@ -118,29 +118,7 @@ impl PhaseGradientTimeStretch {
         assert_eq!(syn_freq.len(), num_bins);
 
         let min_magn = self.prepare_magnitude_and_phases(ana_freq);
-        self.assign_phases_time_stretch(ana_hop_size as f32, syn_hop_size as f32);
-        self.convert_to_freq(ana_freq, syn_freq, min_magn);
-
-        // Save previous analysis data for next frame
-        for bin in &mut self.bins {
-            bin.prev_sqr_magnitude = bin.sqr_magnitude;
-            bin.prev_ana_phase = bin.ana_phase;
-        }
-    }
-
-    pub fn process_pitch_shift(
-        &mut self,
-        ana_freq: &[Complex<f32>],
-        _ana_hop_size: usize,
-        syn_freq: &mut [Complex<f32>],
-        _pitch_shift: f32,
-    ) {
-        let num_bins = self.num_bins;
-        assert_eq!(ana_freq.len(), num_bins);
-        assert_eq!(syn_freq.len(), num_bins);
-
-        let min_magn = self.prepare_magnitude_and_phases(ana_freq);
-        // self.assign_phases_pitch_shift(ana_hop_size as f32, pitch_shift);
+        self.assign_phases(ana_hop_size as f32, syn_hop_size as f32);
         self.convert_to_freq(ana_freq, syn_freq, min_magn);
 
         // Save previous analysis data for next frame
@@ -251,7 +229,7 @@ impl PhaseGradientTimeStretch {
 
     // Assign phases to syn_phases
     #[inline(never)]
-    fn assign_phases_time_stretch(&mut self, ana_hop_size: f32, syn_hop_size: f32) {
+    fn assign_phases(&mut self, ana_hop_size: f32, syn_hop_size: f32) {
         let num_bins = self.num_bins;
 
         // Original phase diff between frames for bin k = k * 2.0 * PI * ana_hop_size / fft_size.
