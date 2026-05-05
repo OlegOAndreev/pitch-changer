@@ -267,11 +267,6 @@ mod wasm_simd {
         }
 
         #[inline(always)]
-        fn reverse(a: Self) -> Self {
-            WASMFloat4(i32x4_shuffle::<3, 2, 1, 0>(a.0, a.0))
-        }
-
-        #[inline(always)]
         unsafe fn load(ptr: *const f32) -> Self {
             unsafe { WASMFloat4(v128_load(ptr as *const v128)) }
         }
@@ -306,15 +301,13 @@ mod wasm_simd {
 
         #[inline(always)]
         unsafe fn load_deinterleave2_rev(ptr: *const f32) -> (Self, Self) {
-            unsafe {
-                let low = unsafe { v128_load(ptr as *const v128) };
-                let high = unsafe { v128_load(ptr.add(4) as *const v128) };
-                // even: [high2, high0, low2, low0]
-                let even = i32x4_shuffle::<6, 4, 2, 0>(low, high);
-                // odd: [high3, high1, low3, low1]
-                let odd = i32x4_shuffle::<7, 5, 3, 1>(low, high);
-                (SSE2Float4(even), SSE2Float4(odd))
-            }
+            let low = unsafe { v128_load(ptr as *const v128) };
+            let high = unsafe { v128_load(ptr.add(4) as *const v128) };
+            // even: [high2, high0, low2, low0]
+            let even = i32x4_shuffle::<6, 4, 2, 0>(low, high);
+            // odd: [high3, high1, low3, low1]
+            let odd = i32x4_shuffle::<7, 5, 3, 1>(low, high);
+            (WASMFloat4(even), WASMFloat4(odd))
         }
 
         #[inline(always)]
