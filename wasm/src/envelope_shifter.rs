@@ -1,9 +1,7 @@
-use std::sync::Arc;
-
-use realfft::num_complex::Complex;
-use realfft::{ComplexToReal, RealToComplex};
+use rustfft::num_complex::Complex;
 
 use crate::util::{LinearSample, approx_exp2, approx_log2};
+use crate::{FftComplexToReal, FftRealToComplex};
 
 /// An implementation of spectral envelope shifting. It takes spectrum, computes the spectral envelope using cepstrum
 /// and after that updates the spectrum magnitudes so that the spectrum envelopes "shifts down":
@@ -16,8 +14,8 @@ pub struct EnvelopeShifter {
     downsample_size: usize,
     cepstrum_cutoff_bins: usize,
     shift_ratio: f32,
-    forward_plan: Arc<dyn RealToComplex<f32>>,
-    inverse_plan: Arc<dyn ComplexToReal<f32>>,
+    forward_plan: FftRealToComplex,
+    inverse_plan: FftComplexToReal,
     // Scratch buffers, all sized for the downsampled spectrum
     magnitudes_buf: Vec<f32>,
     orig_magnitudes_buf: Vec<f32>,
@@ -33,15 +31,12 @@ impl EnvelopeShifter {
     const MAX_GAIN: f32 = 10.0;
 
     pub fn new(num_bins: usize, cepstrum_cutoff_bins: usize, shift_ratio: f32) -> Self {
-        use realfft::RealFftPlanner;
-
         let full_size = num_bins - 1;
         assert!(full_size.is_power_of_two());
         let downsample_size = full_size / Self::DOWNSAMPLE_BY;
 
-        let mut planner = RealFftPlanner::<f32>::new();
-        let forward_plan = planner.plan_fft_forward(downsample_size);
-        let inverse_plan = planner.plan_fft_inverse(downsample_size);
+        let forward_plan = FftRealToComplex::new(downsample_size).expect("failed FftRealToComplex::new");
+        let inverse_plan = FftComplexToReal::new(downsample_size).expect("failed FftComplexToReal::new");
         let cepstrum_size = downsample_size / 2 + 1;
         let magnitudes_buf = vec![0.0; downsample_size];
         let orig_magnitudes_buf = vec![0.0; downsample_size];
@@ -247,13 +242,13 @@ impl EnvelopeShifter {
                 }
             }
             self.forward_plan
-                .process_with_scratch(&mut self.magnitudes_buf, &mut self.cepstrum_buf, &mut self.scratch_forward)
+                .process(&mut self.magnitudes_buf, &mut self.cepstrum_buf, &mut self.scratch_forward)
                 .expect("failed forward STFT pass");
 
             self.cepstrum_buf[cutoff..].fill(Complex::ZERO);
 
             self.inverse_plan
-                .process_with_scratch(&mut self.cepstrum_buf, &mut self.new_magnitudes_buf, &mut self.scratch_inverse)
+                .process(&mut self.cepstrum_buf, &mut self.new_magnitudes_buf, &mut self.scratch_inverse)
                 .expect("failed inverse STFT pass");
         }
 

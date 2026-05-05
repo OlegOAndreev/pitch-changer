@@ -34,6 +34,11 @@ impl FftRealToComplex {
         return self.fft.get_outofplace_scratch_len();
     }
 
+    /// Return the Vec suitable for passing as scratch to process()
+    pub fn make_scratch_vec(&self) -> Vec<Complex<f32>> {
+        vec![Complex::ZERO; self.get_scratch_len()]
+    }
+
     /// Process input and store the result in output. Output is sized the same way as realfft does: the first element
     /// is DC and the last element is Nyqist, both have zero immediate component. The input is used as a scratch buffer.
     #[inline(never)]
@@ -118,12 +123,6 @@ impl FftRealToComplex {
 
         Ok(())
     }
-
-    /// Create a vector suitable for passing as scratch parameter to process.
-    #[inline(never)]
-    pub fn make_scratch_vec(&self) -> Vec<Complex<f32>> {
-        vec![Complex::ZERO; self.size / 2]
-    }
 }
 
 pub struct FftComplexToReal {
@@ -148,6 +147,11 @@ impl FftComplexToReal {
     /// Return the size of scratch buffer that must be passed to process().
     pub fn get_scratch_len(&self) -> usize {
         return self.fft.get_outofplace_scratch_len();
+    }
+
+    /// Return the Vec suitable for passing as scratch to process()
+    pub fn make_scratch_vec(&self) -> Vec<Complex<f32>> {
+        vec![Complex::ZERO; self.get_scratch_len()]
     }
 
     /// Process input and store the result in output. Input is sized the same way as realfft does: the first element is
@@ -227,12 +231,6 @@ impl FftComplexToReal {
         self.fft.process_outofplace_with_scratch(&mut input[..self.size / 2], fft_output, scratch);
 
         Ok(())
-    }
-
-    /// Create a vector suitable for passing as scratch parameter to process.
-    #[inline(never)]
-    pub fn make_scratch_vec(&self) -> Vec<Complex<f32>> {
-        vec![Complex::ZERO; self.size / 2]
     }
 }
 

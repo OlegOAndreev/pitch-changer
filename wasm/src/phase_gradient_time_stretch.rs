@@ -1,6 +1,6 @@
 use std::f32::consts::PI;
 
-use realfft::num_complex::Complex;
+use rustfft::num_complex::Complex;
 
 use crate::util::{approx_atan2, approx_sincos, get_disjoint_two_mut, normalize_phase, radix_sort_u32};
 

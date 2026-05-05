@@ -25,7 +25,6 @@ harness = false
 anyhow = "1.0"
 js-sys = "0.3"
 wasm-bindgen = "=0.2.115"
-realfft = { version = "3.5", features = ["wasm_simd"] }
 rustfft = { version = "6.4", features = ["wasm_simd"] }
 rubato = "1.0"
 audioadapter = "2.0"
@@ -37,6 +36,7 @@ criterion = { version = "0.8", default-features = false, features = ["cargo_benc
 hound = "3.5.0"
 plotters = { version = "0.3", default-features = false, features = ["line_series", "svg_backend"] }
 rand = { version = "0.10", default-features = false, features = [] }
+realfft = { version = "3.5", features = ["wasm_simd"] }
 symphonia = { version = "0.5", features = ["aac", "isomp4", "mp3"] }
 
 [build-dependencies]

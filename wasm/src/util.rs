@@ -1,5 +1,9 @@
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
+use rustfft::num_complex::Complex;
+
+use crate::FftRealToComplex;
+
 /// Get mutable references to two elements in a slice at different indices. Returns (&mut slice[idx1], &mut slice[idx2])
 /// where idx1 != idx2.
 pub fn get_disjoint_two_mut<T>(slice: &mut [T], idx1: usize, idx2: usize) -> (&mut T, &mut T) {
@@ -24,18 +28,16 @@ pub fn normalize_phase(phase: f32) -> f32 {
 
 /// Compute the dominant frequency of a signal using FFT. Returns the frequency in Hz.
 pub fn compute_dominant_frequency(signal: &[f32], sample_rate: f32) -> f32 {
-    use realfft::RealFftPlanner;
-
     let n = signal.len();
 
     let fft_size = n.next_power_of_two();
-    let mut planner = RealFftPlanner::<f32>::new();
-    let r2c = planner.plan_fft_forward(fft_size);
+    let r2c = FftRealToComplex::new(fft_size).expect("failed FftRealToComplex::new");
 
     let mut input = vec![0.0; fft_size];
     input[..n].copy_from_slice(signal);
-    let mut freq = r2c.make_output_vec();
-    r2c.process(&mut input, &mut freq).expect("failed FFT");
+    let mut freq = vec![Complex::ZERO; fft_size / 2 + 1];
+    let mut scratch = r2c.make_scratch_vec();
+    r2c.process(&mut input, &mut freq, &mut scratch).expect("failed FFT");
 
     let mut max_magn = 0.0;
     let mut max_bin = 0;

@@ -1,10 +1,9 @@
 //! STFT (Short-Time Fourier Transform) state and operations.
 
-use realfft::num_complex::Complex;
-use realfft::{ComplexToReal, RealToComplex};
-use std::sync::Arc;
+use rustfft::num_complex::Complex;
 
 use crate::window::{WindowType, get_window_squared_sum};
+use crate::{FftComplexToReal, FftRealToComplex};
 
 /// STFT state for performing forward and inverse FFT operations.
 ///
@@ -25,8 +24,8 @@ use crate::window::{WindowType, get_window_squared_sum};
 pub(crate) struct Stft {
     fft_size: usize,
     window_type: WindowType,
-    forward_plan: Arc<dyn RealToComplex<f32>>,
-    inverse_plan: Arc<dyn ComplexToReal<f32>>,
+    forward_plan: FftRealToComplex,
+    inverse_plan: FftComplexToReal,
     window: Vec<f32>,
     // Scratch buffers
     input_buf: Vec<f32>,
@@ -41,11 +40,9 @@ impl Stft {
     /// Create a new STFT instance with given FFT size and window type.
     pub fn new(fft_size: usize, window_type: WindowType) -> Self {
         use crate::window::generate_window;
-        use realfft::RealFftPlanner;
 
-        let mut planner = RealFftPlanner::<f32>::new();
-        let forward_plan = planner.plan_fft_forward(fft_size);
-        let inverse_plan = planner.plan_fft_inverse(fft_size);
+        let forward_plan = FftRealToComplex::new(fft_size).expect("failed FftRealToComplex::new");
+        let inverse_plan = FftComplexToReal::new(fft_size).expect("failed FftComplexToReal::new");
 
         let window = generate_window(window_type, fft_size);
 
@@ -83,13 +80,13 @@ impl Stft {
             *b = *i * *w;
         }
         self.forward_plan
-            .process_with_scratch(&mut self.input_buf, &mut self.input_freq_buf, &mut self.scratch_forward)
+            .process(&mut self.input_buf, &mut self.input_freq_buf, &mut self.scratch_forward)
             .expect("failed forward STFT pass");
 
         processor(&self.input_freq_buf, &mut self.output_freq_buf);
 
         self.inverse_plan
-            .process_with_scratch(&mut self.output_freq_buf, &mut self.output_buf, &mut self.scratch_inverse)
+            .process(&mut self.output_freq_buf, &mut self.output_buf, &mut self.scratch_inverse)
             .expect("failed inverse STFT pass");
         for (o, w) in self.output_buf.iter_mut().zip(&self.window) {
             *o *= *w;
