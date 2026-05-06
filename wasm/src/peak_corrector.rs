@@ -98,6 +98,7 @@ impl PeakCorrector {
     }
 
     /// Calculate gain from analysis block, write output block into output with gain.
+    #[inline(never)]
     fn calculate_and_apply_gain(&mut self, output: &mut Vec<f32>) {
         assert!(
             self.current_gain <= self.required_gain,
@@ -155,14 +156,22 @@ impl PeakCorrector {
 }
 
 /// Compute required gain for signal (either mono or multichannel interleaved).
+#[inline(never)]
 pub fn compute_required_gain(signal: &[f32]) -> f32 {
-    let mut max_peak = 0.0;
-    for &s in signal {
-        let abs = s.abs();
-        if abs > max_peak {
-            max_peak = abs;
-        }
+    // Manually unroll the loop for autovectorizer
+    let mut max0 = 0.0f32;
+    let mut max1 = 0.0f32;
+    let mut max2 = 0.0f32;
+    let mut max3 = 0.0f32;
+    // Ignore the remainder
+    let (chunked, _) = signal.as_chunks::<4>();
+    for chunk in chunked {
+        max0 = max0.max(chunk[0].abs());
+        max1 = max1.max(chunk[1].abs());
+        max2 = max2.max(chunk[2].abs());
+        max3 = max3.max(chunk[3].abs());
     }
+    let max_peak = max0.max(max1).max(max2).max(max3);
     if max_peak > 1.0 { 1.0 / max_peak } else { 1.0 }
 }
 
