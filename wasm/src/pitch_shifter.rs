@@ -570,8 +570,7 @@ mod tests {
                             // Skip transient at start and end, compare the middle
                             let offset = fft_size * 2;
                             let middle_len = (input.len() - offset * 2).min(output.len() - offset * 2);
-                            // Account of resampling latency.
-                            let output_offset = offset + StreamingResampler::LATENCY;
+                            let output_offset = offset;
                             let mut max_diff = 0.0f32;
                             for i in 0..middle_len {
                                 let diff = (input[offset + i] - output[output_offset + i]).abs();
