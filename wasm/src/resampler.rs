@@ -6,7 +6,7 @@ use crate::web::WrapAnyhowError;
 /// Rubato interface is way too convoluted and I decided to remove the dependency. Cubic spline is enough for our
 /// use case anyway.
 pub struct StreamingResampler {
-    // Step is split into integer and fractional part, ratio_fract is in [0, 1)
+    // Step is split into integer and fractional part, step_fract is in [0, 1)
     step_int: usize,
     step_fract: f64,
 
@@ -40,8 +40,11 @@ fn interpolate_cubic(t: f32, y0: f32, y1: f32, y2: f32, y3: f32) -> f32 {
 impl StreamingResampler {
     /// Create a new resampler with the given sample rate ratio. The ratio is output sample rate / input sample rate.
     pub fn new(sample_rate_ratio: f64) -> std::result::Result<Self, WrapAnyhowError> {
-        if sample_rate_ratio < 0.0 {
-            return Err(WrapAnyhowError(anyhow!("sample_rate_ratio must be positive, is {}", sample_rate_ratio)));
+        if sample_rate_ratio < 1e-2 {
+            return Err(WrapAnyhowError(anyhow!(
+                "sample_rate_ratio must be greater than 0.01, is {}",
+                sample_rate_ratio
+            )));
         }
 
         let step_int = (1.0 / sample_rate_ratio).floor() as usize;
@@ -130,6 +133,9 @@ impl StreamingResampler {
 
     /// Update the resampling ratio.
     pub fn set_ratio(&mut self, sample_rate_ratio: f64) {
+        if sample_rate_ratio < 1e-2 {
+            panic!("sample_rate_ratio must be greater than 0.01, is {}", sample_rate_ratio);
+        }
         self.step_int = (1.0 / sample_rate_ratio).floor() as usize;
         self.step_fract = (1.0 / sample_rate_ratio).fract();
     }
@@ -226,7 +232,7 @@ mod tests {
         let mut output = vec![];
         resampler.resample(&input, &mut output);
         resampler.finish(&mut output);
-        // Take every second element
+        // Take every 10th element
         for i in 0..input.len() {
             assert!(
                 (input[i] - output[i * 10]).abs() < 1e-5,
@@ -267,7 +273,7 @@ mod tests {
         let input = generate_sine_wave(INPUT_FREQ, SAMPLE_RATE, MAGNITUDE, DURATION);
 
         // Test various ratios
-        for &ratio in &[0.1, 0.5, 0.75, 1.25, 1.5, 15.0] {
+        for &ratio in &[0.1, 0.3, 0.5, 0.75, 1.25, 1.3, 1.5, 15.0] {
             let mut resampler = StreamingResampler::new(ratio)?;
             let output = resample_all_small_chunks(&mut resampler, &input);
 

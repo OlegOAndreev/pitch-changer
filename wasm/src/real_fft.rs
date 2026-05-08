@@ -40,7 +40,7 @@ impl FftRealToComplex {
     }
 
     /// Process input and store the result in output. Output is sized the same way as realfft does: the first element
-    /// is DC and the last element is Nyqist, both have zero immediate component. The input is used as a scratch buffer.
+    /// is DC and the last element is Nyquist, both have zero immediate component. The input is used as a scratch buffer.
     #[inline(never)]
     pub fn process(&self, input: &mut [f32], output: &mut [Complex<f32>], scratch: &mut [Complex<f32>]) -> Result<()> {
         if input.len() != self.size {
@@ -155,8 +155,8 @@ impl FftComplexToReal {
     }
 
     /// Process input and store the result in output. Input is sized the same way as realfft does: the first element is
-    /// DC and the last element is Nyqist, both have zero immediate component (unlike realfft, we simply ignore the
-    /// immediate components). The input is used as a scratch buffer.
+    /// DC and the last element is Nyquist, both have zero imaginary component (unlike realfft, we simply ignore the
+    /// imaginary components). The input is used as a scratch buffer.
     #[inline(never)]
     pub fn process(&self, input: &mut [Complex<f32>], output: &mut [f32], scratch: &mut [Complex<f32>]) -> Result<()> {
         if input.len() != self.size / 2 + 1 {
@@ -178,50 +178,50 @@ impl FftComplexToReal {
         let input_f32_ptr = input.as_mut_ptr() as *mut f32;
         // See remainder plain loop to see how the original loop looks like.
         for i in (1..(self.size / 4 - 3)).step_by(4) {
-            let (out_re, out_im) = unsafe { SimdFloat4::load_deinterleave2(input_f32_ptr.add(2 * i)) };
-            let (out_rev_re, out_rev_im) =
+            let (inp_re, inp_im) = unsafe { SimdFloat4::load_deinterleave2(input_f32_ptr.add(2 * i)) };
+            let (inp_rev_re, inp_rev_im) =
                 unsafe { SimdFloat4::load_deinterleave2_rev(input_f32_ptr.add(self.size - 2 * i - 6)) };
             let (twiddle_re, twiddle_im) = unsafe { SimdFloat4::load_deinterleave2(twiddle_f32_ptr.add(2 * i - 2)) };
 
-            let sum_re = SimdFloat4::add(out_re, out_rev_re);
-            let sum_im = SimdFloat4::add(out_im, out_rev_im);
-            let diff_re = SimdFloat4::sub(out_re, out_rev_re);
-            let diff_im = SimdFloat4::sub(out_im, out_rev_im);
+            let sum_re = SimdFloat4::add(inp_re, inp_rev_re);
+            let sum_im = SimdFloat4::add(inp_im, inp_rev_im);
+            let diff_re = SimdFloat4::sub(inp_re, inp_rev_re);
+            let diff_im = SimdFloat4::sub(inp_im, inp_rev_im);
 
-            let output_twiddled_re =
+            let input_twiddled_re =
                 SimdFloat4::add(SimdFloat4::mul(sum_im, twiddle_re), SimdFloat4::mul(diff_re, twiddle_im));
-            let output_twiddled_im =
+            let input_twiddled_im =
                 SimdFloat4::sub(SimdFloat4::mul(diff_re, twiddle_re), SimdFloat4::mul(sum_im, twiddle_im));
 
-            let out_re = SimdFloat4::sub(sum_re, output_twiddled_re);
-            let out_im = SimdFloat4::add(diff_im, output_twiddled_im);
+            let inp_re = SimdFloat4::sub(sum_re, input_twiddled_re);
+            let inp_im = SimdFloat4::add(diff_im, input_twiddled_im);
             unsafe {
-                SimdFloat4::store_interleave2(input_f32_ptr.add(2 * i), out_re, out_im);
+                SimdFloat4::store_interleave2(input_f32_ptr.add(2 * i), inp_re, inp_im);
             }
-            let out_rev_re = SimdFloat4::add(sum_re, output_twiddled_re);
-            let out_rev_im = SimdFloat4::sub(output_twiddled_im, diff_im);
+            let inp_rev_re = SimdFloat4::add(sum_re, input_twiddled_re);
+            let inp_rev_im = SimdFloat4::sub(input_twiddled_im, diff_im);
             unsafe {
-                SimdFloat4::store_interleave2_rev(input_f32_ptr.add(self.size - 2 * i - 6), out_rev_re, out_rev_im);
+                SimdFloat4::store_interleave2_rev(input_f32_ptr.add(self.size - 2 * i - 6), inp_rev_re, inp_rev_im);
             }
         }
 
         // Remainder plain loop
         for i in (self.size / 4 - 3)..(self.size / 4) {
-            let out = input[i];
-            let out_rev = input[self.size / 2 - i];
+            let inp = input[i];
+            let inp_rev = input[self.size / 2 - i];
 
             let twiddle = self.twiddles[i - 1];
 
-            let sum = out + out_rev;
-            let diff = out - out_rev;
+            let sum = inp + inp_rev;
+            let diff = inp - inp_rev;
 
-            let output_twiddled_re = sum.im * twiddle.re + diff.re * twiddle.im;
-            let output_twiddled_im = -sum.im * twiddle.im + diff.re * twiddle.re;
+            let input_twiddled_re = sum.im * twiddle.re + diff.re * twiddle.im;
+            let input_twiddled_im = -sum.im * twiddle.im + diff.re * twiddle.re;
 
-            input[i].re = sum.re - output_twiddled_re;
-            input[i].im = diff.im + output_twiddled_im;
-            input[self.size / 2 - i].re = sum.re + output_twiddled_re;
-            input[self.size / 2 - i].im = output_twiddled_im - diff.im;
+            input[i].re = sum.re - input_twiddled_re;
+            input[i].im = diff.im + input_twiddled_im;
+            input[self.size / 2 - i].re = sum.re + input_twiddled_re;
+            input[self.size / 2 - i].im = input_twiddled_im - diff.im;
         }
 
         input[self.size / 4].re *= 2.0;

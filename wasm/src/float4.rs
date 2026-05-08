@@ -135,9 +135,9 @@ mod sse2 {
         #[inline(always)]
         unsafe fn store_interleave2_rev(ptr: *mut f32, even: Self, odd: Self) {
             unsafe {
-                // _MM_SHUFFLE(3,2,1,0): rev0 = [e3, e2, e1, e0]
+                // _MM_SHUFFLE(0,1,2,3): rev0 = [e3, e2, e1, e0]
                 let rev0 = _mm_shuffle_ps(even.0, even.0, 0b00011011);
-                // _MM_SHUFFLE(3,2,1,0): rev1 = [o3, o2, o1, o0]
+                // _MM_SHUFFLE(0,1,2,3): rev1 = [o3, o2, o1, o0]
                 let rev1 = _mm_shuffle_ps(odd.0, odd.0, 0b00011011);
                 let low = _mm_unpacklo_ps(rev0, rev1);
                 _mm_storeu_ps(ptr, low);
@@ -223,7 +223,7 @@ mod neon {
         #[inline(always)]
         unsafe fn store_interleave2_rev(ptr: *mut f32, even: Self, odd: Self) {
             unsafe {
-                // zipped = [e0 o0 e1 o0] [e2 o2 e3 o3]
+                // zipped = [e0 o0 e1 o1] [e2 o2 e3 o3]
                 let zipped = vzipq_f32(even.0, odd.0);
                 // rev0 = [e1 o1 e0 o0]
                 let rev0 = vextq_f32(zipped.0, zipped.0, 2);
@@ -532,5 +532,31 @@ mod tests {
         compare(SimdFloat4::mul(simd_a1, simd_a2), ScalarFloat4::mul(scalar_a1, scalar_a2), "mul");
         compare(SimdFloat4::sub(simd_a1, simd_a2), ScalarFloat4::sub(scalar_a1, scalar_a2), "sub");
         compare(SimdFloat4::splat(15.0), ScalarFloat4::splat(15.0), "splat");
+
+        let (simd_even, simd_odd) = unsafe { SimdFloat4::load_deinterleave2(f.as_ptr()) };
+        let (scalar_even, scalar_odd) = unsafe { ScalarFloat4::load_deinterleave2(f.as_ptr()) };
+        compare(simd_even, scalar_even, "load_deinterleave2 even");
+        compare(simd_odd, scalar_odd, "load_deinterleave2 odd");
+
+        let (simd_even, simd_odd) = unsafe { SimdFloat4::load_deinterleave2_rev(f.as_ptr()) };
+        let (scalar_even, scalar_odd) = unsafe { ScalarFloat4::load_deinterleave2_rev(f.as_ptr()) };
+        compare(simd_even, scalar_even, "load_deinterleave2_rev even");
+        compare(simd_odd, scalar_odd, "load_deinterleave2_rev odd");
+
+        let mut simd_out = [0.0f32; 8];
+        let mut scalar_out = [0.0f32; 8];
+        unsafe {
+            SimdFloat4::store_interleave2(simd_out.as_mut_ptr(), simd_a2, simd_a1);
+            ScalarFloat4::store_interleave2(scalar_out.as_mut_ptr(), scalar_a2, scalar_a1);
+        }
+        assert_eq!(simd_out, scalar_out, "store_interleave2");
+
+        let mut simd_out = [0.0f32; 8];
+        let mut scalar_out = [0.0f32; 8];
+        unsafe {
+            SimdFloat4::store_interleave2_rev(simd_out.as_mut_ptr(), simd_a2, simd_a1);
+            ScalarFloat4::store_interleave2_rev(scalar_out.as_mut_ptr(), scalar_a2, scalar_a1);
+        }
+        assert_eq!(simd_out, scalar_out, "store_interleave2_rev");
     }
 }
