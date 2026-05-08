@@ -2,9 +2,9 @@ import { Float32Vec, MultiPitchShifter, PitchShiftParams } from '../wasm/build/w
 import type { InterleavedAudio, ProcessingMode } from './types';
 
 export interface BenchmarkResults {
-    pitch: number;
-    'formant-preserving-pitch': number;
-    time: number;
+    pitch: number[];
+    'formant-preserving-pitch': number[];
+    time: number[];
 }
 
 // Simple deterministic pseudo-random number generator using LCG
@@ -141,7 +141,7 @@ export function runBenchmark(
     pitchValue: number,
     withNoise: boolean,
 ): BenchmarkResults {
-    const NUM_ITERATIONS = 4;
+    const NUM_ITERATIONS = 5;
     const timePer10Sec = measureTestTime(sampleRate, numChannels, pitchValue);
     // We want the whole test to take ~5 sec.
     const durationSeconds = Math.round((1000 * 10) / (timePer10Sec * NUM_ITERATIONS));
@@ -165,11 +165,11 @@ export function runBenchmark(
         numChannels,
     };
 
-    const modes: ProcessingMode[] = ['time', 'pitch', 'formant-preserving-pitch'];
+    const modes: ProcessingMode[] = ['formant-preserving-pitch', 'pitch', 'time'];
     const results: BenchmarkResults = {
-        pitch: 0.0,
-        'formant-preserving-pitch': 0.0,
-        time: 0.0,
+        pitch: [],
+        'formant-preserving-pitch': [],
+        time: [],
     };
 
     for (let iter = 0; iter < NUM_ITERATIONS; iter++) {
@@ -180,7 +180,7 @@ export function runBenchmark(
             const processingTimeMs = endTime - startTime;
 
             const ratio = (durationSeconds * 1000) / processingTimeMs;
-            results[mode] = Math.max(ratio, results[mode]);
+            results[mode].push(ratio);
         }
     }
 

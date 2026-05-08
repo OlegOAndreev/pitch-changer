@@ -400,16 +400,22 @@ async function handleDebugPanelClick() {
         // Add benchmark results if available
         if (appState.benchmarkTimes) {
             info += `\n\nBenchmark (processing-to-realtime):`;
-            const { time: timeStretch, pitch, 'formant-preserving-pitch': formantPitch } = appState.benchmarkTimes;
-            info += `\n  time-stretch: ${timeStretch.toFixed(2)}`;
-            info += `\n  pitch: ${pitch.toFixed(2)}`;
-            info += `\n  formant-preserving-pitch: ${formantPitch.toFixed(2)}`;
+            info += `\n  time-stretch: ${benchmarkTimesStr(appState.benchmarkTimes.time)}`;
+            info += `\n  pitch: ${benchmarkTimesStr(appState.benchmarkTimes.pitch)}`;
+            info += `\n  formant-preserving-pitch: ${benchmarkTimesStr(appState.benchmarkTimes['formant-preserving-pitch'])}`;
         }
         debugInfo.textContent = info;
         debugPanel.style.display = 'flex';
     } else {
         debugPanel.style.display = 'none';
     }
+}
+
+function benchmarkTimesStr(times: number[]): string {
+    const min = Math.min(...times);
+    const max = Math.max(...times);
+    const avg = times.reduce((a, b) => a + b) / times.length;
+    return `${avg.toFixed(1)} (${min.toFixed(1)}...${max.toFixed(1)})`;
 }
 
 async function handleBenchmarkClick(withNoise: boolean) {
