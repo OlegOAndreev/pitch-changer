@@ -1,7 +1,6 @@
-#[allow(dead_code)]
-
 // Common trait for 4-element SIMD f32 vectors. Each platform then defines a SimdFloat4 implementation (the platforms
 // without SIMD use ScalarFloat4).
+#[allow(dead_code)]
 pub(crate) trait Float4: Copy {
     /// Element-wise multiplication
     fn mul(a: Self, b: Self) -> Self;
