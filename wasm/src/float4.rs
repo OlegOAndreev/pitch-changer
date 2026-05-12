@@ -14,6 +14,9 @@ pub(crate) trait Float4: Copy {
     /// Broadcast scalar to all lanes
     fn splat(f: f32) -> Self;
 
+    /// Compute the maximum value of a and b per-element.
+    fn max(a: Self, b: Self) -> Self;
+
     /// Unaligned load from memory
     unsafe fn load(ptr: *const f32) -> Self;
 
@@ -54,8 +57,8 @@ mod sse2 {
     use super::*;
     use core::arch::x86_64::__m128;
     use core::arch::x86_64::{
-        _mm_add_ps, _mm_loadu_ps, _mm_mul_ps, _mm_set1_ps, _mm_shuffle_ps, _mm_storeu_ps, _mm_sub_ps, _mm_unpackhi_ps,
-        _mm_unpacklo_ps,
+        _mm_add_ps, _mm_loadu_ps, _mm_max_ps, _mm_mul_ps, _mm_set1_ps, _mm_shuffle_ps, _mm_storeu_ps, _mm_sub_ps,
+        _mm_unpackhi_ps, _mm_unpacklo_ps,
     };
 
     #[repr(transparent)]
@@ -81,6 +84,11 @@ mod sse2 {
         #[inline(always)]
         fn splat(f: f32) -> Self {
             unsafe { SSE2Float4(_mm_set1_ps(f)) }
+        }
+
+        #[inline(always)]
+        fn max(a: Self, b: Self) -> Self {
+            unsafe { SSE2Float4(_mm_max_ps(a.0, b.0)) }
         }
 
         #[inline(always)]
@@ -152,8 +160,8 @@ mod sse2 {
 mod neon {
     use super::*;
     use core::arch::aarch64::{
-        float32x4_t, float32x4x2_t, vaddq_f32, vextq_f32, vld1q_dup_f32, vld1q_f32, vld1q_f32_x2, vld2q_f32, vmulq_f32,
-        vst1q_f32, vst1q_f32_x2, vst2q_f32, vsubq_f32, vuzpq_f32, vzipq_f32,
+        float32x4_t, float32x4x2_t, vaddq_f32, vextq_f32, vld1q_dup_f32, vld1q_f32, vld1q_f32_x2, vld2q_f32, vmaxq_f32,
+        vmulq_f32, vst1q_f32, vst1q_f32_x2, vst2q_f32, vsubq_f32, vuzpq_f32, vzipq_f32,
     };
 
     #[repr(transparent)]
@@ -179,6 +187,11 @@ mod neon {
         #[inline(always)]
         fn splat(f: f32) -> Self {
             unsafe { NEONFloat4(vld1q_dup_f32(&f)) }
+        }
+
+        #[inline(always)]
+        fn max(a: Self, b: Self) -> Self {
+            unsafe { NEONFloat4(vmaxq_f32(a.0, b.0)) }
         }
 
         #[inline(always)]
@@ -239,7 +252,9 @@ mod neon {
 mod wasm_simd {
     use super::*;
     use core::arch::wasm32::v128;
-    use core::arch::wasm32::{f32x4_add, f32x4_mul, f32x4_splat, f32x4_sub, i32x4_shuffle, v128_load, v128_store};
+    use core::arch::wasm32::{
+        f32x4_add, f32x4_max, f32x4_mul, f32x4_splat, f32x4_sub, i32x4_shuffle, v128_load, v128_store,
+    };
 
     #[repr(transparent)]
     #[derive(Copy, Clone)]
@@ -264,6 +279,11 @@ mod wasm_simd {
         #[inline(always)]
         fn splat(f: f32) -> Self {
             WASMFloat4(f32x4_splat(f))
+        }
+
+        #[inline(always)]
+        fn max(a: Self, b: Self) -> Self {
+            WASMFloat4(f32x4_max(a.0, b.0))
         }
 
         #[inline(always)]
@@ -364,6 +384,15 @@ impl Float4 for ScalarFloat4 {
     #[inline(always)]
     fn splat(f: f32) -> Self {
         ScalarFloat4([f; 4])
+    }
+
+    #[inline(always)]
+    fn max(a: Self, b: Self) -> Self {
+        let mut result = [0.0; 4];
+        for i in 0..4 {
+            result[i] = a.0[i].max(b.0[i]);
+        }
+        ScalarFloat4(result)
     }
 
     #[inline(always)]
@@ -472,6 +501,8 @@ mod tests {
         compare(SimdFloat4::add(a1, a2), 12., 14., 16., 18., "add");
         compare(SimdFloat4::sub(a1, a2), -4., -4., -4., -4., "sub");
         compare(SimdFloat4::splat(15.), 15., 15., 15., 15., "splat");
+        compare(SimdFloat4::max(a1, a2), 8., 9., 10., 11., "max");
+        compare(SimdFloat4::max(a2, a1), 8., 9., 10., 11., "max reversed");
 
         let (t, u) = unsafe { SimdFloat4::load_deinterleave2(f.as_ptr()) };
         compare(t, 4., 6., 8., 10., "load_deinterleave2 first");
@@ -531,6 +562,8 @@ mod tests {
         compare(SimdFloat4::mul(simd_a1, simd_a2), ScalarFloat4::mul(scalar_a1, scalar_a2), "mul");
         compare(SimdFloat4::sub(simd_a1, simd_a2), ScalarFloat4::sub(scalar_a1, scalar_a2), "sub");
         compare(SimdFloat4::splat(15.0), ScalarFloat4::splat(15.0), "splat");
+        compare(SimdFloat4::max(simd_a1, simd_a2), ScalarFloat4::max(scalar_a1, scalar_a2), "max");
+        compare(SimdFloat4::max(simd_a2, simd_a1), ScalarFloat4::max(scalar_a2, scalar_a1), "max");
 
         let (simd_even, simd_odd) = unsafe { SimdFloat4::load_deinterleave2(f.as_ptr()) };
         let (scalar_even, scalar_odd) = unsafe { ScalarFloat4::load_deinterleave2(f.as_ptr()) };
