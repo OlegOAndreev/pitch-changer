@@ -49,6 +49,15 @@ pub(crate) trait Float4: Copy {
         assert!(slice.len() >= 4, "slice must have at least 4 elements for Float4 store");
         unsafe { Self::store(slice.as_mut_ptr(), self) }
     }
+
+    /// Return the maximum value in all lanes
+    #[inline(always)]
+    fn horizontal_max(v: Self) -> f32 {
+        let mut s = [0.0f32; 4];
+        unsafe { Self::store(s.as_mut_ptr(), v) }
+        // Use scalar implementation for now
+        s[0].max(s[1]).max(s[2]).max(s[3])
+    }
 }
 
 // SSE2 implementation

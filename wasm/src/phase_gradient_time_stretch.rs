@@ -3,6 +3,7 @@ use std::mem;
 
 use rustfft::num_complex::Complex;
 
+use crate::float4::{Float4, SimdFloat4};
 use crate::util::{approx_atan2, approx_sincos, normalize_phase, radix_sort_u32};
 
 // CompactBin stores bin magnitude + bin index compacted into one u32 value. This allows much faster sorting of bins by
@@ -51,6 +52,7 @@ pub struct PhaseGradientTimeStretch {
 
     // Per-bin data.
     prev_sqr_magnitudes: Vec<f32>,
+    prev_sqr_magnitudes_max: f32,
     prev_ana_phases: Vec<f32>,
     prev_syn_phases: Vec<f32>,
 
@@ -91,6 +93,7 @@ impl PhaseGradientTimeStretch {
             fft_size,
             num_bins,
             prev_sqr_magnitudes: vec![0.0; num_bins],
+            prev_sqr_magnitudes_max: 0.0,
             prev_ana_phases: vec![0.0; num_bins],
             prev_syn_phases: vec![0.0; num_bins],
             sqr_magnitudes: vec![0.0; num_bins],
@@ -184,16 +187,31 @@ impl PhaseGradientTimeStretch {
     fn prepare_magnitude_and_phases(&mut self, ana_freq: &[Complex<f32>]) -> f32 {
         let num_bins = self.num_bins;
 
-        let mut max_magn = 0.0f32;
-        for ((sqr_magn, prev_sqr_magn), freq) in
-            self.sqr_magnitudes.iter_mut().zip(self.prev_sqr_magnitudes.iter()).zip(ana_freq.iter())
-        {
-            // We compare squared magnitudes and call sqrt() only before computing the final value.
-            let magn = freq.norm_sqr();
-            *sqr_magn = magn;
-            max_magn = max_magn.max(magn).max(*prev_sqr_magn);
+        // Compute squared magnitudes and max of them. Process 4 bins at a time using SIMD.
+        let num_chunks = num_bins / 4;
+        let ana_freq_ptr = ana_freq.as_ptr() as *const f32;
+        let sqr_magn_ptr = self.sqr_magnitudes.as_mut_ptr();
+        let mut magn_max_chunked = Float4::splat(0.0);
+        for k in 0..num_chunks {
+            // Load 4 complex numbers (8 interleaved f32 values), deinterleave into re and im.
+            let (re, im) = unsafe { SimdFloat4::load_deinterleave2(ana_freq_ptr.add(k * 8)) };
+            // sqr_magn = re*re + im*im
+            let sqr_magn = SimdFloat4::add(SimdFloat4::mul(re, re), SimdFloat4::mul(im, im));
+            unsafe {
+                SimdFloat4::store(sqr_magn_ptr.add(k * 4), sqr_magn);
+            }
+            magn_max_chunked = Float4::max(magn_max_chunked, sqr_magn);
         }
-        let min_magn = max_magn * Self::MIN_MAGNITUDE_TOLERANCE;
+        let mut cur_magn_max = Float4::horizontal_max(magn_max_chunked);
+        for k in num_chunks * 4..num_bins {
+            let magn = ana_freq[k].norm_sqr();
+            self.sqr_magnitudes[k] = magn;
+            cur_magn_max = cur_magn_max.max(magn).max(self.prev_sqr_magnitudes[k]);
+        }
+        let magn_max = cur_magn_max.max(self.prev_sqr_magnitudes_max);
+        self.prev_sqr_magnitudes_max = cur_magn_max;
+
+        let min_magn = magn_max * Self::MIN_MAGNITUDE_TOLERANCE;
 
         self.prev_sorted_bins.clear();
 
