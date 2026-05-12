@@ -19,7 +19,7 @@ pub struct FftRealToComplex {
 impl FftRealToComplex {
     /// Create new FftRealToComplex
     pub fn new(size: usize) -> Result<FftRealToComplex> {
-        if !size.is_power_of_two() || !size.is_multiple_of(16) {
+        if !size.is_power_of_two() || !size.is_multiple_of(32) {
             bail!("FftRealToComplex size must be power of two and multiple of 16, is {}", size);
         }
         let mut planner = rustfft::FftPlanner::new();
@@ -66,40 +66,70 @@ impl FftRealToComplex {
         let twiddle_f32_ptr = self.twiddles.as_ptr() as *const f32;
         let output_f32_ptr = output.as_mut_ptr() as *mut f32;
         let simd_half = SimdFloat4::splat(0.5);
-        // See remainder plain loop to see how the original loop looks like.
-        for i in (1..(self.size / 4 - 3)).step_by(4) {
-            let (out_re, out_im) = unsafe { SimdFloat4::load_deinterleave2(output_f32_ptr.add(2 * i)) };
-            let (out_rev_re, out_rev_im) =
+        // See remainder plain loop to see how the original loop looks like. Unrolled: process 8 complex numbers per
+        // iteration
+        for i in (1..(self.size / 4 - 7)).step_by(8) {
+            let (out_re_0, out_im_0) = unsafe { SimdFloat4::load_deinterleave2(output_f32_ptr.add(2 * i)) };
+            let (out_re_1, out_im_1) = unsafe { SimdFloat4::load_deinterleave2(output_f32_ptr.add(2 * i + 8)) };
+            let (out_rev_re_0, out_rev_im_0) =
                 unsafe { SimdFloat4::load_deinterleave2_rev(output_f32_ptr.add(self.size - 2 * i - 6)) };
-            let (twiddle_re, twiddle_im) = unsafe { SimdFloat4::load_deinterleave2(twiddle_f32_ptr.add(2 * i - 2)) };
+            let (out_rev_re_1, out_rev_im_1) =
+                unsafe { SimdFloat4::load_deinterleave2_rev(output_f32_ptr.add(self.size - 2 * i - 14)) };
+            let (twiddle_re_0, twiddle_im_0) =
+                unsafe { SimdFloat4::load_deinterleave2(twiddle_f32_ptr.add(2 * i - 2)) };
+            let (twiddle_re_1, twiddle_im_1) =
+                unsafe { SimdFloat4::load_deinterleave2(twiddle_f32_ptr.add(2 * i + 6)) };
 
-            let sum_re = SimdFloat4::add(out_re, out_rev_re);
-            let sum_im = SimdFloat4::add(out_im, out_rev_im);
-            let diff_re = SimdFloat4::sub(out_re, out_rev_re);
-            let diff_im = SimdFloat4::sub(out_im, out_rev_im);
+            let sum_re_0 = SimdFloat4::add(out_re_0, out_rev_re_0);
+            let sum_im_0 = SimdFloat4::add(out_im_0, out_rev_im_0);
+            let diff_re_0 = SimdFloat4::sub(out_re_0, out_rev_re_0);
+            let diff_im_0 = SimdFloat4::sub(out_im_0, out_rev_im_0);
+            let sum_re_1 = SimdFloat4::add(out_re_1, out_rev_re_1);
+            let sum_im_1 = SimdFloat4::add(out_im_1, out_rev_im_1);
+            let diff_re_1 = SimdFloat4::sub(out_re_1, out_rev_re_1);
+            let diff_im_1 = SimdFloat4::sub(out_im_1, out_rev_im_1);
 
-            let half_sum_re = SimdFloat4::mul(simd_half, sum_re);
-            let half_diff_im = SimdFloat4::mul(simd_half, diff_im);
+            let half_sum_re_0 = SimdFloat4::mul(simd_half, sum_re_0);
+            let half_diff_im_0 = SimdFloat4::mul(simd_half, diff_im_0);
+            let half_sum_re_1 = SimdFloat4::mul(simd_half, sum_re_1);
+            let half_diff_im_1 = SimdFloat4::mul(simd_half, diff_im_1);
 
-            let output_twiddled_re =
-                SimdFloat4::add(SimdFloat4::mul(sum_im, twiddle_re), SimdFloat4::mul(diff_re, twiddle_im));
-            let output_twiddled_im =
-                SimdFloat4::sub(SimdFloat4::mul(sum_im, twiddle_im), SimdFloat4::mul(diff_re, twiddle_re));
+            let output_twiddled_re_0 =
+                SimdFloat4::add(SimdFloat4::mul(sum_im_0, twiddle_re_0), SimdFloat4::mul(diff_re_0, twiddle_im_0));
+            let output_twiddled_im_0 =
+                SimdFloat4::sub(SimdFloat4::mul(sum_im_0, twiddle_im_0), SimdFloat4::mul(diff_re_0, twiddle_re_0));
+            let output_twiddled_re_1 =
+                SimdFloat4::add(SimdFloat4::mul(sum_im_1, twiddle_re_1), SimdFloat4::mul(diff_re_1, twiddle_im_1));
+            let output_twiddled_im_1 =
+                SimdFloat4::sub(SimdFloat4::mul(sum_im_1, twiddle_im_1), SimdFloat4::mul(diff_re_1, twiddle_re_1));
 
-            let out_re = SimdFloat4::add(half_sum_re, output_twiddled_re);
-            let out_im = SimdFloat4::add(half_diff_im, output_twiddled_im);
+            let out_re_0 = SimdFloat4::add(half_sum_re_0, output_twiddled_re_0);
+            let out_im_0 = SimdFloat4::add(half_diff_im_0, output_twiddled_im_0);
+            let out_rev_re_0 = SimdFloat4::sub(half_sum_re_0, output_twiddled_re_0);
+            let out_rev_im_0 = SimdFloat4::sub(output_twiddled_im_0, half_diff_im_0);
+            let out_re_1 = SimdFloat4::add(half_sum_re_1, output_twiddled_re_1);
+            let out_im_1 = SimdFloat4::add(half_diff_im_1, output_twiddled_im_1);
+            let out_rev_re_1 = SimdFloat4::sub(half_sum_re_1, output_twiddled_re_1);
+            let out_rev_im_1 = SimdFloat4::sub(output_twiddled_im_1, half_diff_im_1);
+
             unsafe {
-                SimdFloat4::store_interleave2(output_f32_ptr.add(2 * i), out_re, out_im);
-            }
-            let out_rev_re = SimdFloat4::sub(half_sum_re, output_twiddled_re);
-            let out_rev_im = SimdFloat4::sub(output_twiddled_im, half_diff_im);
-            unsafe {
-                SimdFloat4::store_interleave2_rev(output_f32_ptr.add(self.size - 2 * i - 6), out_rev_re, out_rev_im);
+                SimdFloat4::store_interleave2(output_f32_ptr.add(2 * i), out_re_0, out_im_0);
+                SimdFloat4::store_interleave2(output_f32_ptr.add(2 * i + 8), out_re_1, out_im_1);
+                SimdFloat4::store_interleave2_rev(
+                    output_f32_ptr.add(self.size - 2 * i - 6),
+                    out_rev_re_0,
+                    out_rev_im_0,
+                );
+                SimdFloat4::store_interleave2_rev(
+                    output_f32_ptr.add(self.size - 2 * i - 14),
+                    out_rev_re_1,
+                    out_rev_im_1,
+                );
             }
         }
 
         // Remainder plain loop
-        for i in (self.size / 4 - 3)..(self.size / 4) {
+        for i in (self.size / 4 - 7)..(self.size / 4) {
             let out = output[i];
             let out_rev = output[self.size / 2 - i];
             let twiddle = self.twiddles[i - 1];
@@ -134,7 +164,7 @@ pub struct FftComplexToReal {
 impl FftComplexToReal {
     /// Create new FftComplexToReal
     pub fn new(size: usize) -> Result<FftComplexToReal> {
-        if !size.is_power_of_two() || !size.is_multiple_of(16) {
+        if !size.is_power_of_two() || !size.is_multiple_of(32) {
             bail!("FftComplexToReal size must be power of two and multiple of 16, is {}", size);
         }
         let mut planner = rustfft::FftPlanner::new();
@@ -176,40 +206,63 @@ impl FftComplexToReal {
 
         let twiddle_f32_ptr = self.twiddles.as_ptr() as *const f32;
         let input_f32_ptr = input.as_mut_ptr() as *mut f32;
-        // See remainder plain loop to see how the original loop looks like.
-        for i in (1..(self.size / 4 - 3)).step_by(4) {
-            let (inp_re, inp_im) = unsafe { SimdFloat4::load_deinterleave2(input_f32_ptr.add(2 * i)) };
-            let (inp_rev_re, inp_rev_im) =
+        // See remainder plain loop to see how the original loop looks like. Unrolled: process 8 complex numbers per
+        // iteration
+        for i in (1..(self.size / 4 - 7)).step_by(8) {
+            let (inp_re_0, inp_im_0) = unsafe { SimdFloat4::load_deinterleave2(input_f32_ptr.add(2 * i)) };
+            let (inp_re_1, inp_im_1) = unsafe { SimdFloat4::load_deinterleave2(input_f32_ptr.add(2 * i + 8)) };
+            let (inp_rev_re_0, inp_rev_im_0) =
                 unsafe { SimdFloat4::load_deinterleave2_rev(input_f32_ptr.add(self.size - 2 * i - 6)) };
-            let (twiddle_re, twiddle_im) = unsafe { SimdFloat4::load_deinterleave2(twiddle_f32_ptr.add(2 * i - 2)) };
+            let (inp_rev_re_1, inp_rev_im_1) =
+                unsafe { SimdFloat4::load_deinterleave2_rev(input_f32_ptr.add(self.size - 2 * i - 14)) };
+            let (twiddle_re_0, twiddle_im_0) =
+                unsafe { SimdFloat4::load_deinterleave2(twiddle_f32_ptr.add(2 * i - 2)) };
+            let (twiddle_re_1, twiddle_im_1) =
+                unsafe { SimdFloat4::load_deinterleave2(twiddle_f32_ptr.add(2 * i + 6)) };
 
-            let sum_re = SimdFloat4::add(inp_re, inp_rev_re);
-            let sum_im = SimdFloat4::add(inp_im, inp_rev_im);
-            let diff_re = SimdFloat4::sub(inp_re, inp_rev_re);
-            let diff_im = SimdFloat4::sub(inp_im, inp_rev_im);
+            let sum_re_0 = SimdFloat4::add(inp_re_0, inp_rev_re_0);
+            let sum_im_0 = SimdFloat4::add(inp_im_0, inp_rev_im_0);
+            let diff_re_0 = SimdFloat4::sub(inp_re_0, inp_rev_re_0);
+            let diff_im_0 = SimdFloat4::sub(inp_im_0, inp_rev_im_0);
+            let sum_re_1 = SimdFloat4::add(inp_re_1, inp_rev_re_1);
+            let sum_im_1 = SimdFloat4::add(inp_im_1, inp_rev_im_1);
+            let diff_re_1 = SimdFloat4::sub(inp_re_1, inp_rev_re_1);
+            let diff_im_1 = SimdFloat4::sub(inp_im_1, inp_rev_im_1);
 
-            let input_twiddled_re =
-                SimdFloat4::add(SimdFloat4::mul(sum_im, twiddle_re), SimdFloat4::mul(diff_re, twiddle_im));
-            let input_twiddled_im =
-                SimdFloat4::sub(SimdFloat4::mul(diff_re, twiddle_re), SimdFloat4::mul(sum_im, twiddle_im));
+            let input_twiddled_re_0 =
+                SimdFloat4::add(SimdFloat4::mul(sum_im_0, twiddle_re_0), SimdFloat4::mul(diff_re_0, twiddle_im_0));
+            let input_twiddled_im_0 =
+                SimdFloat4::sub(SimdFloat4::mul(diff_re_0, twiddle_re_0), SimdFloat4::mul(sum_im_0, twiddle_im_0));
+            let input_twiddled_re_1 =
+                SimdFloat4::add(SimdFloat4::mul(sum_im_1, twiddle_re_1), SimdFloat4::mul(diff_re_1, twiddle_im_1));
+            let input_twiddled_im_1 =
+                SimdFloat4::sub(SimdFloat4::mul(diff_re_1, twiddle_re_1), SimdFloat4::mul(sum_im_1, twiddle_im_1));
 
-            let inp_re = SimdFloat4::sub(sum_re, input_twiddled_re);
-            let inp_im = SimdFloat4::add(diff_im, input_twiddled_im);
+            let inp_re_0 = SimdFloat4::sub(sum_re_0, input_twiddled_re_0);
+            let inp_im_0 = SimdFloat4::add(diff_im_0, input_twiddled_im_0);
+            let inp_rev_re_0 = SimdFloat4::add(sum_re_0, input_twiddled_re_0);
+            let inp_rev_im_0 = SimdFloat4::sub(input_twiddled_im_0, diff_im_0);
+            let inp_re_1 = SimdFloat4::sub(sum_re_1, input_twiddled_re_1);
+            let inp_im_1 = SimdFloat4::add(diff_im_1, input_twiddled_im_1);
+            let inp_rev_re_1 = SimdFloat4::add(sum_re_1, input_twiddled_re_1);
+            let inp_rev_im_1 = SimdFloat4::sub(input_twiddled_im_1, diff_im_1);
+
             unsafe {
-                SimdFloat4::store_interleave2(input_f32_ptr.add(2 * i), inp_re, inp_im);
-            }
-            let inp_rev_re = SimdFloat4::add(sum_re, input_twiddled_re);
-            let inp_rev_im = SimdFloat4::sub(input_twiddled_im, diff_im);
-            unsafe {
-                SimdFloat4::store_interleave2_rev(input_f32_ptr.add(self.size - 2 * i - 6), inp_rev_re, inp_rev_im);
+                SimdFloat4::store_interleave2(input_f32_ptr.add(2 * i), inp_re_0, inp_im_0);
+                SimdFloat4::store_interleave2(input_f32_ptr.add(2 * i + 8), inp_re_1, inp_im_1);
+                SimdFloat4::store_interleave2_rev(input_f32_ptr.add(self.size - 2 * i - 6), inp_rev_re_0, inp_rev_im_0);
+                SimdFloat4::store_interleave2_rev(
+                    input_f32_ptr.add(self.size - 2 * i - 14),
+                    inp_rev_re_1,
+                    inp_rev_im_1,
+                );
             }
         }
 
         // Remainder plain loop
-        for i in (self.size / 4 - 3)..(self.size / 4) {
+        for i in (self.size / 4 - 7)..(self.size / 4) {
             let inp = input[i];
             let inp_rev = input[self.size / 2 - i];
-
             let twiddle = self.twiddles[i - 1];
 
             let sum = inp + inp_rev;
@@ -254,7 +307,7 @@ mod tests {
 
     #[test]
     fn test_real_fft_roundtrip() {
-        for size in [16, 256, 512, 1024, 2048, 4096] {
+        for size in [32, 256, 512, 1024, 2048, 4096] {
             // Generate random input in [-5, 5)
             let rng = SmallRng::seed_from_u64(size as u64);
             let mut input: Vec<f32> = rng.random_iter::<f32>().take(size).map(|x| x * 10.0 - 5.0).collect();
@@ -289,7 +342,7 @@ mod tests {
 
     #[test]
     fn test_real_fft_vs_realfft_forward() {
-        for size in [16, 256, 512, 1024, 2048, 4096] {
+        for size in [32, 256, 512, 1024, 2048, 4096] {
             // Generate random input in [-5, 5)
             for i in 0..10 {
                 let rng = SmallRng::seed_from_u64((size + i) as u64);
