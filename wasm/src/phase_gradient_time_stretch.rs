@@ -206,7 +206,7 @@ impl PhaseGradientTimeStretch {
         for k in num_chunks * 4..num_bins {
             let magn = ana_freq[k].norm_sqr();
             self.sqr_magnitudes[k] = magn;
-            cur_magn_max = cur_magn_max.max(magn).max(self.prev_sqr_magnitudes[k]);
+            cur_magn_max = cur_magn_max.max(magn);
         }
         let magn_max = cur_magn_max.max(self.prev_sqr_magnitudes_max);
         self.prev_sqr_magnitudes_max = cur_magn_max;
