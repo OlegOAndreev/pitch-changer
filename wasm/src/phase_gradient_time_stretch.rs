@@ -211,13 +211,13 @@ impl PhaseGradientTimeStretch {
         let magn_max = cur_magn_max.max(self.prev_sqr_magnitudes_max);
         self.prev_sqr_magnitudes_max = cur_magn_max;
 
-        let min_magn = magn_max * Self::MIN_MAGNITUDE_TOLERANCE;
+        let magn_threshold = magn_max * Self::MIN_MAGNITUDE_TOLERANCE;
 
         self.prev_sorted_bins.clear();
 
         for k in 0..num_bins {
             // Optimization: do not compute phase for frequencies below the min_magn threshold.
-            if self.sqr_magnitudes[k] > min_magn {
+            if self.sqr_magnitudes[k] > magn_threshold {
                 let freq = ana_freq[k];
                 // Use approximation instead of ana_freq[k].arg();
                 self.ana_phases[k] = approx_atan2(freq.im, freq.re);
@@ -233,7 +233,7 @@ impl PhaseGradientTimeStretch {
         }
         radix_sort_u32(CompactBin::as_u32_slice_mut(&mut self.prev_sorted_bins), &mut self.prev_sorted_bins_scratch);
 
-        min_magn
+        magn_threshold
     }
 
     // Assign phases to syn_phases
