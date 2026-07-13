@@ -7,8 +7,8 @@ set -e
 # Latest wasm-pack release was too long ago and now a few of dependencies are vulnerable, which is annoying.
 # Run wasm-bindgen and wasm-opt ourselves as outlined here: https://fourteenscrews.com/essays/look-ma-no-wasm-pack/
 
-#BUILD_PROFILE="release"
-BUILD_PROFILE="dev"
+BUILD_PROFILE="release"
+#BUILD_PROFILE="dev"
 
 echo "Building with profile: $BUILD_PROFILE"
 
