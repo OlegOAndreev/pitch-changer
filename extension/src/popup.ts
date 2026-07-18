@@ -128,7 +128,7 @@ async function applyToTabs() {
                 injectImmediately: true,
             });
         } catch (error) {
-            console.error('Could not apply settings', error);
+            console.error(`Could not apply settings to tab ${tab.url}`, error);
             showStatus(error as string);
         }
     }
@@ -187,7 +187,7 @@ async function updateDebugStats() {
                 numAudioContextDestinations += data.numAudioContextDestinations;
             }
         } catch (error) {
-            console.error('Could not get stats from tab', error);
+            console.error(`Could not get stats from tab ${tab.url}`, error);
             showStatus(error as string);
         }
     }
