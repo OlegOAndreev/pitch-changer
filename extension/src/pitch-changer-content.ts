@@ -22,14 +22,14 @@ function debugLog(...args: unknown[]): void {
 //
 // * We want to process all frames (it's extremely frequent that audio/video elements are inside iframes) in the tab.
 //
-// * The AudioWorklet overriding script must be ran as soon as possible, before all the page script: the easiest way
-//   to do it is by adding to manifest.json. The alternative of calling executeScript() is harder to pull off: getting
-//   current tab is an async operation, getting current frame is non-trivial.
+// * The AudioWorklet overriding script must be ran as soon as possible, before the page script: the easiest way to do
+//   it is by adding to manifest.json. The alternative of calling executeScript() is harder to pull off: getting current
+//   tab is an async operation, getting current frame is non-trivial.
 //
-// * The standard advice for communicating between scripts (e.g. popup <-> content scripts) is sendMessage, but a) this
+// * The standard way of communicating between scripts (e.g. popup <-> content scripts) is sendMessage, but a) this
 //   is a very verbose way of doing it, b) you can't sendMessage into a MAIN environment on Firefox and c) you have to
 //   enumerate frames if we need to get results from all frames. Instead we call functions using executeScript(). In
-//   order to do that we store the references to those functions into globalThis, which looks like a hack but works.
+//   order to do that we store the references to those functions in globalThis, which looks like a hack but works.
 
 let settings: ExtensionSettings;
 

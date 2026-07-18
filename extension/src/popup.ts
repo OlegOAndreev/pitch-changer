@@ -9,7 +9,7 @@ import {
     SETTINGS_KEY,
 } from './common.js';
 // Note: yes, this is an intended import
-import { debounce } from '../../src/utils.js';
+import { debounce } from '../../src/common-utils.js';
 
 const currentSettings: ExtensionSettings = await loadSettings();
 

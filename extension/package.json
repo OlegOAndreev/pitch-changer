@@ -1,11 +1,11 @@
 {
   "type": "module",
   "scripts": {
-    "build": "npm run build:ts && npm run build:assets && npm run lint:webext",
+    "build:extension": "npm run build:ts && npm run build:assets && npm run lint:webext",
     "build:ts": "eslint -c ../eslint.config.ts src/*.ts && esbuild --bundle --target=chrome89,firefox89 --format=esm --outdir=dist src/*.ts",
-    "build:assets": "cp -r assets/* dist/",
+    "build:assets": "cp -r assets/* dist/ && cp ../wasm/build/wasm_main_module_bg.wasm dist/",
     "lint:webext": "web-ext lint --source-dir dist",
-    "package": "npm run build && web-ext sign --source-dir dist --channel unlisted && mv web-ext-artifacts/*.xpi audio-pitch-changer-`jq -r .version < ./assets/manifest.json`.xpi"
+    "package:extension": "npm run build:extension && web-ext sign --source-dir dist --channel unlisted && mv web-ext-artifacts/*.xpi audio-pitch-changer-`jq -r .version < ./assets/manifest.json`.xpi"
   },
   "devDependencies": {
     "@eslint/css": "^0.14.1",
