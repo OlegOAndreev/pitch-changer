@@ -94,6 +94,14 @@ function shouldApplyToTab(tab: chrome.tabs.Tab): boolean {
     if (!tab.id) {
         return false;
     }
+    // See https://stackoverflow.com/questions/70948787/how-to-detect-if-a-tab-is-unloaded-after-you-restart-the-chrome-browser
+    if (tab.discarded || tab.status === 'unloaded') {
+        return false;
+    }
+    // See https://github.com/w3c/webextensions/issues/527
+    if (tab.frozen) {
+        return false;
+    }
     if (tab.incognito) {
         return false;
     }
@@ -128,8 +136,14 @@ async function applyToTabs() {
                 injectImmediately: true,
             });
         } catch (error) {
-            console.error(`Could not apply settings to tab ${tab.url}`, error);
-            showStatus(error as string);
+            const message = error instanceof Error ? error.message : String(error);
+            // Injection into restricted/quarantined hosts always fails; this is expected, so just log it.
+            if (message.includes('Cannot access contents of the page')) {
+                console.debug(`Could not apply settings to tab ${tab.url}, skipping`, error)
+            } else {
+                console.error(`Could not apply settings to tab ${tab.url}`, error);
+                showStatus(error as string);
+            }
         }
     }
 }
