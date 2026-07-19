@@ -41,8 +41,12 @@ export async function loadSettings(): Promise<ExtensionSettings> {
 }
 
 // The following two interfaces are hacks for allowing calling functions in content scripts from popup script. We store
-// function pointers in globalThis properties via those interfaces. An alternative would be either a) passing messages
-// or b) exporting those functions using modules. Both options require more code and look more fragile.
+// function pointers in globalThis properties via those interfaces.
+//
+// An alternative would be either a) passing messages or b) exporting those functions using modules. Both those options
+// require more code and look more fragile, because we need to run both in ISOLATED world and MAIN world: while ISOLATED
+// world can listen to messages and settings changes, MAIN cannot and we would need to communicate with it through
+// messages with ISOLATED world.
 export interface ContentScriptExports {
     exportGetStats?(): StatsResult;
     exportApplySettings?(newSettings: ExtensionSettings): void;
