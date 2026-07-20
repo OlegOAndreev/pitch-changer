@@ -30,25 +30,25 @@ function debugLog(...args: unknown[]): void {
 //   is a very verbose way of doing it, b) you can't sendMessage into a MAIN environment on Firefox and c) you have to
 //   enumerate frames if we need to get results from all frames. Instead we call functions using executeScript(). In
 //   order to do that we store the references to those functions in globalThis, which looks like a hack but works.
+//
+// * We run processing of all audio and video elements through a single AudioWorkletNode, that the elements connect to.
+//   It is lazily initialized.
 
 let settings: ExtensionSettings;
 
 let workletAudioContext: Promise<AudioContext> | null = null;
 
-interface NodeWithWorklet {
-    sourceNode: MediaElementAudioSourceNode;
-    workletNode: AudioWorkletNode | null;
-}
-
 // WeakMap would have been nice here, but it is not iterable and we have a MutationObserver anyway.
 //
 // Because of the unsolved https://github.com/WebAudio/web-audio-api/issues/1202 this map may contain somewhat stale
 // data: we add the elements to this map when the processing is enabled, but not when it is disabled. If the extension
-// is enabled after the page was loaded, we re-scan all elements and add the new ones to this map.
+// is enabled after the page was loaded, we re-scan all elements and add the new ones to the map.
 //
 // Basically, we try not to add worklets to elements if extension is disabled, but we never remove them from active
 // elements.
-const nodesMap = new Map<HTMLMediaElement, NodeWithWorklet>();
+const nodesMap = new Map<HTMLMediaElement, MediaElementAudioSourceNode>();
+
+let globalWorkletNode: AudioWorkletNode | null = null;
 
 async function initAudioContext(): Promise<AudioContext> {
     const newAudioContext = new AudioContext();
@@ -65,17 +65,26 @@ async function getWorkletAudioContext(): Promise<AudioContext> {
     return workletAudioContext;
 }
 
-function createWorkletNode(context: AudioContext, sourceNode: MediaElementAudioSourceNode): AudioWorkletNode {
-    const workletNode = new AudioWorkletNode(context, PROCESSOR_NAME, {
-        channelCount: sourceNode.channelCount,
-        outputChannelCount: [context.destination.channelCount],
+function getWorkletNode(context: AudioContext): AudioWorkletNode {
+    if (globalWorkletNode) {
+        return globalWorkletNode;
+    }
+
+    const destChannelCount = context.destination.channelCount;
+
+    globalWorkletNode = new AudioWorkletNode(context, PROCESSOR_NAME, {
+        // Force the WebAudio do up/downmixing for us.
+        channelCount: destChannelCount,
+        channelCountMode: 'explicit',
+        outputChannelCount: [destChannelCount],
         parameterData: {
             pitchValue: settings.pitchValue,
         },
     });
-    sourceNode.connect(workletNode);
-    workletNode.connect(context.destination);
-    return workletNode;
+    globalWorkletNode.connect(context.destination);
+
+    debugLog(`Created shared worklet node, channelCount=${destChannelCount}`);
+    return globalWorkletNode;
 }
 
 async function applyWorklet(element: HTMLMediaElement) {
@@ -83,12 +92,13 @@ async function applyWorklet(element: HTMLMediaElement) {
         return;
     }
     if (!settings.enabled) {
-        console.error('Adding element when the extension is disabled', element);
+        console.error('Trying to add element when the extension is disabled', element);
         return;
     }
 
     try {
         const context = await getWorkletAudioContext();
+        const workletNode = getWorkletNode(context);
         if (nodesMap.get(element)) {
             // Re-check if a concurrent applyWorklet already added the element.
             return;
@@ -107,10 +117,10 @@ async function applyWorklet(element: HTMLMediaElement) {
         });
 
         const sourceNode = context.createMediaElementSource(element);
-        const workletNode = createWorkletNode(context, sourceNode);
-        nodesMap.set(element, { sourceNode: sourceNode, workletNode: workletNode });
+        sourceNode.connect(workletNode);
+        nodesMap.set(element, sourceNode);
         debugLog(
-            `Added worklet to element ${element.id}, channelCount ${sourceNode.channelCount}, outputChannelCount ${context.destination.channelCount}`,
+            `Added source to shared worklet for element ${element.id}, channelCount ${sourceNode.channelCount}, outputChannelCount ${context.destination.channelCount}`,
         );
     } catch (error) {
         console.error('Error adding worklet to node', error);
@@ -118,20 +128,16 @@ async function applyWorklet(element: HTMLMediaElement) {
 }
 
 function removeWorklet(element: HTMLMediaElement) {
-    const state = nodesMap.get(element);
-    if (!state) {
+    const sourceNode = nodesMap.get(element);
+    if (!sourceNode) {
         console.error('Removing non-added element', element);
         return;
     }
 
     try {
-        state.sourceNode.disconnect();
-        if (state.workletNode) {
-            state.workletNode.disconnect();
-        }
-
+        sourceNode.disconnect();
         nodesMap.delete(element);
-        debugLog(`Removed worklet from element ${element.id}`);
+        debugLog(`Removed source from shared worklet for element ${element.id}`);
     } catch (error) {
         console.error('Error removing worklet from element:', error);
     }
@@ -187,43 +193,50 @@ function applyStoredSettings() {
 function applySettings(newSettings: ExtensionSettings) {
     debugLog('Applying settings', newSettings);
     const gotEnabled = !settings.enabled && newSettings.enabled;
+    const gotDisabled = settings.enabled && !newSettings.enabled;
     settings = newSettings;
 
-    // TODO: Run the applySettings functino in the MAIN world.
+    // TODO: Run the applySettings function in the MAIN world.
 
-    // Do not await for future, so that applySettings exits asap.
-    applySettingsImpl(gotEnabled);
+    // Do not await the future, so that applySettings exits asap.
+    applySettingsImpl(gotEnabled, gotDisabled);
 }
 
-async function applySettingsImpl(gotEnabled: boolean) {
-    // Re-scan the HTML elements to find new audio/video elements not in nodesMap.
+async function applySettingsImpl(gotEnabled: boolean, gotDisabled: boolean) {
     if (gotEnabled) {
-        debugLog('Enabling pitch shift for page');
+        debugLog('Re-enabling pitch shift for page');
+        // Re-scan for any media elements that appeared while extension was disabled.
         applyWorkletToChildren(document);
-    }
 
-    // Apply the new pitch value to the worklet nodes and creates worklet nodes if required.
-    const context = await getWorkletAudioContext();
-    const currentTime = context.currentTime;
-    for (const node of nodesMap.values()) {
-        if (settings.enabled) {
-            if (!node.workletNode) {
-                node.sourceNode.disconnect();
-                node.workletNode = createWorkletNode(context, node.sourceNode);
-            } else {
-                //@ts-expect-error AudioParamMap does not currently have full interface described in TypeScript
-                (node.workletNode.parameters.get('pitchValue') as AudioParam).setValueAtTime(
-                    settings.pitchValue,
-                    currentTime,
-                );
-            }
-        } else {
-            if (node.workletNode) {
-                node.sourceNode.disconnect();
-                node.sourceNode.connect(context.destination);
-                node.workletNode = null;
+        if (nodesMap.size > 0) {
+            // Route all nodes through our worklet (newly added nodes in applyWorkletToChildren are already routed
+            // through worklet, for those it will do a no-op).
+            const context = await getWorkletAudioContext();
+            const worklet = getWorkletNode(context);
+            for (const sourceNode of nodesMap.values()) {
+                sourceNode.disconnect();
+                sourceNode.connect(worklet);
             }
         }
+    }
+    if (gotDisabled) {
+        // Route all nodes through default destination.
+        const context = await getWorkletAudioContext();
+        for (const sourceNode of nodesMap.values()) {
+            sourceNode.disconnect();
+            sourceNode.connect(context.destination);
+        }
+    }
+
+    // Update the parameters of the worklet if it exists.
+    if (globalWorkletNode) {
+        const context = await getWorkletAudioContext();
+        const worklet = getWorkletNode(context);
+        //@ts-expect-error AudioParamMap does not currently have full interface described in TypeScript
+        (worklet.parameters.get('pitchValue') as AudioParam).setValueAtTime(
+            settings.pitchValue,
+            context.currentTime,
+        );
     }
 }
 
