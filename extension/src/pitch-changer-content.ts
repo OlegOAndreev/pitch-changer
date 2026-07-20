@@ -82,7 +82,7 @@ function getWorkletNode(context: AudioContext): AudioWorkletNode {
     });
     globalWorkletNode.connect(context.destination);
 
-    debugLog(`Created shared worklet node, channelCount=${destChannelCount}`);
+    debugLog(`Created shared worklet node, channelCount ${destChannelCount}`);
     return globalWorkletNode;
 }
 
@@ -118,9 +118,7 @@ async function applyWorklet(element: HTMLMediaElement) {
         const sourceNode = context.createMediaElementSource(element);
         sourceNode.connect(workletNode);
         nodesMap.set(element, sourceNode);
-        debugLog(
-            `Added source to shared worklet for element ${element.id}, channelCount ${sourceNode.channelCount}, outputChannelCount ${context.destination.channelCount}`,
-        );
+        debugLog(`Added source to shared worklet for element ${element.id}, channelCount ${sourceNode.channelCount}`);
     } catch (error) {
         console.error('Error adding worklet to node', error);
     }
@@ -190,9 +188,9 @@ function applyStoredSettings() {
 }
 
 function applySettings(newSettings: ExtensionSettings) {
-    debugLog('Applying settings', newSettings);
-    const gotEnabled = !settings.enabled && newSettings.enabled;
-    const gotDisabled = settings.enabled && !newSettings.enabled;
+    debugLog(`Applying new settings ${JSON.stringify(newSettings)}, current settings ${JSON.stringify(settings)}`);
+    const gotEnabled = settings && !settings.enabled && newSettings.enabled;
+    const gotDisabled = settings && settings.enabled && !newSettings.enabled;
     settings = newSettings;
 
     // TODO: Run the applySettings function in the MAIN world.
@@ -264,7 +262,7 @@ async function init(): Promise<void> {
     setupExports();
 
     settings = await loadSettings();
-    debugLog('Audio Pitch Changer: Initializing main content script');
+    debugLog('Audio Pitch Changer: Initializing ISOLATED content script');
     // TODO:
     // 1. Inject the pitch-changer-override-ac here.
     // 2. Pass the current settings and processor URL to initialize the rest (call the function?)
