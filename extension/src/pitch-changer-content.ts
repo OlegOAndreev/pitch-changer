@@ -36,7 +36,8 @@ function debugLog(...args: unknown[]): void {
 
 let settings: ExtensionSettings;
 
-let workletAudioContext: Promise<AudioContext> | null = null;
+let globalAudioContext: Promise<AudioContext> | null = null;
+let globalWorkletNode: AudioWorkletNode | null = null;
 
 // WeakMap would have been nice here, but it is not iterable and we have a MutationObserver anyway.
 //
@@ -48,8 +49,6 @@ let workletAudioContext: Promise<AudioContext> | null = null;
 // elements.
 const nodesMap = new Map<HTMLMediaElement, MediaElementAudioSourceNode>();
 
-let globalWorkletNode: AudioWorkletNode | null = null;
-
 async function initAudioContext(): Promise<AudioContext> {
     const newAudioContext = new AudioContext();
     const processorUrl = chrome.runtime.getURL('pitch-changer-processor.js');
@@ -59,10 +58,10 @@ async function initAudioContext(): Promise<AudioContext> {
 }
 
 async function getWorkletAudioContext(): Promise<AudioContext> {
-    if (!workletAudioContext) {
-        workletAudioContext = initAudioContext();
+    if (!globalAudioContext) {
+        globalAudioContext = initAudioContext();
     }
-    return workletAudioContext;
+    return globalAudioContext;
 }
 
 function getWorkletNode(context: AudioContext): AudioWorkletNode {
@@ -231,9 +230,8 @@ async function applySettingsImpl(gotEnabled: boolean, gotDisabled: boolean) {
     // Update the parameters of the worklet if it exists.
     if (globalWorkletNode) {
         const context = await getWorkletAudioContext();
-        const worklet = getWorkletNode(context);
         //@ts-expect-error AudioParamMap does not currently have full interface described in TypeScript
-        (worklet.parameters.get('pitchValue') as AudioParam).setValueAtTime(
+        (globalWorkletNode.parameters.get('pitchValue') as AudioParam).setValueAtTime(
             settings.pitchValue,
             context.currentTime,
         );
