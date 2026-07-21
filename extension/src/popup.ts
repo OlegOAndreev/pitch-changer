@@ -120,7 +120,7 @@ async function applyToTabs() {
         }
         debugLog(`Applying to ${tab.url}`);
         try {
-            await chrome.scripting.executeScript({
+            chrome.scripting.executeScript({
                 func: (settings) => {
                     const applySettings = (globalThis as unknown as ContentScriptExports).exportApplySettings;
                     // Skip the frames we did not get injected into for whatever reason.
@@ -131,9 +131,18 @@ async function applyToTabs() {
                 args: [currentSettings],
                 target: { tabId: tab.id!, allFrames: true },
                 world: 'ISOLATED',
-                // Set to true, otherwise the execution may hang for a looong time while the various iframes are being
-                // loaded.
-                injectImmediately: true,
+            });
+            chrome.scripting.executeScript({
+                func: (settings) => {
+                    const applySettings = (globalThis as unknown as OverrideScriptExports).exportPitchChangerOverrideApplySettings;
+                    // Skip the frames we did not get injected into for whatever reason.
+                    if (applySettings) {
+                        applySettings(settings);
+                    }
+                },
+                args: [currentSettings],
+                target: { tabId: tab.id!, allFrames: true },
+                world: 'MAIN',
             });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -141,7 +150,7 @@ async function applyToTabs() {
             if (message.includes('Cannot access contents of the page')) {
                 console.debug(`Could not apply settings to tab ${tab.url}, skipping`, error)
             } else {
-                console.error(`Could not apply settings to tab ${tab.url}`, error);
+                console.error(`Could not apply settings to tab ${tab.url} ISOLATED`, error);
                 showStatus(error as string);
             }
         }
@@ -182,7 +191,7 @@ async function updateDebugStats() {
             const overrideResults = await chrome.scripting.executeScript({
                 func: () => {
                     const getStats = (globalThis as unknown as OverrideScriptExports)
-                        .exportPitchShifterOverrideGetStats;
+                        .exportPitchChangerOverrideGetStats;
                     // Skip the frames we did not get injected into for whatever reason.
                     if (getStats) {
                         return getStats();

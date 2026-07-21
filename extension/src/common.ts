@@ -27,6 +27,13 @@ const defaultSettings: ExtensionSettings = {
     pitchValue: 1.0,
 };
 
+export interface PitchChangerOverrideInit {
+    type: 'pitch-changer-extension-main-init';
+    processorUrl: string;
+    wasmUrl: string;
+    settings: ExtensionSettings;
+}
+
 export async function loadSettings(): Promise<ExtensionSettings> {
     const result = structuredClone(defaultSettings);
     try {
@@ -54,5 +61,6 @@ export interface ContentScriptExports {
 
 export interface OverrideScriptExports {
     // The function name must be unique: we are injecting into global user-visible namespace.
-    exportPitchShifterOverrideGetStats?(): OverrideStatsResult;
+    exportPitchChangerOverrideApplySettings?(newSettings: ExtensionSettings): void;
+    exportPitchChangerOverrideGetStats?(): OverrideStatsResult;
 }

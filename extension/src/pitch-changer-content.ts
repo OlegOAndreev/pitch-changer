@@ -1,8 +1,10 @@
 import {
     loadSettings,
     PROCESSOR_NAME,
+    SETTINGS_KEY,
     type ContentScriptExports,
     type ExtensionSettings,
+    type PitchChangerOverrideInit,
     type StatsResult,
 } from './common.js';
 
@@ -20,19 +22,27 @@ function debugLog(...args: unknown[]): void {
 // 2. it overrides AudioWorklet constructor (this must be done in the MAIN environment from pitch-changer-override-ac:
 //    we need to replace the global variable)
 //
-// * We want to process all frames (it's extremely frequent that audio/video elements are inside iframes) in the tab.
+// We want to process all frames (it's extremely frequent that audio/video elements are inside iframes) in the tab.
 //
-// * The AudioWorklet overriding script must be ran as soon as possible, before the page script: the easiest way to do
-//   it is by adding to manifest.json. The alternative of calling executeScript() is harder to pull off: getting current
-//   tab is an async operation, getting current frame is non-trivial.
+// The AudioWorklet overriding script must be ran as soon as possible, before the page script: the easiest way to do it
+// is by adding to manifest.json. The alternative of calling executeScript() is harder to pull off: getting current tab
+// is an async operation, getting current frame is non-trivial.
 //
-// * The standard way of communicating between scripts (e.g. popup <-> content scripts) is sendMessage, but a) this
-//   is a very verbose way of doing it, b) you can't sendMessage into a MAIN environment on Firefox and c) you have to
-//   enumerate frames if we need to get results from all frames. Instead we call functions using executeScript(). In
-//   order to do that we store the references to those functions in globalThis, which looks like a hack but works.
+// The standard way of communicating between scripts (e.g. popup <-> content scripts) is sendMessage, but a) this is a
+// very verbose way of doing it, b) you can't sendMessage into a MAIN environment on Firefox and c) you have to
+// enumerate frames if we need to get results from all frames. Instead we call functions using executeScript(). In order
+// to do that we store the references to those functions in globalThis, which looks like a hack but works. See
+// ContentScriptExports and OverrideScriptExports.
 //
-// * We run processing of all audio and video elements through a single AudioWorkletNode, that the elements connect to.
-//   It is lazily initialized.
+// We run processing of all audio and video elements through a single AudioWorkletNode, that the elements connect to. It
+// is lazily initialized.
+//
+// Each overriden AudioContext has its own AudioWorkletNode.
+//
+// MAIN world content script is ran first before all the other scripts are loaded to override the AudioContext
+// constructor, the ISOLATED content script is ran much later, because it needs to complete initialization of MAIN world
+// content script. Unlike the ISOLATED world content script, MAIN world content script cannot access chrome.runtime APIs
+// and cannot get the URLs of extension scripts/wasm files or current settings.
 
 let settings: ExtensionSettings;
 
@@ -53,7 +63,7 @@ async function initAudioContext(): Promise<AudioContext> {
     const newAudioContext = new AudioContext();
     const processorUrl = chrome.runtime.getURL('pitch-changer-processor.js');
     await newAudioContext.audioWorklet.addModule(processorUrl);
-    debugLog(`Created shared AudioContext and loaded processor from ${processorUrl}`);
+    debugLog(`Created shared AudioContext and loaded processor from ${processorUrl} in ISOLATED`);
     return newAudioContext;
 }
 
@@ -188,7 +198,7 @@ function applyStoredSettings() {
 }
 
 function applySettings(newSettings: ExtensionSettings) {
-    debugLog(`Applying new settings ${JSON.stringify(newSettings)}, current settings ${JSON.stringify(settings)}`);
+    debugLog(`Applying new settings in ISOLATED: ${JSON.stringify(newSettings)}, current settings ${JSON.stringify(settings)}`);
     const gotEnabled = settings && !settings.enabled && newSettings.enabled;
     const gotDisabled = settings && settings.enabled && !newSettings.enabled;
     settings = newSettings;
@@ -263,9 +273,6 @@ async function init(): Promise<void> {
 
     settings = await loadSettings();
     debugLog('Audio Pitch Changer: Initializing ISOLATED content script');
-    // TODO:
-    // 1. Inject the pitch-changer-override-ac here.
-    // 2. Pass the current settings and processor URL to initialize the rest (call the function?)
     applyStoredSettings();
 
     const observer = new MutationObserver((mutations) => {
@@ -288,6 +295,15 @@ async function init(): Promise<void> {
     });
 
     observer.observe(document, { subtree: true, childList: true });
+
+    // Complete initialization of the MAIN content script. Ideally we would simply use executeScript from ISOLATED
+    // content script to run MAIN init, but browser does not allow getting current tab id :-(
+    window.postMessage({
+        type: 'pitch-changer-extension-main-init',
+        processorUrl: chrome.runtime.getURL('pitch-changer-processor.js'),
+        wasmUrl: chrome.runtime.getURL('wasm_main_module_bg.wasm'),
+        settings: settings,
+    } as PitchChangerOverrideInit, '*');
 }
 
 init();
