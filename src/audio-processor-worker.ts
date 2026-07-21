@@ -21,8 +21,9 @@ class AudioProcessorWorker {
         numChannels: 1,
         fftSize: 4096,
     };
-    private workerInit = false;
-    private paramsDirty = false;
+    private workerIsInit = false;
+    private paramsAreDirty = false;
+    private wasmInit: Promise<void> | undefined;
     private processor: MultiPitchShifter | undefined;
     private processorNumChannels: number | undefined;
     private inputVec: Float32Vec | undefined;
@@ -33,13 +34,8 @@ class AudioProcessorWorker {
     // otherwise the messages get dropped:
     // https://stackoverflow.com/questions/34409254/are-messages-sent-via-worker-postmessage-queued
     // https://github.com/GoogleChromeLabs/comlink/issues/635
-    async init() {
-        const module = await initWasmModule();
-        const wasmMemory = module.memory;
-        console.debug(`AudioProcessorWorker: Wasm settings: ${get_settings()}`);
-        console.debug(`AudioProcessorWorker: Initial wasm memory size: ${wasmMemory.buffer.byteLength}`);
-
-        this.workerInit = true;
+    init() {
+        this.workerIsInit = true;
 
         const message: WorkerInitResponse = {
             type: 'initDone',
@@ -48,7 +44,7 @@ class AudioProcessorWorker {
     }
 
     setClientPort(clientPort: MessagePort) {
-        if (!this.workerInit) {
+        if (!this.workerIsInit) {
             throw new Error('Worker not initialized before calling methods');
         }
 
@@ -64,26 +60,26 @@ class AudioProcessorWorker {
     }
 
     setParams(newParams: WorkerParams): void {
-        if (!this.workerInit) {
+        if (!this.workerIsInit) {
             throw new Error('Worker not initialized before calling methods');
         }
 
         this.params = newParams;
-        this.paramsDirty = true;
+        this.paramsAreDirty = true;
     }
 
-    private onMessage(message: AudioProcessorClientRequest) {
+    private async onMessage(message: AudioProcessorClientRequest) {
         switch (message.type) {
             case 'resetRequest':
-                this.reset();
+                await this.reset();
                 break;
 
             case 'processSamplesRequest':
-                this.processSamples(message.samples);
+                await this.processSamples(message.samples);
                 break;
 
             case 'finishRequest':
-                this.finish();
+                await this.finish();
                 break;
 
             default:
@@ -92,20 +88,37 @@ class AudioProcessorWorker {
         }
     }
 
-    private reset() {
-        if (!this.workerInit) {
+    // Lazily initialize WASM module: this is important for extension where we want to postpone initialization as far as
+    // possible. Do not run initWasmModule more than once.
+    private async ensureWasmInit(): Promise<void> {
+        if (!this.wasmInit) {
+            this.wasmInit = this.initWasm();
+        }
+        return this.wasmInit;
+    }
+
+    private async initWasm() {
+        const module = await initWasmModule();
+        const wasmMemory = module.memory;
+        console.debug(`AudioProcessorWorker: Wasm settings: ${get_settings()}, initial wasm memory size ${wasmMemory.buffer.byteLength}`);
+    }
+
+    private async reset() {
+        if (!this.workerIsInit) {
             throw new Error('Worker not initialized before calling methods');
         }
 
+        await this.ensureWasmInit();
         const processor = this.getProcessor();
         processor.reset();
     }
 
-    private processSamples(samples: Float32Array) {
-        if (!this.workerInit) {
+    private async processSamples(samples: Float32Array) {
+        if (!this.workerIsInit) {
             throw new Error('Worker not initialized before calling methods');
         }
 
+        await this.ensureWasmInit();
         if (!this.inputVec) {
             this.inputVec = new Float32Vec(0);
         }
@@ -125,11 +138,12 @@ class AudioProcessorWorker {
         this.sendResult(result, false);
     }
 
-    private finish() {
-        if (!this.workerInit) {
+    private async finish() {
+        if (!this.workerIsInit) {
             throw new Error('Worker not initialized before calling methods');
         }
 
+        await this.ensureWasmInit();
         if (!this.processedVec) {
             this.processedVec = new Float32Vec(0);
         }
@@ -143,7 +157,7 @@ class AudioProcessorWorker {
     }
 
     private getProcessor(): MultiPitchShifter {
-        if (this.processor && !this.paramsDirty) {
+        if (this.processor && !this.paramsAreDirty) {
             return this.processor;
         }
 
@@ -185,7 +199,7 @@ class AudioProcessorWorker {
         }
 
         this.processorNumChannels = this.params.numChannels;
-        this.paramsDirty = false;
+        this.paramsAreDirty = false;
 
         return this.processor!;
     }
