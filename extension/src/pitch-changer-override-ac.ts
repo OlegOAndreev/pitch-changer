@@ -43,6 +43,7 @@ class PitchChangerOverrideAudioContext extends AudioContext {
             this.pitchChangerOverrideGainNode = gainNode as unknown as AudioDestinationNode;
             pitchChangerOverridenAudioContexts.push(this);
 
+            // We intentionally do not await this.
             this.pitchChangerOverrideApplySettings();
         }
 
@@ -81,7 +82,7 @@ class PitchChangerOverrideAudioContext extends AudioContext {
                 );
             } else {
                 if (!this.pitchChangerOverrideModuleAdded) {
-                    this.audioWorklet.addModule(pitchChangerOverrideProcessorUrl);
+                    await this.audioWorklet.addModule(pitchChangerOverrideProcessorUrl);
                     this.pitchChangerOverrideModuleAdded = true;
                     pitchChangerOverrideDebugLog(`Loaded processor from ${pitchChangerOverrideProcessorUrl} in MAIN`);
                 }
@@ -115,6 +116,7 @@ function pitchChangerOverrideApplySettings(newSettings: ExtensionSettings) {
     pitchChangerOverrideSettings = newSettings;
 
     for (const context of pitchChangerOverridenAudioContexts) {
+        // We intentionally do not await this.
         context.pitchChangerOverrideApplySettings();
     }
 }
@@ -137,6 +139,7 @@ async function pitchChangerOverrideAsyncInit(init: PitchChangerOverrideInit) {
     pitchChangerOverrideWasmUrl = init.wasmUrl;
 
     for (const context of pitchChangerOverridenAudioContexts) {
+        // We intentionally do not await this.
         context.pitchChangerOverrideApplySettings();
     }
 }
