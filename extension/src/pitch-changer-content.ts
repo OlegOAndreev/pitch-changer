@@ -1,7 +1,6 @@
 import {
     loadSettings,
     PROCESSOR_NAME,
-    SETTINGS_KEY,
     type ContentScriptExports,
     type ExtensionSettings,
     type PitchChangerOverrideInit,
@@ -28,11 +27,14 @@ function debugLog(...args: unknown[]): void {
 // is by adding to manifest.json. The alternative of calling executeScript() is harder to pull off: getting current tab
 // is an async operation, getting current frame is non-trivial.
 //
-// The standard way of communicating between scripts (e.g. popup <-> content scripts) is sendMessage, but a) this is a
-// very verbose way of doing it, b) you can't sendMessage into a MAIN environment on Firefox and c) you have to
-// enumerate frames if we need to get results from all frames. Instead we call functions using executeScript(). In order
-// to do that we store the references to those functions in globalThis, which looks like a hack but works. See
-// ContentScriptExports and OverrideScriptExports.
+// We propagate changes from popup to tabs via calling executeScript. The standard way of communicating between scripts
+// (e.g. popup <-> content scripts) is sendMessage, but a) this is a very verbose way of doing it, b) you can't
+// sendMessage into a MAIN environment on Firefox and c) you have to enumerate frames if we need to get results from all
+// frames. Instead we call functions using executeScript(): in order to do that we store the references to those
+// functions in globalThis, which looks like a hack but works. See ContentScriptExports and OverrideScriptExports.
+//
+// Another way to propagate changes would be listening to storage.onChanged, but we debounce writes and want to have
+// immediate feedback when changing the parameters.
 //
 // We run processing of all audio and video elements through a single AudioWorkletNode, that the elements connect to. It
 // is lazily initialized.
@@ -203,8 +205,6 @@ function applySettings(newSettings: ExtensionSettings) {
     const gotDisabled = settings && settings.enabled && !newSettings.enabled;
     settings = newSettings;
 
-    // TODO: Run the applySettings function in the MAIN world.
-
     // Do not await the future, so that applySettings exits asap.
     applySettingsImpl(gotEnabled, gotDisabled);
 }
@@ -275,6 +275,15 @@ async function init(): Promise<void> {
     debugLog('Audio Pitch Changer: Initializing ISOLATED content script');
     applyStoredSettings();
 
+    // Complete initialization of the MAIN content script. Ideally we would simply use executeScript from ISOLATED
+    // content script to run MAIN init, but browser does not allow getting current tab id :-(
+    window.postMessage({
+        type: 'pitch-changer-override-init',
+        processorUrl: chrome.runtime.getURL('pitch-changer-processor.js'),
+        wasmUrl: chrome.runtime.getURL('wasm_main_module_bg.wasm'),
+        settings: settings,
+    } as PitchChangerOverrideInit, '*');
+
     const observer = new MutationObserver((mutations) => {
         for (const mutation of mutations) {
             if (settings.enabled && mutation.addedNodes) {
@@ -293,17 +302,7 @@ async function init(): Promise<void> {
             }
         }
     });
-
     observer.observe(document, { subtree: true, childList: true });
-
-    // Complete initialization of the MAIN content script. Ideally we would simply use executeScript from ISOLATED
-    // content script to run MAIN init, but browser does not allow getting current tab id :-(
-    window.postMessage({
-        type: 'pitch-changer-extension-main-init',
-        processorUrl: chrome.runtime.getURL('pitch-changer-processor.js'),
-        wasmUrl: chrome.runtime.getURL('wasm_main_module_bg.wasm'),
-        settings: settings,
-    } as PitchChangerOverrideInit, '*');
 }
 
 init();

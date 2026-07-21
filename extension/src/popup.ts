@@ -31,7 +31,7 @@ const numAudioElementsValue = document.getElementById('numAudioElements') as HTM
 const numVideoElementsValue = document.getElementById('numVideoElements') as HTMLSpanElement;
 const numAudioContextDestinationsValue = document.getElementById('numAudioContextDestinations') as HTMLSpanElement;
 
-const SAVE_SETTINGS_DEBOUNCE = 500;
+const SAVE_SETTINGS_DEBOUNCE = 50;
 const HIDE_ERROR_AFTER = 10000;
 
 function showStatus(message: string) {
@@ -112,7 +112,7 @@ function shouldApplyToTab(tab: chrome.tabs.Tab): boolean {
     return true;
 }
 
-async function applyToTabs() {
+async function applySettingsToTabs() {
     const tabs = await chrome.tabs.query({});
     for (const tab of tabs) {
         if (!shouldApplyToTab(tab)) {
@@ -196,7 +196,7 @@ async function updateDebugStats() {
                     if (getStats) {
                         return getStats();
                     } else {
-                        return { numAudioContextDestinations: 0 } as OverrideStatsResult;
+                        return { numAudioContexts: 0 } as OverrideStatsResult;
                     }
                 },
                 target: { tabId: tab.id!, allFrames: true },
@@ -207,7 +207,7 @@ async function updateDebugStats() {
             });
             for (const result of overrideResults) {
                 const data = result.result as OverrideStatsResult;
-                numAudioContextDestinations += data.numAudioContextDestinations;
+                numAudioContextDestinations += data.numAudioContexts;
             }
         } catch (error) {
             console.error(`Could not get stats from tab ${tab.url}`, error);
@@ -232,20 +232,20 @@ async function init(): Promise<void> {
         currentSettings.enabled = toggleEnabled.checked;
         setEnabled();
         saveSettings();
-        applyToTabs();
+        applySettingsToTabs();
     });
 
     pitchSlider.addEventListener('input', () => {
         currentSettings.pitchValue = parseFloat(pitchSlider.value);
         updatePitchDisplay();
         saveSettings();
-        applyToTabs();
+        applySettingsToTabs();
     });
 
     debugLoggingCheckbox.addEventListener('change', () => {
         currentSettings.debugLogging = debugLoggingCheckbox.checked;
         saveSettings();
-        applyToTabs();
+        applySettingsToTabs();
     });
 
     advancedSection.addEventListener('toggle', () => {
@@ -261,7 +261,7 @@ async function init(): Promise<void> {
                 currentSettings.processingMode = mode;
                 updateActiveModeDisplay(mode);
                 saveSettings();
-                applyToTabs();
+                applySettingsToTabs();
             } else {
                 console.warn('Invalid mode:', mode);
             }

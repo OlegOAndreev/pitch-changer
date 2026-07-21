@@ -17,7 +17,7 @@ export interface StatsResult {
 }
 
 export interface OverrideStatsResult {
-    numAudioContextDestinations: number;
+    numAudioContexts: number;
 }
 
 const defaultSettings: ExtensionSettings = {
@@ -28,7 +28,7 @@ const defaultSettings: ExtensionSettings = {
 };
 
 export interface PitchChangerOverrideInit {
-    type: 'pitch-changer-extension-main-init';
+    type: 'pitch-changer-override-init';
     processorUrl: string;
     wasmUrl: string;
     settings: ExtensionSettings;
