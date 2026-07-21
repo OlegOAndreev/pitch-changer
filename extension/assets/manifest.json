@@ -33,7 +33,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["pitch-changer-processor.js", "wasm_main_module_bg.wasm"],
+      "resources": ["audio-processor-worker.js", "pitch-changer-processor.js", "wasm_main_module_bg.wasm"],
       "matches": ["<all_urls>"]
     }
   ],
