@@ -148,7 +148,7 @@ async function applySettingsToTabs() {
             const message = error instanceof Error ? error.message : String(error);
             // Injection into restricted/quarantined hosts always fails; this is expected, so just log it.
             if (message.includes('Cannot access contents of the page')) {
-                console.debug(`Could not apply settings to tab ${tab.url}, skipping`, error)
+                console.debug(`Could not apply settings to tab ${tab.url}, skipping`, error);
             } else {
                 console.error(`Could not apply settings to tab ${tab.url} ISOLATED`, error);
                 showStatus(error as string);
@@ -173,7 +173,7 @@ async function updateDebugStats() {
                     if (getStats) {
                         return getStats();
                     } else {
-                        return { numAudioElements: 0, numVideoElements: 0 } as StatsResult;
+                        return null;
                     }
                 },
                 target: { tabId: tab.id!, allFrames: true },
@@ -184,8 +184,10 @@ async function updateDebugStats() {
             });
             for (const result of results) {
                 const data = result.result as StatsResult;
-                numAudioElements += data.numAudioElements;
-                numVideoElements += data.numVideoElements;
+                if (data) {
+                    numAudioElements += data.numAudioElements;
+                    numVideoElements += data.numVideoElements;
+                }
             }
 
             const overrideResults = await chrome.scripting.executeScript({
@@ -196,7 +198,7 @@ async function updateDebugStats() {
                     if (getStats) {
                         return getStats();
                     } else {
-                        return { numAudioContexts: 0 } as OverrideStatsResult;
+                        return null;
                     }
                 },
                 target: { tabId: tab.id!, allFrames: true },
@@ -207,7 +209,9 @@ async function updateDebugStats() {
             });
             for (const result of overrideResults) {
                 const data = result.result as OverrideStatsResult;
-                numAudioContextDestinations += data.numAudioContexts;
+                if (data) {
+                    numAudioContextDestinations += data.numAudioContexts;
+                }
             }
         } catch (error) {
             console.error(`Could not get stats from tab ${tab.url}`, error);
