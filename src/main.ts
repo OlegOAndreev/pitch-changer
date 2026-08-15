@@ -1,5 +1,6 @@
 import initWasmModule, { get_settings } from '../wasm/build/wasm_main_module';
 import { AudioProcessorManager } from './audio-processor';
+import audioProcessorURL from './audio-processor-worker.ts?worker&url';
 import { runBenchmark, type BenchmarkResults } from './benchmark';
 import { debounce, getById, setupWindowOnError, sleep, withButtonsDisabled } from './common-utils';
 import { decodeAudioFromBlob } from './media-decoder';
@@ -311,7 +312,7 @@ async function handleFileInputChange(file: File): Promise<void> {
 
 async function processAllAudio(): Promise<InterleavedAudio> {
     const startTime = performance.now();
-    const manager = await AudioProcessorManager.create();
+    const manager = await AudioProcessorManager.create(audioProcessorURL);
     manager.setParams(
         appState.settings.processingMode,
         appState.settings.pitchValue,

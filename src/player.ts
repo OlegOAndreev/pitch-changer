@@ -10,6 +10,7 @@
 //   * audio thread must not depend on UI thread scheduling
 
 import { AudioProcessorManager } from './audio-processor';
+import audioProcessorModule from './audio-processor-worker.ts?worker&url';
 import playerProcessorModule from './player-processor.ts?worker&url';
 import {
     playerProcessorName,
@@ -53,7 +54,7 @@ export class Player {
     static async create(audioContext: AudioContext, fftSize: number): Promise<Player> {
         console.log('Initializing player processor module');
         await audioContext.audioWorklet.addModule(playerProcessorModule);
-        const processorManager = await AudioProcessorManager.create();
+        const processorManager = await AudioProcessorManager.create(audioProcessorModule);
         return new Player(audioContext, processorManager, fftSize);
     }
 

@@ -6,7 +6,6 @@ import type {
     SetParamsMessage,
     WorkerInitMessage,
 } from './audio-processor-types';
-import audioProcessorURL from './audio-processor-worker.ts?worker&url';
 import { logError } from './common-utils';
 import type { ProcessingMode } from './types';
 import { concatArrays } from './utils';
@@ -14,14 +13,15 @@ import { concatArrays } from './utils';
 export class AudioProcessorManager {
     private worker: Worker | undefined;
 
-    // Workaround for lack of async constructors
-    static async create(): Promise<AudioProcessorManager> {
+    // Workaround for lack of async constructors. This code is used both in webapp and web extension, so it requires the
+    // processor URL to be passed to it.
+    static async create(audioProcessorURL: string): Promise<AudioProcessorManager> {
         const result = new AudioProcessorManager();
-        await result.workerInit();
+        await result.workerInit(audioProcessorURL);
         return result;
     }
 
-    private workerInit(): Promise<void> {
+    private workerInit(audioProcessorURL: string): Promise<void> {
         this.worker = new Worker(audioProcessorURL, { type: 'module' });
         this.worker.onerror = (event: ErrorEvent) => {
             logError('AudioProcessorWorker', event);
