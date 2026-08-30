@@ -48,6 +48,7 @@ import {
         window.addEventListener('message', onMessage);
 
         workerIframe.src = workerIframeUrlParsed.href;
+        workerIframe.hidden = true;
         document.body.appendChild(workerIframe);
 
         return promise;

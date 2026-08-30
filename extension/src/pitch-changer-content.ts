@@ -108,6 +108,7 @@ async function createWorkerInIframe(): Promise<MessagePort> {
     window.addEventListener('message', onMessage);
 
     workerIframe.src = workerIframeUrl.href;
+    workerIframe.hidden = true;
     document.body.appendChild(workerIframe);
 
     return promise;
