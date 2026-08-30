@@ -323,7 +323,7 @@ async function init(): Promise<void> {
     // content script to run MAIN init, but browser does not allow getting current tab id :-(
     window.postMessage(
         {
-            type: 'pitch-changer-override-init',
+            type: 'pitch-changer-extension-override-init',
             processorUrl: chrome.runtime.getURL('pitch-changer-processor.js'),
             wasmUrl: chrome.runtime.getURL('wasm_main_module_bg.wasm'),
             settings: settings,

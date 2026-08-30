@@ -28,7 +28,7 @@ const defaultSettings: ExtensionSettings = {
 };
 
 export interface PitchChangerOverrideInit {
-    type: 'pitch-changer-override-init';
+    type: 'pitch-changer-extension-override-init';
     processorUrl: string;
     wasmUrl: string;
     settings: ExtensionSettings;
@@ -36,7 +36,6 @@ export interface PitchChangerOverrideInit {
 
 export interface WorkerIframeInit {
     type: 'pitch-changer-extension-worker-iframe-init';
-    iframeId: string;
     audioProcessorClientPort: MessagePort;
 }
 
@@ -65,8 +64,8 @@ export interface ContentScriptExports {
     exportApplySettings?(newSettings: ExtensionSettings): void;
 }
 
+// The function names must be unique: we are injecting into global user-visible namespace.
 export interface OverrideScriptExports {
-    // The function name must be unique: we are injecting into global user-visible namespace.
-    exportPitchChangerOverrideApplySettings?(newSettings: ExtensionSettings): void;
-    exportPitchChangerOverrideGetStats?(): OverrideStatsResult;
+    exportPitchChangerExtensionOverrideGetStats?(): OverrideStatsResult;
+    exportPitchChangerExtensionOverrideApplySettings?(newSettings: ExtensionSettings): void;
 }
