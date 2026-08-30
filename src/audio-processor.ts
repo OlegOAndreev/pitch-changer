@@ -6,7 +6,6 @@ import type {
     SetParamsMessage,
     WorkerInitMessage,
 } from './audio-processor-types';
-import { logError } from './common-utils';
 import type { ProcessingMode } from './types';
 import { concatArrays } from './utils';
 
@@ -14,17 +13,17 @@ export class AudioProcessorManager {
     private worker: Worker | undefined;
 
     // Workaround for lack of async constructors. This code is used both in webapp and web extension, so it requires the
-    // processor URL to be passed to it.
-    static async create(audioProcessorURL: string): Promise<AudioProcessorManager> {
+    // processor URL and onError handler to be passed to it.
+    static async create(audioProcessorURL: string, onError: (e: string) => void): Promise<AudioProcessorManager> {
         const result = new AudioProcessorManager();
-        await result.workerInit(audioProcessorURL);
+        await result.workerInit(audioProcessorURL, onError);
         return result;
     }
 
-    private workerInit(audioProcessorURL: string): Promise<void> {
+    private workerInit(audioProcessorURL: string, onError: (e: string) => void): Promise<void> {
         this.worker = new Worker(audioProcessorURL, { type: 'module' });
         this.worker.onerror = (event: ErrorEvent) => {
-            logError('AudioProcessorWorker', event);
+            onError(`AudioProcessorWorker: ${event.message}, ${event.filename}:${event.lineno}, ${event.error}`);
         };
 
         let resolve: (value?: void) => void;
@@ -89,7 +88,7 @@ export class AudioProcessorManager {
 
         const port = this.createClientPort();
         const client = new AudioProcessorClient(port, (samples, finished) => {
-            console.log(`Got ${samples.length} samples`);
+            // console.debug(`Got ${samples.length} samples`);
             chunks.push(samples);
             if (finished) {
                 const result = concatArrays(chunks);

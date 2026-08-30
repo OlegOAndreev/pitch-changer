@@ -45,7 +45,7 @@ export class Spectrogram {
         // console.debug(`Got ${maxValue}`);
         canvasCtx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // We do not care about frequencies greater than 10Khz
+        // We do not care about frequencies greater than 10KHz
         const spectrogramRange = (Math.min(1.0, 10000 / sampleRate) * SPECTROGRAM_SIZE) >>> 0;
         // console.debug(`Showing spectrogram up to ${spectrogramRange}`);
         const barWidth = this.canvas.width / spectrogramRange;

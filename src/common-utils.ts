@@ -122,7 +122,12 @@ export function setupWindowOnError() {
 }
 
 // Log error, suitable for global error catching
-export function logError(context: string, event: ErrorEvent) {
-    console.error(`Error from ${context}: ${event.message}, ${event.filename}:${event.lineno}, ${event.error}`);
-    alert(`Error from ${context}: ${event.message}, ${event.filename}:${event.lineno}, ${event.error}`);
+export function logError(context: string, event: ErrorEvent | null) {
+    if (!event) {
+        console.error(`Error: ${context}`);
+        alert(`Error: ${context}`);
+    } else {
+        console.error(`Error from ${context}: ${event.message}, ${event.filename}:${event.lineno}, ${event.error}`);
+        alert(`Error from ${context}: ${event.message}, ${event.filename}:${event.lineno}, ${event.error}`);
+    }
 }

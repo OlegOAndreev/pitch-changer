@@ -53,7 +53,7 @@ class AudioProcessorWorker {
         }
         this.clientPort = clientPort;
         // Start the client event loop
-        console.log(`Starting client loop`);
+        // console.debug(`Starting client loop`);
         this.clientPort.onmessage = (event: MessageEvent<AudioProcessorClientRequest>) => {
             this.onMessage(event.data);
         };
@@ -83,8 +83,7 @@ class AudioProcessorWorker {
                 break;
 
             default:
-                console.error('Player worker: Unknown message type:', message);
-                break;
+                throw new Error(`Player worker: Unknown message type: ${JSON.stringify(message)}`);
         }
     }
 
@@ -185,10 +184,10 @@ class AudioProcessorWorker {
             }
 
             if (this.processor && this.processorNumChannels === this.params.numChannels) {
-                console.log(`Player worker: Updating processor parameters to ${params.to_debug_string()}`);
+                // console.debug(`Player worker: Updating processor parameters to ${params.to_debug_string()}`);
                 this.processor.update_params(params);
             } else {
-                console.log(`Player worker: Creating new processor with parameters ${params.to_debug_string()}`);
+                // console.debug(`Player worker: Creating new processor with parameters ${params.to_debug_string()}`);
                 if (this.processor) {
                     this.processor.free();
                 }
@@ -237,8 +236,7 @@ function init() {
                 break;
 
             default:
-                console.error('Player worker: Unknown message type:', message);
-                break;
+                throw new Error(`Player worker: Unknown message type: ${message}`);
         }
     };
 }

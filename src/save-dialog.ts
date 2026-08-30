@@ -12,8 +12,7 @@ saveOkBtn.addEventListener('click', () => {
     const filename = saveInput.value.trim();
     saveDialogOverlay.style.display = 'none';
     if (!saveDialogResolve) {
-        console.error('Save button is clicked even though the resolve is not set');
-        return;
+        throw new Error('Save button is clicked even though the resolve is not set');
     }
     saveDialogResolve(filename);
     saveDialogResolve = null;
@@ -22,8 +21,7 @@ saveOkBtn.addEventListener('click', () => {
 saveCancelBtn.addEventListener('click', () => {
     saveDialogOverlay.style.display = 'none';
     if (!saveDialogResolve) {
-        console.error('Save button is clicked even though the resolve is not set');
-        return;
+        throw new Error('Save button is clicked even though the resolve is not set');
     }
     saveDialogResolve(null);
     saveDialogResolve = null;

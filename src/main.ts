@@ -2,7 +2,7 @@ import initWasmModule, { get_settings } from '../wasm/build/wasm_main_module';
 import { AudioProcessorManager } from './audio-processor';
 import audioProcessorURL from './audio-processor-worker.ts?worker&url';
 import { runBenchmark, type BenchmarkResults } from './benchmark';
-import { debounce, getById, setupWindowOnError, sleep, withButtonsDisabled } from './common-utils';
+import { debounce, getById, logError, setupWindowOnError, sleep, withButtonsDisabled } from './common-utils';
 import { decodeAudioFromBlob } from './media-decoder';
 import { encodeAudioToBlob } from './media-encoder';
 import { Player } from './player';
@@ -61,7 +61,7 @@ class AppState {
         try {
             Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}'));
         } catch (error) {
-            console.error('Failed to parse settings from localStorage, using defaults:', error);
+            console.error(`Failed to parse settings from localStorage, using defaults: ${error}`);
         }
         if (!settings.processingMode) {
             settings.processingMode = DEFAULT_PROCESSING_MODE;
@@ -244,7 +244,7 @@ async function runPlay(player: Player): Promise<void> {
                 underrunsLabel.textContent = `Got ${stats.numUnderruns} underruns`;
             }
         } catch (error) {
-            console.error('Error getting latest samples:', error);
+            throw new Error(`Error getting latest samples: ${error}`);
         }
     }, SPECTROGRAM_INTERVAL);
 
@@ -258,8 +258,7 @@ async function handlePlayClick(): Promise<void> {
     const player = await appState.getPlayer();
     if (!player.playing) {
         if (!appState.sourceAudio) {
-            console.error('Error: no audio data to play');
-            return;
+            throw new Error('No audio data to play');
         }
 
         playBtnEmoji.classList.remove(playingBtnClass);
@@ -312,7 +311,7 @@ async function handleFileInputChange(file: File): Promise<void> {
 
 async function processAllAudio(): Promise<InterleavedAudio> {
     const startTime = performance.now();
-    const manager = await AudioProcessorManager.create(audioProcessorURL);
+    const manager = await AudioProcessorManager.create(audioProcessorURL, (e) => logError(e, null));
     manager.setParams(
         appState.settings.processingMode,
         appState.settings.pitchValue,
@@ -444,8 +443,7 @@ async function handleBenchmarkClick(withNoise: boolean) {
         await handleDebugPanelClick();
         console.log('Benchmark completed:', results);
     } catch (error) {
-        console.error('Benchmark failed:', error);
-        alert(`Benchmark failed: ${error}`);
+        throw new Error(`Benchmark failed: ${error}`);
     } finally {
         benchmarkNoiseBtn.disabled = false;
         benchmarkSineBtn.disabled = false;
@@ -458,8 +456,7 @@ async function handleCopyDebugClick() {
     try {
         await navigator.clipboard.writeText(text);
     } catch (error) {
-        console.error('Failed to copy debug info:', error);
-        alert('Failed to copy to clipboard: ' + error);
+        throw new Error(`Failed to copy to clipboard: ${error}`);
     }
 }
 

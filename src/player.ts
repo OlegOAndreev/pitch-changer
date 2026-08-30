@@ -54,7 +54,7 @@ export class Player {
     static async create(audioContext: AudioContext, fftSize: number): Promise<Player> {
         console.log('Initializing player processor module');
         await audioContext.audioWorklet.addModule(playerProcessorModule);
-        const processorManager = await AudioProcessorManager.create(audioProcessorModule);
+        const processorManager = await AudioProcessorManager.create(audioProcessorModule, (e) => logError(e, null));
         return new Player(audioContext, processorManager, fftSize);
     }
 
@@ -85,8 +85,7 @@ export class Player {
         }
 
         if (this.isPlaying) {
-            console.error('play() called while playing');
-            return;
+            throw new Error('play() called while playing');
         }
 
         this.isPlaying = true;

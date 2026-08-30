@@ -87,15 +87,13 @@ class PlayerProcessor extends AudioWorkletProcessor {
                 this.playbackFinished = true;
                 break;
             default:
-                console.error('PlayerProcessor: Unknown message type:', message);
-                break;
+                throw new Error(`PlayerProcessor: Unknown message type: ${JSON.stringify(message)}`);
         }
     }
 
     private doInit(input: Float32Array, clientPort: MessagePort) {
         if (this.input) {
-            console.error('Double init() called');
-            return;
+            throw new Error('Double init() called');
         }
         this.input = input;
         this.client = new AudioProcessorClient(clientPort, this.onProcessedSamples.bind(this));
@@ -145,11 +143,10 @@ class PlayerProcessor extends AudioWorkletProcessor {
 
     private requestProcessSamples(numSamples: number) {
         if (!this.client || !this.input) {
-            console.error('Request processing before init()');
-            return;
+            throw new Error('Request processing before init()');
         }
         if (this.inputConsumed) {
-            console.error('requestProcessSamples() is called when all input is consumed');
+            throw new Error('requestProcessSamples() is called when all input is consumed');
         }
 
         const totalSamples = this.input.length / this.numChannels;
