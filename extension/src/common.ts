@@ -34,6 +34,12 @@ export interface PitchChangerOverrideInit {
     settings: ExtensionSettings;
 }
 
+export interface WorkerIframeInit {
+    type: 'pitch-changer-extension-worker-iframe-init';
+    iframeId: string;
+    audioProcessorClientPort: MessagePort;
+}
+
 export async function loadSettings(): Promise<ExtensionSettings> {
     const result = structuredClone(defaultSettings);
     try {

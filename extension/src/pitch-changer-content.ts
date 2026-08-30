@@ -5,6 +5,7 @@ import {
     type ExtensionSettings,
     type PitchChangerOverrideInit,
     type StatsResult,
+    type WorkerIframeInit,
 } from './common.js';
 
 function debugLog(...args: unknown[]): void {
@@ -49,7 +50,7 @@ function debugLog(...args: unknown[]): void {
 let settings: ExtensionSettings;
 
 let globalAudioContext: Promise<AudioContext> | null = null;
-let globalWorkletNode: AudioWorkletNode | null = null;
+let globalWorkletNode: Promise<AudioWorkletNode> | null = null;
 
 // WeakMap would have been nice here, but it is not iterable and we have a MutationObserver anyway.
 //
@@ -76,14 +77,55 @@ async function getWorkletAudioContext(): Promise<AudioContext> {
     return globalAudioContext;
 }
 
-function getWorkletNode(context: AudioContext): AudioWorkletNode {
-    if (globalWorkletNode) {
-        return globalWorkletNode;
+// Unfortunately due to https://issues.chromium.org/issues/41098022 we cannot directly create a worker using the script
+// from the extension. One workaround is starting the worker from blob URL, but it does not work consistently: the page
+// CSP may prevent loading the blob URL. Out workaround is rather horrible: we create an iframe inside the page, create
+// a worker inside it and communicate with it.
+//
+// Inspired by https://github.com/Rob--W/chrome-api/tree/master/worker_proxy
+async function createWorkerInIframe(): Promise<MessagePort> {
+    const workerIframe = document.createElement('iframe');
+    const workerIframeUrl = new URL(chrome.runtime.getURL('worker-iframe.html'));
+    // The parameters are parsed by worker-iframe.ts
+    workerIframeUrl.searchParams.append('worker_url', chrome.runtime.getURL('audio-processor-worker.js'));
+
+    let resolve: (value: MessagePort) => void;
+    const promise = new Promise<MessagePort>((res) => {
+        resolve = res;
+    });
+    const onMessage = (event: MessageEvent) => {
+        if (event.source !== workerIframe.contentWindow) {
+            return;
+        }
+        if (event.data?.type !== 'pitch-changer-extension-worker-iframe-init') {
+            console.error(`Strange message from worker iframe: ${JSON.stringify(event.data)}`);
+            return;
+        }
+        const data = event.data as WorkerIframeInit;
+        resolve(data.audioProcessorClientPort);
+        window.removeEventListener('message', onMessage);
+    };
+    window.addEventListener('message', onMessage);
+
+    workerIframe.src = workerIframeUrl.href;
+    document.body.appendChild(workerIframe);
+
+    return promise;
+}
+
+async function getWorkletNode(context: AudioContext): Promise<AudioWorkletNode> {
+    if (!globalWorkletNode) {
+        globalWorkletNode = initWorkletNode(context);
     }
+    return globalWorkletNode;
+}
+
+async function initWorkletNode(context: AudioContext): Promise<AudioWorkletNode> {
+    const audioProcessorClientPort = await createWorkerInIframe();
 
     const destChannelCount = context.destination.channelCount;
 
-    globalWorkletNode = new AudioWorkletNode(context, PROCESSOR_NAME, {
+    const result = new AudioWorkletNode(context, PROCESSOR_NAME, {
         // Force the WebAudio do up/downmixing for us.
         channelCount: destChannelCount,
         channelCountMode: 'explicit',
@@ -92,10 +134,10 @@ function getWorkletNode(context: AudioContext): AudioWorkletNode {
             pitchValue: settings.pitchValue,
         },
     });
-    globalWorkletNode.connect(context.destination);
+    result.connect(context.destination);
 
     debugLog(`Created shared worklet node, channelCount ${destChannelCount}`);
-    return globalWorkletNode;
+    return result;
 }
 
 async function applyWorklet(element: HTMLMediaElement) {
@@ -109,7 +151,7 @@ async function applyWorklet(element: HTMLMediaElement) {
 
     try {
         const context = await getWorkletAudioContext();
-        const workletNode = getWorkletNode(context);
+        const workletNode = await getWorkletNode(context);
         if (nodesMap.get(element)) {
             // Re-check if a concurrent applyWorklet already added the element.
             return;
@@ -200,7 +242,9 @@ function applyStoredSettings() {
 }
 
 function applySettings(newSettings: ExtensionSettings) {
-    debugLog(`Applying new settings in ISOLATED: ${JSON.stringify(newSettings)}, current settings ${JSON.stringify(settings)}`);
+    debugLog(
+        `Applying new settings in ISOLATED: ${JSON.stringify(newSettings)}, current settings ${JSON.stringify(settings)}`,
+    );
     const gotEnabled = settings && !settings.enabled && newSettings.enabled;
     const gotDisabled = settings && settings.enabled && !newSettings.enabled;
     settings = newSettings;
@@ -219,7 +263,7 @@ async function applySettingsImpl(gotEnabled: boolean, gotDisabled: boolean) {
             // Route all nodes through our worklet (newly added nodes in applyWorkletToChildren are already routed
             // through worklet, for those it will do a no-op).
             const context = await getWorkletAudioContext();
-            const worklet = getWorkletNode(context);
+            const worklet = await getWorkletNode(context);
             for (const sourceNode of nodesMap.values()) {
                 sourceNode.disconnect();
                 sourceNode.connect(worklet);
@@ -239,7 +283,7 @@ async function applySettingsImpl(gotEnabled: boolean, gotDisabled: boolean) {
     if (globalWorkletNode) {
         const context = await getWorkletAudioContext();
         //@ts-expect-error AudioParamMap does not currently have full interface described in TypeScript
-        (globalWorkletNode.parameters.get('pitchValue') as AudioParam).setValueAtTime(
+        ((await globalWorkletNode).parameters.get('pitchValue') as AudioParam).setValueAtTime(
             settings.pitchValue,
             context.currentTime,
         );
@@ -277,12 +321,15 @@ async function init(): Promise<void> {
 
     // Complete initialization of the MAIN content script. Ideally we would simply use executeScript from ISOLATED
     // content script to run MAIN init, but browser does not allow getting current tab id :-(
-    window.postMessage({
-        type: 'pitch-changer-override-init',
-        processorUrl: chrome.runtime.getURL('pitch-changer-processor.js'),
-        wasmUrl: chrome.runtime.getURL('wasm_main_module_bg.wasm'),
-        settings: settings,
-    } as PitchChangerOverrideInit, '*');
+    window.postMessage(
+        {
+            type: 'pitch-changer-override-init',
+            processorUrl: chrome.runtime.getURL('pitch-changer-processor.js'),
+            wasmUrl: chrome.runtime.getURL('wasm_main_module_bg.wasm'),
+            settings: settings,
+        } as PitchChangerOverrideInit,
+        '*',
+    );
 
     const observer = new MutationObserver((mutations) => {
         for (const mutation of mutations) {

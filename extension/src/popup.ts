@@ -134,7 +134,7 @@ async function applySettingsToTabs() {
             });
             chrome.scripting.executeScript({
                 func: (settings) => {
-                    const applySettings = (globalThis as unknown as OverrideScriptExports).exportPitchChangerOverrideApplySettings;
+                    const applySettings = (globalThis as unknown as OverrideScriptExports).exportPitchChangerExtensionOverrideApplySettings;
                     // Skip the frames we did not get injected into for whatever reason.
                     if (applySettings) {
                         applySettings(settings);
@@ -193,7 +193,7 @@ async function updateDebugStats() {
             const overrideResults = await chrome.scripting.executeScript({
                 func: () => {
                     const getStats = (globalThis as unknown as OverrideScriptExports)
-                        .exportPitchChangerOverrideGetStats;
+                        .exportPitchChangerExtensionOverrideGetStats;
                     // Skip the frames we did not get injected into for whatever reason.
                     if (getStats) {
                         return getStats();
