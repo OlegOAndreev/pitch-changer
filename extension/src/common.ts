@@ -30,7 +30,8 @@ const defaultSettings: ExtensionSettings = {
 export interface PitchChangerOverrideInit {
     type: 'pitch-changer-extension-override-init';
     processorUrl: string;
-    wasmUrl: string;
+    workerIframeUrl: string;
+    audioProcessorWorkerUrl: string;
     settings: ExtensionSettings;
 }
 

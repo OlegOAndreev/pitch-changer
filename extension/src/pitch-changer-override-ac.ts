@@ -4,13 +4,15 @@ import {
     type OverrideScriptExports,
     type OverrideStatsResult,
     type PitchChangerOverrideInit,
+    type WorkerIframeInit,
 } from './common.js';
 
 // Do IIFE to prevent symbols from leaking into main user script.
 (function () {
     let settings: ExtensionSettings;
     let processorUrl: string;
-    let wasmUrl: string;
+    let workerIframeUrl: string;
+    let audioProcessorWorkerUrl: string;
     // We push the AudioContext only when the destination() is called first time.
     const overridenAudioContexts: PitchChangerOverrideAudioContext[] = [];
 
@@ -18,6 +20,37 @@ import {
         if (settings?.debugLogging) {
             console.debug(...args);
         }
+    }
+
+    // This is a copy of createWorkerInIframe from pitch-changer-content.ts, adapted to MAIN world.
+    async function createWorkerInIframe(): Promise<MessagePort> {
+        const workerIframe = document.createElement('iframe');
+        const workerIframeUrlParsed = new URL(workerIframeUrl);
+        // The parameters are parsed by worker-iframe.ts
+        workerIframeUrlParsed.searchParams.append('worker_url', audioProcessorWorkerUrl);
+
+        let resolve: (value: MessagePort) => void;
+        const promise = new Promise<MessagePort>((res) => {
+            resolve = res;
+        });
+        const onMessage = (event: MessageEvent) => {
+            if (event.source !== workerIframe.contentWindow) {
+                return;
+            }
+            if (event.data?.type !== 'pitch-changer-extension-worker-iframe-init') {
+                console.error(`Strange message from worker iframe: ${JSON.stringify(event.data)}`);
+                return;
+            }
+            const data = event.data as WorkerIframeInit;
+            resolve(data.audioProcessorClientPort);
+            window.removeEventListener('message', onMessage);
+        };
+        window.addEventListener('message', onMessage);
+
+        workerIframe.src = workerIframeUrlParsed.href;
+        document.body.appendChild(workerIframe);
+
+        return promise;
     }
 
     // We override global AudioContext constructor to insert our worklet node before the destination
@@ -80,7 +113,7 @@ import {
         async pitchChangerOverrideApplySettings(): Promise<void> {
             // AudioContext could've been created before the script has been fully initialized from ISOLATED content
             // script. This method will be later called in onMessage handler from init.
-            if (!settings || !processorUrl || !wasmUrl) {
+            if (!settings || !processorUrl) {
                 return;
             }
 
@@ -101,7 +134,6 @@ import {
                         settings.pitchValue,
                         0.0,
                     );
-
                 }
             } else {
                 // Do nothing if we haven't started initializing worklet node: this can happen only when we get
@@ -132,7 +164,9 @@ import {
 
         async initPitchChangerOverrideWorkletNode(): Promise<AudioWorkletNode> {
             await this.audioWorklet.addModule(processorUrl);
-            debugLog(`Loaded processor from ${processorUrl} in MAIN`);
+
+            const audioProcessorClientPort = await createWorkerInIframe();
+            debugLog(`Loaded processor from ${processorUrl} and worker from ${audioProcessorWorkerUrl} in MAIN`);
 
             // We cannot reach this point if the destination() has not been called: this means that
             // PitchChangerOverrideAudioContext has not been published in overridenAudioContexts.
@@ -191,7 +225,8 @@ import {
                 debugLog('Audio Pitch Changer: Initializing MAIN content script, settings', init.settings);
                 settings = init.settings;
                 processorUrl = init.processorUrl;
-                wasmUrl = init.wasmUrl;
+                workerIframeUrl = init.workerIframeUrl;
+                audioProcessorWorkerUrl = init.audioProcessorWorkerUrl;
 
                 for (const context of overridenAudioContexts) {
                     // We intentionally do not await this.

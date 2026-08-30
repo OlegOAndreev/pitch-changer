@@ -325,7 +325,8 @@ async function init(): Promise<void> {
         {
             type: 'pitch-changer-extension-override-init',
             processorUrl: chrome.runtime.getURL('pitch-changer-processor.js'),
-            wasmUrl: chrome.runtime.getURL('wasm_main_module_bg.wasm'),
+            workerIframeUrl: chrome.runtime.getURL('worker-iframe.html'),
+            audioProcessorWorkerUrl: chrome.runtime.getURL('audio-processor-worker.js'),
             settings: settings,
         } as PitchChangerOverrideInit,
         '*',
