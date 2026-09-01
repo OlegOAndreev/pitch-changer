@@ -21,8 +21,8 @@ export class SamplesQueue {
     }
 
     // Pops data from the queue and deinterleaves it into multichannel arrays. Assumes that all outputChannels arrays
-    // have the same length. The tail of the array is filled with zeros if there is not enough data, and the resulting
-    // underrun is returned.
+    // have the same length. The tail of the array is filled with zeros if there is not enough data, and the number of
+    // written samples is returned.
     popNonInterleaved(outputChannels: Float32Array[]): number {
         if (outputChannels.length < this.numChannels) {
             throw new Error(`Expected to output at least to ${this.numChannels}, got ${outputChannels.length}`);
@@ -62,7 +62,7 @@ export class SamplesQueue {
             outputChannels[ch].fill(0.0, outputOffset);
         }
 
-        return toPop;
+        return popped;
     }
 
     // Skips up to n samples from the queue without reading the data. Returns the actual number of skipped samples,

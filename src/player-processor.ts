@@ -129,7 +129,8 @@ class PlayerProcessor extends AudioWorkletProcessor {
     }
 
     private writeOutput(outputChannels: Float32Array[]): void {
-        const underrun = this.processedQueue.popNonInterleaved(outputChannels);
+        const written = this.processedQueue.popNonInterleaved(outputChannels);
+        const underrun = outputChannels[0].length - written;
         if (underrun > 0) {
             this.numUnderruns++;
             // Rate-limit console logging

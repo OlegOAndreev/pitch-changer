@@ -58,9 +58,9 @@ describe('SamplesQueue', () => {
             queue.pushInterleaved(chunk);
 
             const outputChannels = [new Float32Array(4)];
-            const remaining = queue.popNonInterleaved(outputChannels);
+            const written = queue.popNonInterleaved(outputChannels);
 
-            expect(remaining).toBe(0);
+            expect(written).toBe(4);
             expect(outputChannels[0]).toEqual(new Float32Array([1, 2, 3, 4]));
             expect(queue.length).toBe(0);
         });
@@ -71,9 +71,9 @@ describe('SamplesQueue', () => {
             queue.pushInterleaved(chunk);
 
             const outputChannels = [new Float32Array(3), new Float32Array(3)];
-            const remaining = queue.popNonInterleaved(outputChannels);
+            const written = queue.popNonInterleaved(outputChannels);
 
-            expect(remaining).toBe(0);
+            expect(written).toBe(3);
             expect(outputChannels[0]).toEqual(new Float32Array([1, 3, 5]));
             expect(outputChannels[1]).toEqual(new Float32Array([2, 4, 6]));
             expect(queue.length).toBe(0);
@@ -85,9 +85,9 @@ describe('SamplesQueue', () => {
             queue.pushInterleaved(chunk);
 
             const outputChannels = [new Float32Array(4)];
-            const remaining = queue.popNonInterleaved(outputChannels);
+            const written = queue.popNonInterleaved(outputChannels);
 
-            expect(remaining).toBe(2);
+            expect(written).toBe(2);
             expect(outputChannels[0]).toEqual(new Float32Array([1, 2, 0, 0]));
             expect(queue.length).toBe(0);
         });
@@ -100,9 +100,9 @@ describe('SamplesQueue', () => {
             queue.pushInterleaved(chunk2);
 
             const outputChannels = [new Float32Array(3)];
-            const remaining = queue.popNonInterleaved(outputChannels);
+            const written = queue.popNonInterleaved(outputChannels);
 
-            expect(remaining).toBe(0);
+            expect(written).toBe(3);
             expect(outputChannels[0]).toEqual(new Float32Array([1, 2, 3]));
             expect(queue.length).toBe(1);
         });
@@ -114,15 +114,15 @@ describe('SamplesQueue', () => {
 
             // First pop 2 samples
             const output1 = [new Float32Array(2)];
-            const remaining1 = queue.popNonInterleaved(output1);
-            expect(remaining1).toBe(0);
+            const written1 = queue.popNonInterleaved(output1);
+            expect(written1).toBe(2);
             expect(output1[0]).toEqual(new Float32Array([1, 2]));
             expect(queue.length).toBe(3);
 
             // Then pop 2 more samples (should continue from offset)
             const output2 = [new Float32Array(2)];
-            const remaining2 = queue.popNonInterleaved(output2);
-            expect(remaining2).toBe(0);
+            const written2 = queue.popNonInterleaved(output2);
+            expect(written2).toBe(2);
             expect(output2[0]).toEqual(new Float32Array([3, 4]));
             expect(queue.length).toBe(1);
         });
@@ -141,15 +141,15 @@ describe('SamplesQueue', () => {
 
             // Pop in various sizes
             const output1 = [new Float32Array(3), new Float32Array(3)];
-            const remaining1 = queue.popNonInterleaved(output1);
-            expect(remaining1).toBe(0);
+            const written1 = queue.popNonInterleaved(output1);
+            expect(written1).toBe(3);
             expect(output1[0]).toEqual(new Float32Array([0, 2, 4]));
             expect(output1[1]).toEqual(new Float32Array([1, 3, 5]));
             expect(queue.length).toBe(7);
 
             const output2 = [new Float32Array(4), new Float32Array(4)];
-            const remaining2 = queue.popNonInterleaved(output2);
-            expect(remaining2).toBe(0);
+            const written2 = queue.popNonInterleaved(output2);
+            expect(written2).toBe(4);
             expect(output2[0]).toEqual(new Float32Array([6, 8, 10, 12]));
             expect(output2[1]).toEqual(new Float32Array([7, 9, 11, 13]));
             expect(queue.length).toBe(3);
@@ -161,9 +161,9 @@ describe('SamplesQueue', () => {
             queue.pushInterleaved(chunk);
 
             const outputChannels = [new Float32Array(5)];
-            const remaining = queue.popNonInterleaved(outputChannels);
+            const written = queue.popNonInterleaved(outputChannels);
 
-            expect(remaining).toBe(3);
+            expect(written).toBe(2);
             expect(outputChannels[0]).toEqual(new Float32Array([1, 2, 0, 0, 0]));
             expect(queue.length).toBe(0);
         });
@@ -176,9 +176,9 @@ describe('SamplesQueue', () => {
             queue.pushInterleaved(chunk2);
 
             const outputChannels = [new Float32Array(4), new Float32Array(4)];
-            const remaining = queue.popNonInterleaved(outputChannels);
+            const written = queue.popNonInterleaved(outputChannels);
 
-            expect(remaining).toBe(1);
+            expect(written).toBe(3);
             expect(outputChannels[0]).toEqual(new Float32Array([1, 3, 5, 0]));
             expect(outputChannels[1]).toEqual(new Float32Array([2, 4, 6, 0]));
             expect(queue.length).toBe(0);
@@ -190,18 +190,18 @@ describe('SamplesQueue', () => {
             queue.pushInterleaved(chunk);
 
             const outputChannels = [new Float32Array(0), new Float32Array(0)];
-            const remaining = queue.popNonInterleaved(outputChannels);
+            const written = queue.popNonInterleaved(outputChannels);
 
-            expect(remaining).toBe(0);
+            expect(written).toBe(0);
             expect(queue.length).toBe(2);
         });
 
         test('pops from empty queue', () => {
             const queue = new SamplesQueue(1);
             const outputChannels = [new Float32Array(3)];
-            const remaining = queue.popNonInterleaved(outputChannels);
+            const written = queue.popNonInterleaved(outputChannels);
 
-            expect(remaining).toBe(3); // All samples missing
+            expect(written).toBe(0); // No samples written
             expect(outputChannels[0]).toEqual(new Float32Array([0, 0, 0]));
             expect(queue.length).toBe(0);
         });
@@ -215,8 +215,8 @@ describe('SamplesQueue', () => {
 
             // Pop 2 samples
             const output1 = [new Float32Array(2), new Float32Array(2)];
-            const remaining1 = queue.popNonInterleaved(output1);
-            expect(remaining1).toBe(0);
+            const written1 = queue.popNonInterleaved(output1);
+            expect(written1).toBe(2);
             expect(output1[0]).toEqual(new Float32Array([1, 3]));
             expect(output1[1]).toEqual(new Float32Array([2, 4]));
             expect(queue.length).toBe(1);
@@ -227,8 +227,8 @@ describe('SamplesQueue', () => {
 
             // Pop 3 samples
             const output2 = [new Float32Array(3), new Float32Array(3)];
-            const remaining2 = queue.popNonInterleaved(output2);
-            expect(remaining2).toBe(0);
+            const written2 = queue.popNonInterleaved(output2);
+            expect(written2).toBe(3);
             expect(output2[0]).toEqual(new Float32Array([5, 7, 9]));
             expect(output2[1]).toEqual(new Float32Array([6, 8, 10]));
             expect(queue.length).toBe(0);
@@ -275,8 +275,8 @@ describe('SamplesQueue', () => {
             expect(queue.length).toBe(2);
 
             const outputChannels = [new Float32Array(2)];
-            const remaining = queue.popNonInterleaved(outputChannels);
-            expect(remaining).toBe(0);
+            const written = queue.popNonInterleaved(outputChannels);
+            expect(written).toBe(2);
             expect(outputChannels[0]).toEqual(new Float32Array([3, 4]));
         });
 
@@ -290,8 +290,8 @@ describe('SamplesQueue', () => {
             expect(queue.length).toBe(2);
 
             const outputChannels = [new Float32Array(2), new Float32Array(2)];
-            const remaining = queue.popNonInterleaved(outputChannels);
-            expect(remaining).toBe(0);
+            const written = queue.popNonInterleaved(outputChannels);
+            expect(written).toBe(2);
             expect(outputChannels[0]).toEqual(new Float32Array([3, 5]));
             expect(outputChannels[1]).toEqual(new Float32Array([4, 6]));
         });
@@ -306,8 +306,8 @@ describe('SamplesQueue', () => {
             expect(queue.length).toBe(0);
 
             const outputChannels = [new Float32Array(2)];
-            const remaining = queue.popNonInterleaved(outputChannels);
-            expect(remaining).toBe(2);
+            const written = queue.popNonInterleaved(outputChannels);
+            expect(written).toBe(0);
             expect(outputChannels[0]).toEqual(new Float32Array([0, 0]));
         });
 
@@ -332,8 +332,8 @@ describe('SamplesQueue', () => {
             expect(queue.length).toBe(2);
 
             const outputChannels = [new Float32Array(2)];
-            const remaining = queue.popNonInterleaved(outputChannels);
-            expect(remaining).toBe(0);
+            const written = queue.popNonInterleaved(outputChannels);
+            expect(written).toBe(2);
             expect(outputChannels[0]).toEqual(new Float32Array([4, 5]));
         });
 
@@ -350,8 +350,8 @@ describe('SamplesQueue', () => {
             expect(queue.length).toBe(2);
 
             const outputChannels = [new Float32Array(2)];
-            const remaining = queue.popNonInterleaved(outputChannels);
-            expect(remaining).toBe(0);
+            const written = queue.popNonInterleaved(outputChannels);
+            expect(written).toBe(2);
             expect(outputChannels[0]).toEqual(new Float32Array([4, 5]));
         });
 
@@ -367,8 +367,8 @@ describe('SamplesQueue', () => {
             expect(queue.length).toBe(2);
 
             const outputChannels = [new Float32Array(2), new Float32Array(2)];
-            const remaining = queue.popNonInterleaved(outputChannels);
-            expect(remaining).toBe(0);
+            const written = queue.popNonInterleaved(outputChannels);
+            expect(written).toBe(2);
             expect(outputChannels[0]).toEqual(new Float32Array([6, 8]));
             expect(outputChannels[1]).toEqual(new Float32Array([7, 9]));
         });
@@ -394,8 +394,8 @@ describe('SamplesQueue', () => {
             expect(queue.length).toBe(3);
 
             const outputChannels = [new Float32Array(3), new Float32Array(3)];
-            const remaining = queue.popNonInterleaved(outputChannels);
-            expect(remaining).toBe(0);
+            const written = queue.popNonInterleaved(outputChannels);
+            expect(written).toBe(3);
             expect(outputChannels[0]).toEqual(new Float32Array([3, 5, 7]));
             expect(outputChannels[1]).toEqual(new Float32Array([4, 6, 8]));
         });
@@ -500,8 +500,8 @@ describe('SamplesQueue', () => {
             expect(queue.length).toBe(4);
 
             const popOutput = [new Float32Array(4)];
-            const remaining = queue.popNonInterleaved(popOutput);
-            expect(remaining).toBe(0);
+            const written = queue.popNonInterleaved(popOutput);
+            expect(written).toBe(4);
             expect(popOutput[0]).toEqual(new Float32Array([1, 2, 3, 4]));
             expect(queue.length).toBe(0);
         });
@@ -517,18 +517,18 @@ describe('SamplesQueue', () => {
 
             // Pop exactly one chunk's worth
             const output1 = [new Float32Array(2), new Float32Array(2)];
-            const remaining1 = queue.popNonInterleaved(output1);
+            const written1 = queue.popNonInterleaved(output1);
 
-            expect(remaining1).toBe(0);
+            expect(written1).toBe(2);
             expect(output1[0]).toEqual(new Float32Array([1, 3]));
             expect(output1[1]).toEqual(new Float32Array([2, 4]));
             expect(queue.length).toBe(2);
 
             // Pop the next chunk
             const output2 = [new Float32Array(2), new Float32Array(2)];
-            const remaining2 = queue.popNonInterleaved(output2);
+            const written2 = queue.popNonInterleaved(output2);
 
-            expect(remaining2).toBe(0);
+            expect(written2).toBe(2);
             expect(output2[0]).toEqual(new Float32Array([5, 7]));
             expect(output2[1]).toEqual(new Float32Array([6, 8]));
             expect(queue.length).toBe(0);
@@ -547,25 +547,25 @@ describe('SamplesQueue', () => {
 
             // Pop in various sizes
             const output1 = [new Float32Array(3), new Float32Array(3)];
-            const remaining1 = queue.popNonInterleaved(output1);
+            const written1 = queue.popNonInterleaved(output1);
 
-            expect(remaining1).toBe(0);
+            expect(written1).toBe(3);
             expect(output1[0]).toEqual(new Float32Array([0, 2, 4]));
             expect(output1[1]).toEqual(new Float32Array([1, 3, 5]));
             expect(queue.length).toBe(7);
 
             const output2 = [new Float32Array(4), new Float32Array(4)];
-            const remaining2 = queue.popNonInterleaved(output2);
+            const written2 = queue.popNonInterleaved(output2);
 
-            expect(remaining2).toBe(0);
+            expect(written2).toBe(4);
             expect(output2[0]).toEqual(new Float32Array([6, 8, 10, 12]));
             expect(output2[1]).toEqual(new Float32Array([7, 9, 11, 13]));
             expect(queue.length).toBe(3);
 
             const output3 = [new Float32Array(3), new Float32Array(3)];
-            const remaining3 = queue.popNonInterleaved(output3);
+            const written3 = queue.popNonInterleaved(output3);
 
-            expect(remaining3).toBe(0);
+            expect(written3).toBe(3);
             expect(output3[0]).toEqual(new Float32Array([14, 16, 18]));
             expect(output3[1]).toEqual(new Float32Array([15, 17, 19]));
             expect(queue.length).toBe(0);
