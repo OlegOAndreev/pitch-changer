@@ -1,4 +1,4 @@
-// PlayerProcessorQueue stores incoming chunks of float32 data and allows popping and reading the data.
+// SamplesQueue stores incoming chunks of float32 data and allows popping and reading the data.
 export class SamplesQueue {
     private chunks: Float32Array[] = [];
     private numChannels: number;

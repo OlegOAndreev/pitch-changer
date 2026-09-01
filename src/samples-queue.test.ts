@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { SamplesQueue } from './samples-queue';
 
-describe('PlayerProcessorQueue', () => {
+describe('SamplesQueue', () => {
     describe('constructor', () => {
         test('initializes with correct number of channels', () => {
             const queue = new SamplesQueue(2);
