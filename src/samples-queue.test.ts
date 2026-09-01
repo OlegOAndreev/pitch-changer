@@ -1,41 +1,41 @@
 import { describe, expect, test } from 'vitest';
-import { PlayerProcessorQueue } from './player-processor-queue';
+import { SamplesQueue } from './samples-queue';
 
 describe('PlayerProcessorQueue', () => {
     describe('constructor', () => {
         test('initializes with correct number of channels', () => {
-            const queue = new PlayerProcessorQueue(2);
+            const queue = new SamplesQueue(2);
             expect(queue.length).toBe(0);
         });
 
         test('initializes with mono channel', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             expect(queue.length).toBe(0);
         });
 
         test('initializes with multi-channel', () => {
-            const queue = new PlayerProcessorQueue(5);
+            const queue = new SamplesQueue(5);
             expect(queue.length).toBe(0);
         });
     });
 
     describe('push', () => {
         test('adds mono chunk correctly', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             const chunk = new Float32Array([1, 2, 3, 4]);
             queue.pushInterleaved(chunk);
             expect(queue.length).toBe(4);
         });
 
         test('adds stereo chunk correctly', () => {
-            const queue = new PlayerProcessorQueue(2);
+            const queue = new SamplesQueue(2);
             const chunk = new Float32Array([1, 2, 3, 4, 5, 6]);
             queue.pushInterleaved(chunk);
             expect(queue.length).toBe(3);
         });
 
         test('adds multiple chunks correctly', () => {
-            const queue = new PlayerProcessorQueue(2);
+            const queue = new SamplesQueue(2);
             const chunk1 = new Float32Array([1, 2, 3, 4]);
             const chunk2 = new Float32Array([5, 6, 7, 8, 9, 10]);
             queue.pushInterleaved(chunk1);
@@ -44,7 +44,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('adds empty chunk', () => {
-            const queue = new PlayerProcessorQueue(2);
+            const queue = new SamplesQueue(2);
             const chunk = new Float32Array(0);
             queue.pushInterleaved(chunk);
             expect(queue.length).toBe(0);
@@ -53,7 +53,7 @@ describe('PlayerProcessorQueue', () => {
 
     describe('pop', () => {
         test('pops exact chunk size mono', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             const chunk = new Float32Array([1, 2, 3, 4]);
             queue.pushInterleaved(chunk);
 
@@ -66,7 +66,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('pops exact chunk size stereo', () => {
-            const queue = new PlayerProcessorQueue(2);
+            const queue = new SamplesQueue(2);
             const chunk = new Float32Array([1, 2, 3, 4, 5, 6]);
             queue.pushInterleaved(chunk);
 
@@ -80,7 +80,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('pops partial data when queue has less than requested', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             const chunk = new Float32Array([1, 2]);
             queue.pushInterleaved(chunk);
 
@@ -93,7 +93,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('pops across chunk boundaries', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             const chunk1 = new Float32Array([1, 2]);
             const chunk2 = new Float32Array([3, 4]);
             queue.pushInterleaved(chunk1);
@@ -108,7 +108,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('pops with offset within chunk', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             const chunk = new Float32Array([1, 2, 3, 4, 5]);
             queue.pushInterleaved(chunk);
 
@@ -128,7 +128,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('handles small chunks with multiple pops', () => {
-            const queue = new PlayerProcessorQueue(2);
+            const queue = new SamplesQueue(2);
 
             // Push many small chunks
             for (let i = 0; i < 10; i++) {
@@ -156,7 +156,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('pops with chunk smaller than requested output', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             const chunk = new Float32Array([1, 2]);
             queue.pushInterleaved(chunk);
 
@@ -169,7 +169,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('pops with multiple chunks and partial last chunk', () => {
-            const queue = new PlayerProcessorQueue(2);
+            const queue = new SamplesQueue(2);
             const chunk1 = new Float32Array([1, 2, 3, 4]);
             const chunk2 = new Float32Array([5, 6]);
             queue.pushInterleaved(chunk1);
@@ -185,7 +185,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('pops zero samples', () => {
-            const queue = new PlayerProcessorQueue(2);
+            const queue = new SamplesQueue(2);
             const chunk = new Float32Array([1, 2, 3, 4]);
             queue.pushInterleaved(chunk);
 
@@ -197,7 +197,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('pops from empty queue', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             const outputChannels = [new Float32Array(3)];
             const remaining = queue.popNonInterleaved(outputChannels);
 
@@ -207,7 +207,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('maintains correct state after multiple push/pop operations', () => {
-            const queue = new PlayerProcessorQueue(2);
+            const queue = new SamplesQueue(2);
 
             // Push 3 samples
             queue.pushInterleaved(new Float32Array([1, 2, 3, 4, 5, 6]));
@@ -237,7 +237,7 @@ describe('PlayerProcessorQueue', () => {
 
     describe('skip', () => {
         test('skips zero samples', () => {
-            const queue = new PlayerProcessorQueue(2);
+            const queue = new SamplesQueue(2);
             queue.pushInterleaved(new Float32Array([1, 2, 3, 4]));
 
             const skipped = queue.skip(0);
@@ -247,7 +247,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('skips negative samples', () => {
-            const queue = new PlayerProcessorQueue(2);
+            const queue = new SamplesQueue(2);
             queue.pushInterleaved(new Float32Array([1, 2, 3, 4]));
 
             const skipped = queue.skip(-3);
@@ -257,7 +257,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('skips from empty queue', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
 
             const skipped = queue.skip(3);
 
@@ -266,7 +266,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('skips partial data mono', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             queue.pushInterleaved(new Float32Array([1, 2, 3, 4]));
 
             const skipped = queue.skip(2);
@@ -281,7 +281,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('skips partial data stereo', () => {
-            const queue = new PlayerProcessorQueue(2);
+            const queue = new SamplesQueue(2);
             queue.pushInterleaved(new Float32Array([1, 2, 3, 4, 5, 6]));
 
             const skipped = queue.skip(1);
@@ -297,7 +297,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('skips entire queue', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             queue.pushInterleaved(new Float32Array([1, 2, 3, 4]));
 
             const skipped = queue.skip(4);
@@ -312,7 +312,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('skips more than available', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             queue.pushInterleaved(new Float32Array([1, 2]));
 
             const skipped = queue.skip(5);
@@ -322,7 +322,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('skips across chunk boundaries', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             queue.pushInterleaved(new Float32Array([1, 2]));
             queue.pushInterleaved(new Float32Array([3, 4, 5]));
 
@@ -338,7 +338,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('skips with offset within chunk', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             queue.pushInterleaved(new Float32Array([1, 2, 3, 4, 5]));
 
             // First pop 2 samples to create an offset
@@ -356,7 +356,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('skips multiple single-sample chunks', () => {
-            const queue = new PlayerProcessorQueue(2);
+            const queue = new SamplesQueue(2);
             for (let i = 0; i < 5; i++) {
                 queue.pushInterleaved(new Float32Array([i * 2, i * 2 + 1]));
             }
@@ -374,7 +374,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('skip affects read', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             queue.pushInterleaved(new Float32Array([1, 2, 3, 4]));
 
             queue.skip(1);
@@ -385,7 +385,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('maintains correct state after skip and push', () => {
-            const queue = new PlayerProcessorQueue(2);
+            const queue = new SamplesQueue(2);
             queue.pushInterleaved(new Float32Array([1, 2, 3, 4]));
 
             queue.skip(1);
@@ -403,7 +403,7 @@ describe('PlayerProcessorQueue', () => {
 
     describe('read', () => {
         test('reads without removing data mono', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             const chunk = new Float32Array([1, 2, 3, 4]);
             queue.pushInterleaved(chunk);
 
@@ -415,7 +415,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('reads without removing data stereo', () => {
-            const queue = new PlayerProcessorQueue(2);
+            const queue = new SamplesQueue(2);
             const chunk = new Float32Array([1, 2, 3, 4, 5, 6]);
             queue.pushInterleaved(chunk);
 
@@ -427,7 +427,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('reads partial data when queue has less than requested', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             const chunk = new Float32Array([1, 2]);
             queue.pushInterleaved(chunk);
 
@@ -439,7 +439,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('reads across chunk boundaries', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             const chunk1 = new Float32Array([1, 2]);
             const chunk2 = new Float32Array([3, 4, 5]);
             queue.pushInterleaved(chunk1);
@@ -453,7 +453,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('reads with offset within chunk', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             const chunk = new Float32Array([1, 2, 3, 4, 5]);
             queue.pushInterleaved(chunk);
 
@@ -469,7 +469,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('reads from empty queue', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             const output = new Float32Array(3);
             queue.readNonInterleaved(output);
 
@@ -478,7 +478,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('reads with multiple channels', () => {
-            const queue = new PlayerProcessorQueue(3);
+            const queue = new SamplesQueue(3);
             const chunk = new Float32Array([1, 2, 3, 4, 5, 6]);
             queue.pushInterleaved(chunk);
 
@@ -490,7 +490,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('read does not affect subsequent pop', () => {
-            const queue = new PlayerProcessorQueue(1);
+            const queue = new SamplesQueue(1);
             const chunk = new Float32Array([1, 2, 3, 4]);
             queue.pushInterleaved(chunk);
 
@@ -509,7 +509,7 @@ describe('PlayerProcessorQueue', () => {
 
     describe('edge cases', () => {
         test('handles chunk boundaries with exact alignment', () => {
-            const queue = new PlayerProcessorQueue(2);
+            const queue = new SamplesQueue(2);
 
             // Push chunks that align perfectly with pop boundaries
             queue.pushInterleaved(new Float32Array([1, 2, 3, 4])); // 2 samples
@@ -535,7 +535,7 @@ describe('PlayerProcessorQueue', () => {
         });
 
         test('handles very small chunks (single sample)', () => {
-            const queue = new PlayerProcessorQueue(2);
+            const queue = new SamplesQueue(2);
             const numSamples = 10;
 
             // Push each sample as its own chunk

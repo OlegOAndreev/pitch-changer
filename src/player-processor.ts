@@ -1,6 +1,5 @@
 // AudioWorklet processor for Player.
 import { AudioProcessorClient } from './audio-processor-client';
-import { PlayerProcessorQueue } from './player-processor-queue';
 import {
     playerProcessorName,
     type PlayerStatsMessage,
@@ -8,6 +7,7 @@ import {
     type PlayerProcessorOptions,
     type PlayerRequest,
 } from './player-types';
+import { SamplesQueue } from './samples-queue';
 
 const CONSOLE_LOG_MIN_DELTA = 100;
 
@@ -27,7 +27,7 @@ class PlayerProcessor extends AudioWorkletProcessor {
     // True if we sent the samples to process and haven't received a result.
     private processingInProgress = false;
     // Chunks of processed samples.
-    private processedQueue: PlayerProcessorQueue;
+    private processedQueue: SamplesQueue;
     // True if we got the last processed chunk (this does not mean we have played it already)
     private processingFinished = false;
 
@@ -43,7 +43,7 @@ class PlayerProcessor extends AudioWorkletProcessor {
         const processorOptions = options.processorOptions as PlayerProcessorOptions;
         this.numChannels = processorOptions.numChannels;
         this.bufferSamples = processorOptions.bufferSamples;
-        this.processedQueue = new PlayerProcessorQueue(this.numChannels);
+        this.processedQueue = new SamplesQueue(this.numChannels);
 
         this.port.onmessage = (event: MessageEvent<PlayerRequest>) => {
             this.onMessage(event.data);
