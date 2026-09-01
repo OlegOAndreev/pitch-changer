@@ -235,6 +235,172 @@ describe('PlayerProcessorQueue', () => {
         });
     });
 
+    describe('skip', () => {
+        test('skips zero samples', () => {
+            const queue = new PlayerProcessorQueue(2);
+            queue.pushInterleaved(new Float32Array([1, 2, 3, 4]));
+
+            const skipped = queue.skip(0);
+
+            expect(skipped).toBe(0);
+            expect(queue.length).toBe(2);
+        });
+
+        test('skips negative samples', () => {
+            const queue = new PlayerProcessorQueue(2);
+            queue.pushInterleaved(new Float32Array([1, 2, 3, 4]));
+
+            const skipped = queue.skip(-3);
+
+            expect(skipped).toBe(0);
+            expect(queue.length).toBe(2);
+        });
+
+        test('skips from empty queue', () => {
+            const queue = new PlayerProcessorQueue(1);
+
+            const skipped = queue.skip(3);
+
+            expect(skipped).toBe(0);
+            expect(queue.length).toBe(0);
+        });
+
+        test('skips partial data mono', () => {
+            const queue = new PlayerProcessorQueue(1);
+            queue.pushInterleaved(new Float32Array([1, 2, 3, 4]));
+
+            const skipped = queue.skip(2);
+
+            expect(skipped).toBe(2);
+            expect(queue.length).toBe(2);
+
+            const outputChannels = [new Float32Array(2)];
+            const remaining = queue.popNonInterleaved(outputChannels);
+            expect(remaining).toBe(0);
+            expect(outputChannels[0]).toEqual(new Float32Array([3, 4]));
+        });
+
+        test('skips partial data stereo', () => {
+            const queue = new PlayerProcessorQueue(2);
+            queue.pushInterleaved(new Float32Array([1, 2, 3, 4, 5, 6]));
+
+            const skipped = queue.skip(1);
+
+            expect(skipped).toBe(1);
+            expect(queue.length).toBe(2);
+
+            const outputChannels = [new Float32Array(2), new Float32Array(2)];
+            const remaining = queue.popNonInterleaved(outputChannels);
+            expect(remaining).toBe(0);
+            expect(outputChannels[0]).toEqual(new Float32Array([3, 5]));
+            expect(outputChannels[1]).toEqual(new Float32Array([4, 6]));
+        });
+
+        test('skips entire queue', () => {
+            const queue = new PlayerProcessorQueue(1);
+            queue.pushInterleaved(new Float32Array([1, 2, 3, 4]));
+
+            const skipped = queue.skip(4);
+
+            expect(skipped).toBe(4);
+            expect(queue.length).toBe(0);
+
+            const outputChannels = [new Float32Array(2)];
+            const remaining = queue.popNonInterleaved(outputChannels);
+            expect(remaining).toBe(2);
+            expect(outputChannels[0]).toEqual(new Float32Array([0, 0]));
+        });
+
+        test('skips more than available', () => {
+            const queue = new PlayerProcessorQueue(1);
+            queue.pushInterleaved(new Float32Array([1, 2]));
+
+            const skipped = queue.skip(5);
+
+            expect(skipped).toBe(2);
+            expect(queue.length).toBe(0);
+        });
+
+        test('skips across chunk boundaries', () => {
+            const queue = new PlayerProcessorQueue(1);
+            queue.pushInterleaved(new Float32Array([1, 2]));
+            queue.pushInterleaved(new Float32Array([3, 4, 5]));
+
+            const skipped = queue.skip(3);
+
+            expect(skipped).toBe(3);
+            expect(queue.length).toBe(2);
+
+            const outputChannels = [new Float32Array(2)];
+            const remaining = queue.popNonInterleaved(outputChannels);
+            expect(remaining).toBe(0);
+            expect(outputChannels[0]).toEqual(new Float32Array([4, 5]));
+        });
+
+        test('skips with offset within chunk', () => {
+            const queue = new PlayerProcessorQueue(1);
+            queue.pushInterleaved(new Float32Array([1, 2, 3, 4, 5]));
+
+            // First pop 2 samples to create an offset
+            queue.popNonInterleaved([new Float32Array(2)]);
+
+            const skipped = queue.skip(1);
+
+            expect(skipped).toBe(1);
+            expect(queue.length).toBe(2);
+
+            const outputChannels = [new Float32Array(2)];
+            const remaining = queue.popNonInterleaved(outputChannels);
+            expect(remaining).toBe(0);
+            expect(outputChannels[0]).toEqual(new Float32Array([4, 5]));
+        });
+
+        test('skips multiple single-sample chunks', () => {
+            const queue = new PlayerProcessorQueue(2);
+            for (let i = 0; i < 5; i++) {
+                queue.pushInterleaved(new Float32Array([i * 2, i * 2 + 1]));
+            }
+
+            const skipped = queue.skip(3);
+
+            expect(skipped).toBe(3);
+            expect(queue.length).toBe(2);
+
+            const outputChannels = [new Float32Array(2), new Float32Array(2)];
+            const remaining = queue.popNonInterleaved(outputChannels);
+            expect(remaining).toBe(0);
+            expect(outputChannels[0]).toEqual(new Float32Array([6, 8]));
+            expect(outputChannels[1]).toEqual(new Float32Array([7, 9]));
+        });
+
+        test('skip affects read', () => {
+            const queue = new PlayerProcessorQueue(1);
+            queue.pushInterleaved(new Float32Array([1, 2, 3, 4]));
+
+            queue.skip(1);
+
+            const output = new Float32Array(2);
+            queue.readNonInterleaved(output);
+            expect(output).toEqual(new Float32Array([2, 3]));
+        });
+
+        test('maintains correct state after skip and push', () => {
+            const queue = new PlayerProcessorQueue(2);
+            queue.pushInterleaved(new Float32Array([1, 2, 3, 4]));
+
+            queue.skip(1);
+
+            queue.pushInterleaved(new Float32Array([5, 6, 7, 8]));
+            expect(queue.length).toBe(3);
+
+            const outputChannels = [new Float32Array(3), new Float32Array(3)];
+            const remaining = queue.popNonInterleaved(outputChannels);
+            expect(remaining).toBe(0);
+            expect(outputChannels[0]).toEqual(new Float32Array([3, 5, 7]));
+            expect(outputChannels[1]).toEqual(new Float32Array([4, 6, 8]));
+        });
+    });
+
     describe('read', () => {
         test('reads without removing data mono', () => {
             const queue = new PlayerProcessorQueue(1);

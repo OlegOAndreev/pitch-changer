@@ -65,6 +65,35 @@ export class PlayerProcessorQueue {
         return toPop;
     }
 
+    // Skips up to n samples from the queue without reading the data. Returns the actual number of skipped samples,
+    // which can be less than n if the queue does not have enough data.
+    skip(n: number): number {
+        if (n < 0) {
+            return 0;
+        }
+
+        const numChannels = this.numChannels;
+        let skipped = 0;
+        let chunkIdx = 0;
+        let chunkOffset = this.firstChunkOffset;
+        while (skipped < n && chunkIdx < this.chunks.length) {
+            const chunk = this.chunks[chunkIdx];
+            const chunkSamples = chunk.length / numChannels;
+            const toSkip = Math.min(n - skipped, chunkSamples - chunkOffset);
+            skipped += toSkip;
+            chunkOffset += toSkip;
+            if (chunkOffset === chunkSamples) {
+                chunkIdx++;
+                chunkOffset = 0;
+            }
+        }
+        this.chunks.splice(0, chunkIdx);
+        this.firstChunkOffset = chunkOffset;
+        this.totalSamples -= skipped;
+
+        return skipped;
+    }
+
     // Reads samples without removing them from the queue. It fills the output array with interleaved samples from the
     // queue (the tail of the array is filled with zeros if there is not enough data).
     readNonInterleaved(output: Float32Array) {
