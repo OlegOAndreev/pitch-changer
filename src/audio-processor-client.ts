@@ -6,24 +6,24 @@ import type {
     ProcessSamplesRequest,
     ProcessSamplesResponse,
     ResetRequest,
+    SetParamsMessage,
 } from './audio-processor-types';
+import type { ProcessingMode } from './types';
 
 export class AudioProcessorClient {
     private port: MessagePort;
-    private onProcessedSamples: (samples: Float32Array, finished: boolean) => void;
 
     // Construct from the message port (get the port via AudioProcessorManager.getControlClientPort) and the callback.
     // onProcessedSamples is called when the workers finishes processing samples (either after processSamples or finish
     // is called).
     constructor(port: MessagePort, onProcessedSamples: (samples: Float32Array, finished: boolean) => void) {
         this.port = port;
-        this.onProcessedSamples = onProcessedSamples;
         this.port.onmessage = (event: MessageEvent<ProcessSamplesResponse>) => {
             const message = event.data;
             if (message.type !== 'processSamplesResponse') {
                 return;
             }
-            this.onProcessedSamples(message.samples, message.finished);
+            onProcessedSamples(message.samples, message.finished);
         };
     }
 
@@ -42,6 +42,27 @@ export class AudioProcessorClient {
             samples,
         };
         this.port.postMessage(message, [samples.buffer]);
+    }
+
+    // Update processing params. This method may be called at any time.
+    setParams(
+        processingMode: ProcessingMode,
+        pitchValue: number,
+        sampleRate: number,
+        numChannels: number,
+        fftSize: number,
+    ): void {
+        const message: SetParamsMessage = {
+            type: 'setParams',
+            params: {
+                processingMode,
+                pitchValue,
+                sampleRate,
+                numChannels,
+                fftSize,
+            },
+        };
+        this.port.postMessage(message);
     }
 
     // Complete processing, previously sent samples will be flushed.

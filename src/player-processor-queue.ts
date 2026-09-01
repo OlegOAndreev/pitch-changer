@@ -21,7 +21,7 @@ export class PlayerProcessorQueue {
     }
 
     // Pops data from the queue and deinterleaves it into multichannel arrays. Assumes that all outputChannels arrays
-    // have the same length. The tail of the array is filled with zeros if there is not enough data, and the resuling
+    // have the same length. The tail of the array is filled with zeros if there is not enough data, and the resulting
     // underrun is returned.
     popNonInterleaved(outputChannels: Float32Array[]): number {
         if (outputChannels.length < this.numChannels) {

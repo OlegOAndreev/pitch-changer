@@ -59,6 +59,7 @@ class AudioProcessorWorker {
         };
     }
 
+    // This method may be called both from AudioProcessorClient and AudioProcessorManager.
     setParams(newParams: WorkerParams): void {
         if (!this.workerIsInit) {
             throw new Error('Worker not initialized before calling methods');
@@ -76,6 +77,10 @@ class AudioProcessorWorker {
 
             case 'processSamplesRequest':
                 await this.processSamples(message.samples);
+                break;
+
+            case 'setParams':
+                this.setParams(message.params);
                 break;
 
             case 'finishRequest':
@@ -99,7 +104,9 @@ class AudioProcessorWorker {
     private async initWasm() {
         const module = await initWasmModule();
         const wasmMemory = module.memory;
-        console.debug(`AudioProcessorWorker: Wasm settings: ${get_settings()}, initial wasm memory size ${wasmMemory.buffer.byteLength}`);
+        console.debug(
+            `AudioProcessorWorker: Wasm settings: ${get_settings()}, initial wasm memory size ${wasmMemory.buffer.byteLength}`,
+        );
     }
 
     private async reset() {

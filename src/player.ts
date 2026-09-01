@@ -22,7 +22,7 @@ import {
     type PlayerStopMessage,
 } from './player-types';
 
-import { logError } from './common-utils';
+import { fftSizeForSampleRate, logError } from './common-utils';
 import type { InterleavedAudio, ProcessingMode } from './types';
 
 export { type PlayerStats };
@@ -51,10 +51,12 @@ export class Player {
     }
 
     // Workaround for lack of async constructors.
-    static async create(audioContext: AudioContext, fftSize: number): Promise<Player> {
+    static async create(audioContext: AudioContext): Promise<Player> {
         console.log('Initializing player processor module');
         await audioContext.audioWorklet.addModule(playerProcessorModule);
         const processorManager = await AudioProcessorManager.create(audioProcessorModule, (e) => logError(e, null));
+        // Use higher fft size for offline audio processing quality.
+        const fftSize = fftSizeForSampleRate(audioContext.sampleRate, 80);
         return new Player(audioContext, processorManager, fftSize);
     }
 

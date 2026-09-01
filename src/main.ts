@@ -2,7 +2,7 @@ import initWasmModule, { get_settings } from '../wasm/build/wasm_main_module';
 import { AudioProcessorManager } from './audio-processor';
 import audioProcessorURL from './audio-processor-worker.ts?worker&url';
 import { runBenchmark, type BenchmarkResults } from './benchmark';
-import { debounce, getById, logError, setupWindowOnError, sleep, withButtonsDisabled } from './common-utils';
+import { debounce, fftSizeForSampleRate, getById, logError, setupWindowOnError, sleep, withButtonsDisabled } from './common-utils';
 import { decodeAudioFromBlob } from './media-decoder';
 import { encodeAudioToBlob } from './media-encoder';
 import { Player } from './player';
@@ -21,9 +21,6 @@ const DEFAULT_PROCESSING_MODE = 'pitch';
 const SAVE_SETTINGS_DEBOUNCE = 500;
 
 const SETTINGS_KEY = 'pitch-changer-settings';
-
-// We will probably make this configurable in the future with 'quality' param
-const FFT_SIZE = 4096;
 
 //
 // Global app state
@@ -101,7 +98,7 @@ class AppState {
 
     async getPlayer(): Promise<Player> {
         if (!this.player) {
-            this.player = Player.create(this.getAudioContext(), FFT_SIZE);
+            this.player = Player.create(this.getAudioContext());
         }
         try {
             return await this.player;
@@ -317,7 +314,8 @@ async function processAllAudio(): Promise<InterleavedAudio> {
         appState.settings.pitchValue,
         appState.sourceAudio!.sampleRate,
         appState.sourceAudio!.numChannels,
-        FFT_SIZE,
+        // Use higher fft size for offline audio processing quality.
+        fftSizeForSampleRate(appState.sourceAudio!.sampleRate, 80),
     );
     const processedData = await manager.processAudio(appState.sourceAudio!.data);
     const endTime = performance.now();

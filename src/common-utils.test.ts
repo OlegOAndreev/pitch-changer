@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { debounce, getBaseName } from './common-utils';
+import { debounce, fftSizeForSampleRate, getBaseName } from './common-utils';
 
 describe('getBaseName', () => {
     it('returns filename without extension and path', () => {
@@ -179,5 +179,17 @@ describe('debounce', () => {
         await expect(p1).resolves.toBeUndefined();
         await expect(p2).resolves.toBeUndefined();
         expect(callCount).toBe(2);
+    });
+});
+
+describe('fftSizeForSampleRate', () => {
+    it('test', () => {
+        expect(fftSizeForSampleRate(44100, 40)).toBe(2048);
+        expect(fftSizeForSampleRate(44100, 80)).toBe(4096);
+        expect(fftSizeForSampleRate(48000, 40)).toBe(2048);
+        expect(fftSizeForSampleRate(48000, 80)).toBe(4096);
+        expect(fftSizeForSampleRate(96000, 40)).toBe(4096);
+        expect(fftSizeForSampleRate(96000, 80)).toBe(8192);
+        expect(fftSizeForSampleRate(48000, 1)).toBe(128);
     });
 });
