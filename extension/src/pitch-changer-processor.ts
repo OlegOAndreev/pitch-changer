@@ -9,6 +9,11 @@ import { PROCESSOR_NAME, type ProcessorOptions, type ProcessorRequest, type Proc
 // The minimum latency possible is equal to fftSize: the pitch shifting algorithm requires that at least fftSize samples
 // must be processed before returning the first results. The output quantum is fftSize/4 (the hop size), but we want
 // to account for scheduling hitches.
+//
+// Optimization: if the input has been only zeros consecutive samples, all the internal buffers are guaranteed to
+// contain only zeros. In this case we switch to the fast path: the output is zeroed without any processing at all. This
+// optimization is especially important because once started the processor never stops: there is currently no way to
+// declare that the processor should be run only if non-zero values are passed to it.
 class PitchChangerProcessor extends AudioWorkletProcessor {
     // The worklet node is created with explicit channel count, so WebAudio up/downmixes the input into exactly
     // numChannels channels. Unlike the main app, we set all parameters from inside the worklet processor, which require
@@ -23,6 +28,11 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
     private currentLatency = 0;
 
     private numUnderruns = 0;
+
+    // Number of consecutive zero input samples, used to switch to the zero-only fast path.
+    private zeroRunSamples = 0;
+    // The threshold which the zeroRunSamples must exceed in order to switch to the zero-only fast path.
+    private zeroPathThreshold = 0;
 
     constructor(options: AudioWorkletNodeOptions) {
         super();
@@ -66,6 +76,11 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
                 this.requiredLatency = fftSize * 3;
                 break;
         }
+        // The threshold must be large enough that all non-zero data is processed by PitchShifter. This depends on pitch
+        // value: the output_accum_buf in TimeStretcher is shifted by syn_hop_size, which depends not only on fft_size,
+        // but also on time_stretch (which equals pitch_shift). Shifting the full fft_size "out of" output_accum_buf
+        // takes fft_size / pitch_shift samples.
+        this.zeroPathThreshold = fftSize * 4;
     }
 
     process(inputs: Float32Array[][], outputs: Float32Array[][], _parameters: Record<string, Float32Array>): boolean {
@@ -77,18 +92,28 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
             return true;
         }
 
-        // TODO: Add fast path if there have been fftSize*2 consecutive zeros in input.
-
-        // // We want to skip processing inputs if the input is zero.
-        // if (this.isAllZeros(input)) {
-        //     // this.fillZeros(output);
-        //     return true;
-        // }
-
         // The client has not been created, work as pass-through.
         if (!this.client) {
             this.copySamples(output, input);
             return true;
+        }
+
+        const blockSize = input[0].length;
+        if (this.isAllZeros(input)) {
+            // With sampling rate < 100k we have billions of seconds until this addition becomes a problem.
+            this.zeroRunSamples += blockSize;
+            if (this.zeroRunSamples >= this.zeroPathThreshold) {
+                // Do not touch queue or currentLatency: the queue should contain only zeros and will be used as soon as
+                // we receive the first non-zero input sample.
+                //
+                // The async part of filling the queue does not matter as well: essentially we reorder zeros with zeros.
+                this.fillZeros(output);
+                return true;
+            }
+        } else {
+            this.zeroRunSamples = 0;
+            // Do a reset: at least PeakCorrector can have a slow recovery (up to hundreds of ms).
+            this.client.reset();
         }
 
         this.sendInput(input);
@@ -156,16 +181,16 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
         }
     }
 
-    // private isAllZeros(inputChannels: Float32Array[]): boolean {
-    //     for (const channel of inputChannels) {
-    //         for (let i = 0; i < channel.length; i++) {
-    //             if (channel[i] !== 0.0) {
-    //                 return false;
-    //             }
-    //         }
-    //     }
-    //     return true;
-    // }
+    private isAllZeros(inputChannels: Float32Array[]): boolean {
+        for (const channel of inputChannels) {
+            for (let i = 0; i < channel.length; i++) {
+                if (channel[i] !== 0.0) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
 
     private fillZeros(outputChannels: Float32Array[]): void {
         for (const channel of outputChannels) {
