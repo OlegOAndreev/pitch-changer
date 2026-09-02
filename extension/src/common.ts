@@ -18,10 +18,14 @@ export interface ExtensionSettings {
 export interface StatsResult {
     numAudioElements: number;
     numVideoElements: number;
+    numUnderruns: number;
+    isFastPath: boolean;
 }
 
 export interface OverrideStatsResult {
     numAudioContexts: number;
+    numUnderruns: number;
+    isFastPath: boolean;
 }
 
 const defaultSettings: ExtensionSettings = {
@@ -55,6 +59,12 @@ export interface ProcessorSetParams {
     processingMode: ProcessingMode;
     pitchValue: number;
     targetLatency: TargetLatency;
+}
+
+export interface ProcessorStats {
+    type: 'pitch-changer-extension-processor-stats';
+    numUnderruns: number;
+    isFastPath: boolean;
 }
 
 export type ProcessorRequest = ProcessorInit | ProcessorSetParams;

@@ -1,7 +1,16 @@
 import { AudioProcessorClient } from '../../src/audio-processor-client.js';
 import { fftSizeForSampleRate } from '../../src/common-utils.js';
 import { SamplesQueue } from '../../src/samples-queue.js';
-import { PROCESSOR_NAME, type ProcessorOptions, type ProcessorRequest, type ProcessorSetParams } from './common.js';
+import {
+    PROCESSOR_NAME,
+    type ProcessorOptions,
+    type ProcessorRequest,
+    type ProcessorSetParams,
+    type ProcessorStats,
+} from './common.js';
+
+// Stats are sent back to content script after every STATS_MESSAGE_INTERVAL_SAMPLES samples processed.
+const STATS_MESSAGE_INTERVAL_SAMPLES = 48000;
 
 // PitchProcessor sends data to a separate AudioProcessorWorker and receives the result. It maintains a fixed latency
 // ('normal' = fft size * 1.5, 'high' = fft size * 3 for ~70msec and ~150msec latency respectively).
@@ -28,6 +37,11 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
     private currentLatency = 0;
 
     private numUnderruns = 0;
+
+    // Number of input samples received since the last stats message was sent.
+    private samplesSinceStatsMessage = 0;
+    // Do not send messages if we are in the zero fast path and have already reported that we are in the fast path.
+    private fastPathStatsSent = false;
 
     // Number of consecutive zero input samples, used to switch to the zero-only fast path.
     private zeroRunSamples = 0;
@@ -108,6 +122,7 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
                 //
                 // The async part of filling the queue does not matter as well: essentially we reorder zeros with zeros.
                 this.fillZeros(output);
+                this.maybeSendStats(blockSize);
                 return true;
             }
         } else {
@@ -118,7 +133,30 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
 
         this.sendInput(input);
         this.writeOutput(output);
+        this.maybeSendStats(blockSize);
         return true;
+    }
+
+    private maybeSendStats(numSamples: number): void {
+        const isFastPath = this.zeroRunSamples >= this.zeroPathThreshold;
+        if (isFastPath && this.fastPathStatsSent) {
+            return;
+        }
+
+        this.samplesSinceStatsMessage += numSamples;
+        if (this.samplesSinceStatsMessage < STATS_MESSAGE_INTERVAL_SAMPLES) {
+            return;
+        }
+
+        this.samplesSinceStatsMessage = 0;
+        this.port.postMessage({
+            type: 'pitch-changer-extension-processor-stats',
+            numUnderruns: this.numUnderruns,
+            isFastPath: isFastPath,
+        } as ProcessorStats);
+        if (isFastPath) {
+            this.fastPathStatsSent = true;
+        }
     }
 
     private copySamples(output: Float32Array[], input: Float32Array[]) {
@@ -170,14 +208,10 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
             }
         }
 
-        const outputLen = output[0].length;
         const written = this.queue.popNonInterleaved(output);
         this.currentLatency -= written;
-        const underrun = outputLen - written;
-        if (underrun > 0) {
+        if (written < output[0].length) {
             this.numUnderruns++;
-            // TODO: Report underruns via messages once in a while?
-            console.error("Got underrun ${underrun}");
         }
     }
 

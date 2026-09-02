@@ -7,6 +7,7 @@ import {
     type ProcessorInit,
     type ProcessorOptions,
     type ProcessorSetParams,
+    type ProcessorStats,
     type WorkerIframeInit,
 } from './common.js';
 
@@ -70,6 +71,9 @@ import {
         private pitchChangerOverrideWorkletNode: Promise<AudioWorkletNode> | null = null;
         private pitchChangerOverrideWasEnabled = false;
         private pitchChangerOverrideClosed = false;
+        // Statistics reported by the processor of this context, read by getStats().
+        pitchChangerOverrideNumUnderruns = 0;
+        pitchChangerOverrideIsFastPath = false;
 
         constructor(contextOptions?: AudioContextOptions | undefined) {
             super(contextOptions);
@@ -189,6 +193,14 @@ import {
                     `Error from PitchChangerProcessor: ${event.message}, ${event.filename}:${event.lineno}, ${event.error}`,
                 );
             };
+            result.port.onmessage = (event: MessageEvent<ProcessorStats>) => {
+                const message = event.data;
+                if (message.type !== 'pitch-changer-extension-processor-stats') {
+                    throw new Error(`MAIN: Unknown message type from processor: ${JSON.stringify(message)}`);
+                }
+                this.pitchChangerOverrideNumUnderruns = message.numUnderruns;
+                this.pitchChangerOverrideIsFastPath = message.isFastPath;
+            };
 
             const audioProcessorClientPort = await createWorkerInIframe();
             result.port.postMessage(
@@ -222,8 +234,16 @@ import {
     }
 
     function getStats(): OverrideStatsResult {
+        let numUnderruns = 0;
+        let isFastPath = true;
+        for (const context of overridenAudioContexts) {
+            numUnderruns += context.pitchChangerOverrideNumUnderruns;
+            isFastPath = isFastPath && context.pitchChangerOverrideIsFastPath;
+        }
         return {
             numAudioContexts: overridenAudioContexts.length,
+            numUnderruns,
+            isFastPath,
         };
     }
 

@@ -32,6 +32,8 @@ const debugLoggingCheckbox = document.getElementById('debugLogging') as HTMLInpu
 const numAudioElementsValue = document.getElementById('numAudioElements') as HTMLSpanElement;
 const numVideoElementsValue = document.getElementById('numVideoElements') as HTMLSpanElement;
 const numAudioContextDestinationsValue = document.getElementById('numAudioContextDestinations') as HTMLSpanElement;
+const numUnderrunsValue = document.getElementById('numUnderruns') as HTMLSpanElement;
+const isFastPathValue = document.getElementById('isFastPath') as HTMLSpanElement;
 
 const SAVE_SETTINGS_DEBOUNCE = 50;
 const HIDE_ERROR_AFTER = 10000;
@@ -175,6 +177,8 @@ async function updateDebugStats() {
     let numAudioElements = 0;
     let numVideoElements = 0;
     let numAudioContextDestinations = 0;
+    let numUnderruns = 0;
+    let isFastPath = true;
     if (shouldApplyToTab(tab)) {
         console.debug('Running for tab', tab);
         try {
@@ -200,6 +204,8 @@ async function updateDebugStats() {
                 if (data) {
                     numAudioElements += data.numAudioElements;
                     numVideoElements += data.numVideoElements;
+                    numUnderruns += data.numUnderruns;
+                    isFastPath = isFastPath && data.isFastPath;
                 }
             }
 
@@ -224,6 +230,8 @@ async function updateDebugStats() {
                 const data = result.result as OverrideStatsResult;
                 if (data) {
                     numAudioContextDestinations += data.numAudioContexts;
+                    numUnderruns += data.numUnderruns;
+                    isFastPath = isFastPath && data.isFastPath;
                 }
             }
         } catch (error) {
@@ -234,6 +242,8 @@ async function updateDebugStats() {
     numAudioElementsValue.textContent = numAudioElements.toString();
     numVideoElementsValue.textContent = numVideoElements.toString();
     numAudioContextDestinationsValue.textContent = numAudioContextDestinations.toString();
+    numUnderrunsValue.textContent = numUnderruns.toString();
+    isFastPathValue.textContent = isFastPath.toString();
 }
 
 async function init(): Promise<void> {

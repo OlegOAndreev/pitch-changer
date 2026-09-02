@@ -7,6 +7,7 @@ import {
     type ProcessorInit,
     type ProcessorOptions,
     type ProcessorSetParams,
+    type ProcessorStats,
     type StatsResult,
     type WorkerIframeInit,
 } from './common.js';
@@ -54,6 +55,10 @@ let settings: ExtensionSettings;
 
 let globalAudioContext: Promise<AudioContext> | null = null;
 let globalWorkletNode: Promise<AudioWorkletNode> | null = null;
+
+// Statistics reported by the worklet processor via messages.
+let workletProcessorNumUnderruns = 0;
+let workletProcessorIsFastPath = false;
 
 // WeakMap would have been nice here, but it is not iterable and we have a MutationObserver anyway.
 //
@@ -152,6 +157,15 @@ async function initWorkletNode(context: AudioContext): Promise<AudioWorkletNode>
         pitchValue: settings.pitchValue,
         targetLatency: settings.targetLatency,
     } as ProcessorSetParams);
+
+    result.port.onmessage = (event: MessageEvent<ProcessorStats>) => {
+        const message = event.data;
+        if (message.type !== 'pitch-changer-extension-processor-stats') {
+            throw new Error(`ISOLATED: Unknown message type from processor: ${JSON.stringify(message)}`);
+        }
+        workletProcessorNumUnderruns = message.numUnderruns;
+        workletProcessorIsFastPath = message.isFastPath;
+    };
 
     result.connect(context.destination);
 
@@ -312,6 +326,8 @@ function getStats(): StatsResult {
     const response: StatsResult = {
         numAudioElements: 0,
         numVideoElements: 0,
+        numUnderruns: workletProcessorNumUnderruns,
+        isFastPath: workletProcessorIsFastPath,
     };
     for (const node of nodesMap.keys()) {
         if (node instanceof HTMLAudioElement) {
