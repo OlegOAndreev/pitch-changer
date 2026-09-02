@@ -24,8 +24,6 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
 
     private numUnderruns = 0;
 
-    private lastConsoleLogTime = -CONSOLE_LOG_MIN_DELTA;
-
     constructor(options: AudioWorkletNodeOptions) {
         super();
 
