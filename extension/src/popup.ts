@@ -5,6 +5,7 @@ import {
     type OverrideStatsResult,
     type ProcessingMode,
     type StatsResult,
+    type TargetLatency,
     loadSettings,
     SETTINGS_KEY,
 } from './common.js';
@@ -24,7 +25,8 @@ const toggleEnabled = document.getElementById('toggleEnabled') as HTMLInputEleme
 const pitchSlider = document.getElementById('pitchSlider') as HTMLInputElement;
 const pitchValue = document.getElementById('pitchValue') as HTMLDivElement;
 const noteValue = document.getElementById('noteValue') as HTMLDivElement;
-const modeButtons = document.querySelectorAll('.mode-btn');
+const modeButtons = document.querySelectorAll('#modeSelector button');
+const latencyButtons = document.querySelectorAll('#latencySelector button');
 const advancedSection = document.getElementById('advancedSection') as HTMLDetailsElement;
 const debugLoggingCheckbox = document.getElementById('debugLogging') as HTMLInputElement;
 const numAudioElementsValue = document.getElementById('numAudioElements') as HTMLSpanElement;
@@ -83,6 +85,17 @@ function updateActiveModeDisplay(mode: ProcessingMode): void {
     modeButtons.forEach((btn) => {
         const button = btn as HTMLButtonElement;
         if (button.dataset.mode === mode) {
+            button.classList.add('active');
+        } else {
+            button.classList.remove('active');
+        }
+    });
+}
+
+function updateActiveLatencyDisplay(latency: TargetLatency): void {
+    latencyButtons.forEach((btn) => {
+        const button = btn as HTMLButtonElement;
+        if (button.dataset.latency === latency) {
             button.classList.add('active');
         } else {
             button.classList.remove('active');
@@ -231,6 +244,7 @@ async function init(): Promise<void> {
     setEnabled();
     updatePitchDisplay();
     updateActiveModeDisplay(currentSettings.processingMode);
+    updateActiveLatencyDisplay(currentSettings.targetLatency);
 
     toggleEnabled.addEventListener('change', async () => {
         currentSettings.enabled = toggleEnabled.checked;
@@ -268,6 +282,20 @@ async function init(): Promise<void> {
                 applySettingsToTabs();
             } else {
                 console.warn('Invalid mode:', mode);
+            }
+        });
+    });
+
+    latencyButtons.forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const latency = (btn as HTMLButtonElement).dataset.latency;
+            if (latency === 'normal' || latency === 'high') {
+                currentSettings.targetLatency = latency;
+                updateActiveLatencyDisplay(latency);
+                saveSettings();
+                applySettingsToTabs();
+            } else {
+                console.warn('Invalid latency:', latency);
             }
         });
     });
