@@ -4,6 +4,9 @@ import {
     type ContentScriptExports,
     type ExtensionSettings,
     type PitchChangerOverrideInit,
+    type ProcessorInit,
+    type ProcessorOptions,
+    type ProcessorSetParams,
     type StatsResult,
     type WorkerIframeInit,
 } from './common.js';
@@ -98,8 +101,7 @@ async function createWorkerInIframe(): Promise<MessagePort> {
             return;
         }
         if (event.data?.type !== 'pitch-changer-extension-worker-iframe-init') {
-            console.error(`Strange message from worker iframe: ${JSON.stringify(event.data)}`);
-            return;
+            throw new Error(`ISOLATED: Unknown message type from worker iframe: ${JSON.stringify(event.data)}`);
         }
         const data = event.data as WorkerIframeInit;
         resolve(data.audioProcessorClientPort);
@@ -122,19 +124,35 @@ async function getWorkletNode(context: AudioContext): Promise<AudioWorkletNode> 
 }
 
 async function initWorkletNode(context: AudioContext): Promise<AudioWorkletNode> {
-    const audioProcessorClientPort = await createWorkerInIframe();
-
     const destChannelCount = context.destination.channelCount;
-
     const result = new AudioWorkletNode(context, PROCESSOR_NAME, {
         // Force the WebAudio do up/downmixing for us.
         channelCount: destChannelCount,
         channelCountMode: 'explicit',
         outputChannelCount: [destChannelCount],
+        processorOptions: {
+            numChannels: destChannelCount,
+        } as ProcessorOptions,
         parameterData: {
             pitchValue: settings.pitchValue,
         },
     });
+
+    const audioProcessorClientPort = await createWorkerInIframe();
+    result.port.postMessage(
+        {
+            type: 'pitch-changer-extension-processor-init',
+            audioProcessorClientPort: audioProcessorClientPort,
+        } as ProcessorInit,
+        [audioProcessorClientPort],
+    );
+    result.port.postMessage({
+        type: 'pitch-changer-extension-processor-set-params',
+        processingMode: settings.processingMode,
+        pitchValue: settings.pitchValue,
+        targetLatency: settings.targetLatency,
+    } as ProcessorSetParams);
+
     result.connect(context.destination);
 
     debugLog(`Created shared worklet node, channelCount ${destChannelCount}`);
@@ -282,12 +300,11 @@ async function applySettingsImpl(gotEnabled: boolean, gotDisabled: boolean) {
 
     // Update the parameters of the worklet if it exists.
     if (globalWorkletNode) {
-        const context = await getWorkletAudioContext();
-        //@ts-expect-error AudioParamMap does not currently have full interface described in TypeScript
-        ((await globalWorkletNode).parameters.get('pitchValue') as AudioParam).setValueAtTime(
-            settings.pitchValue,
-            context.currentTime,
-        );
+        (await globalWorkletNode).port.postMessage({
+            type: 'pitch-changer-extension-processor-set-params',
+            processingMode: settings.processingMode,
+            pitchValue: settings.pitchValue,
+        } as ProcessorSetParams);
     }
 }
 

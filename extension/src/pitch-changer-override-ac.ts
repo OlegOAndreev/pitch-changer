@@ -4,6 +4,9 @@ import {
     type OverrideScriptExports,
     type OverrideStatsResult,
     type PitchChangerOverrideInit,
+    type ProcessorInit,
+    type ProcessorOptions,
+    type ProcessorSetParams,
     type WorkerIframeInit,
 } from './common.js';
 
@@ -38,8 +41,7 @@ import {
                 return;
             }
             if (event.data?.type !== 'pitch-changer-extension-worker-iframe-init') {
-                console.error(`Strange message from worker iframe: ${JSON.stringify(event.data)}`);
-                return;
+                throw new Error(`MAIN: Unknown message type from worker iframe: ${JSON.stringify(event.data)}`);
             }
             const data = event.data as WorkerIframeInit;
             resolve(data.audioProcessorClientPort);
@@ -130,11 +132,12 @@ import {
                         pitchChangerOverrideWorkletNode.connect(this.pitchChangerOverrideRealDestination!);
                         this.pitchChangerOverrideWasEnabled = true;
                     }
-                    //@ts-expect-error AudioParamMap does not currently have full interface described in TypeScript
-                    (pitchChangerOverrideWorkletNode.parameters.get('pitchValue') as AudioParam).setValueAtTime(
-                        settings.pitchValue,
-                        0.0,
-                    );
+                    pitchChangerOverrideWorkletNode.port.postMessage({
+                        type: 'pitch-changer-extension-processor-set-params',
+                        processingMode: settings.processingMode,
+                        pitchValue: settings.pitchValue,
+                        targetLatency: settings.targetLatency,
+                    } as ProcessorSetParams);
                 }
             } else {
                 // Do nothing if we haven't started initializing worklet node: this can happen only when we get
@@ -166,9 +169,6 @@ import {
         async initPitchChangerOverrideWorkletNode(): Promise<AudioWorkletNode> {
             await this.audioWorklet.addModule(processorUrl);
 
-            const audioProcessorClientPort = await createWorkerInIframe();
-            debugLog(`Loaded processor from ${processorUrl} and worker from ${audioProcessorWorkerUrl} in MAIN`);
-
             // We cannot reach this point if the destination() has not been called: this means that
             // PitchChangerOverrideAudioContext has not been published in overridenAudioContexts.
             const destChannelCount = this.pitchChangerOverrideRealDestination!.channelCount;
@@ -177,10 +177,34 @@ import {
                 channelCount: destChannelCount,
                 channelCountMode: 'explicit',
                 outputChannelCount: [destChannelCount],
+                processorOptions: {
+                    numChannels: destChannelCount,
+                } as ProcessorOptions,
                 parameterData: {
                     pitchValue: settings.pitchValue,
                 },
             });
+            result.onprocessorerror = (event: ErrorEvent) => {
+                console.error(
+                    `Error from PitchChangerProcessor: ${event.message}, ${event.filename}:${event.lineno}, ${event.error}`,
+                );
+            };
+
+            const audioProcessorClientPort = await createWorkerInIframe();
+            result.port.postMessage(
+                {
+                    type: 'pitch-changer-extension-processor-init',
+                    audioProcessorClientPort: audioProcessorClientPort,
+                } as ProcessorInit,
+                [audioProcessorClientPort],
+            );
+            result.port.postMessage({
+                type: 'pitch-changer-extension-processor-set-params',
+                processingMode: settings.processingMode,
+                pitchValue: settings.pitchValue,
+            } as ProcessorSetParams);
+            debugLog(`Loaded processor from ${processorUrl} and worker from ${audioProcessorWorkerUrl} in MAIN`);
+
             return result;
         }
     }

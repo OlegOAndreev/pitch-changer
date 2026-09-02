@@ -4,11 +4,15 @@ export const PROCESSOR_NAME = 'pitch-changer-extension-processor';
 
 export type ProcessingMode = 'pitch' | 'formant-preserving-pitch';
 
+// Latency matters if if your system is under load: the chances of skipping/cracks are higher with lower latencies.
+export type TargetLatency = 'normal' | 'high';
+
 export interface ExtensionSettings {
     enabled: boolean;
     debugLogging: boolean;
     processingMode: ProcessingMode;
     pitchValue: number;
+    targetLatency: TargetLatency;
 }
 
 export interface StatsResult {
@@ -25,6 +29,7 @@ const defaultSettings: ExtensionSettings = {
     debugLogging: false,
     processingMode: 'pitch',
     pitchValue: 1.0,
+    targetLatency: 'normal',
 };
 
 export interface PitchChangerOverrideInit {
@@ -38,6 +43,24 @@ export interface PitchChangerOverrideInit {
 export interface WorkerIframeInit {
     type: 'pitch-changer-extension-worker-iframe-init';
     audioProcessorClientPort: MessagePort;
+}
+
+export interface ProcessorInit {
+    type: 'pitch-changer-extension-processor-init';
+    audioProcessorClientPort: MessagePort;
+}
+
+export interface ProcessorSetParams {
+    type: 'pitch-changer-extension-processor-set-params';
+    processingMode: ProcessingMode;
+    pitchValue: number;
+    targetLatency: TargetLatency;
+}
+
+export type ProcessorRequest = ProcessorInit | ProcessorSetParams;
+
+export interface ProcessorOptions {
+    numChannels: number;
 }
 
 export async function loadSettings(): Promise<ExtensionSettings> {
