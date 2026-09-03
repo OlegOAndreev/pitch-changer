@@ -28,12 +28,13 @@ const noteValue = document.getElementById('noteValue') as HTMLDivElement;
 const modeButtons = document.querySelectorAll('#modeSelector button');
 const latencyButtons = document.querySelectorAll('#latencySelector button');
 const advancedSection = document.getElementById('advancedSection') as HTMLDetailsElement;
+const passthroughCheckbox = document.getElementById('enablePassthroughOptimization') as HTMLInputElement;
 const debugLoggingCheckbox = document.getElementById('debugLogging') as HTMLInputElement;
 const numAudioElementsValue = document.getElementById('numAudioElements') as HTMLSpanElement;
 const numVideoElementsValue = document.getElementById('numVideoElements') as HTMLSpanElement;
 const numAudioContextDestinationsValue = document.getElementById('numAudioContextDestinations') as HTMLSpanElement;
 const numUnderrunsValue = document.getElementById('numUnderruns') as HTMLSpanElement;
-const isFastPathValue = document.getElementById('isFastPath') as HTMLSpanElement;
+const fastPathActiveValue = document.getElementById('fastPathActive') as HTMLSpanElement;
 
 const SAVE_SETTINGS_DEBOUNCE = 50;
 const HIDE_ERROR_AFTER = 10000;
@@ -150,7 +151,8 @@ async function applySettingsToTabs() {
             });
             chrome.scripting.executeScript({
                 func: (settings) => {
-                    const applySettings = (globalThis as unknown as OverrideScriptExports).exportPitchChangerExtensionOverrideApplySettings;
+                    const applySettings = (globalThis as unknown as OverrideScriptExports)
+                        .exportPitchChangerExtensionOverrideApplySettings;
                     // Skip the frames we did not get injected into for whatever reason.
                     if (applySettings) {
                         applySettings(settings);
@@ -179,7 +181,7 @@ async function updateDebugStats() {
     let numVideoElements = 0;
     let numAudioContextDestinations = 0;
     let numUnderruns = 0;
-    let isFastPath = true;
+    let fastPathActive = true;
     if (shouldApplyToTab(tab)) {
         console.debug('Running for tab', tab);
         try {
@@ -206,7 +208,7 @@ async function updateDebugStats() {
                     numAudioElements += data.numAudioElements;
                     numVideoElements += data.numVideoElements;
                     numUnderruns += data.numUnderruns;
-                    isFastPath = isFastPath && data.isFastPath;
+                    fastPathActive = fastPathActive && data.fastPathActive;
                 }
             }
 
@@ -232,7 +234,7 @@ async function updateDebugStats() {
                 if (data) {
                     numAudioContextDestinations += data.numAudioContexts;
                     numUnderruns += data.numUnderruns;
-                    isFastPath = isFastPath && data.isFastPath;
+                    fastPathActive = fastPathActive && data.fastPathActive;
                 }
             }
         } catch (error) {
@@ -244,13 +246,14 @@ async function updateDebugStats() {
     numVideoElementsValue.textContent = numVideoElements.toString();
     numAudioContextDestinationsValue.textContent = numAudioContextDestinations.toString();
     numUnderrunsValue.textContent = numUnderruns.toString();
-    isFastPathValue.textContent = isFastPath.toString();
+    fastPathActiveValue.textContent = fastPathActive.toString();
 }
 
 async function init(): Promise<void> {
     debugLog('Audio Pitch Changer popup initialized');
 
     toggleEnabled.checked = currentSettings.enabled !== false;
+    passthroughCheckbox.checked = currentSettings.enablePassthroughOptimization !== false;
     debugLoggingCheckbox.checked = currentSettings.debugLogging !== false;
     setEnabled();
     updatePitchDisplay();
@@ -273,6 +276,12 @@ async function init(): Promise<void> {
 
     debugLoggingCheckbox.addEventListener('change', () => {
         currentSettings.debugLogging = debugLoggingCheckbox.checked;
+        saveSettings();
+        applySettingsToTabs();
+    });
+
+    passthroughCheckbox.addEventListener('change', () => {
+        currentSettings.enablePassthroughOptimization = passthroughCheckbox.checked;
         saveSettings();
         applySettingsToTabs();
     });

@@ -247,20 +247,22 @@
         padding: 8px 0;
       }
 
-      #debugCheckbox {
+      .checkbox-row {
         margin-top: 8px;
+        margin-bottom: 8px;
         display: flex;
         align-items: center;
         gap: 8px;
       }
 
-      #debugCheckbox input[type='checkbox'] {
+      .checkbox-row input[type='checkbox'] {
         width: 14px;
         height: 14px;
         cursor: pointer;
+        accent-color: #039be5;
       }
 
-      #debugCheckbox label {
+      .checkbox-row label {
         cursor: pointer;
       }
 
@@ -273,7 +275,6 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        margin-top: 8px;
       }
 
       #latencySelector button {
@@ -327,7 +328,11 @@
               <button id="latencyHigh" data-latency="high">High</button>
             </div>
           </div>
-          <div id="debugCheckbox">
+          <div id="passthroughCheckbox" class="checkbox-row">
+            <input type="checkbox" id="enablePassthroughOptimization" checked />
+            <label for="enablePassthroughOptimization">Enable passthrough optimization</label>
+          </div>
+          <div id="debugCheckbox" class="checkbox-row">
             <input type="checkbox" id="debugLogging" />
             <label for="debugLogging">Enable debug logging</label>
           </div>
@@ -337,7 +342,7 @@
             <span>Number of AudioContexts:</span><span id="numAudioContextDestinations" class="num-elements"></span>
           </div>
           <div><span>Number of underruns:</span><span id="numUnderruns" class="num-elements"></span></div>
-          <div><span>Fast path active:</span><span id="isFastPath" class="num-elements"></span></div>
+          <div><span>Fast path active:</span><span id="fastPathActive" class="num-elements"></span></div>
         </details>
       </div>
     </div>

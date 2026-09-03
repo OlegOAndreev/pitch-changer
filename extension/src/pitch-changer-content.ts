@@ -58,7 +58,7 @@ let globalWorkletNode: Promise<AudioWorkletNode> | null = null;
 
 // Statistics reported by the worklet processor via messages.
 let workletProcessorNumUnderruns = 0;
-let workletProcessorIsFastPath = false;
+let workletProcessorFastPathActive = true;
 
 // WeakMap would have been nice here, but it is not iterable and we have a MutationObserver anyway.
 //
@@ -156,6 +156,7 @@ async function initWorkletNode(context: AudioContext): Promise<AudioWorkletNode>
         processingMode: settings.processingMode,
         pitchValue: settings.pitchValue,
         targetLatency: settings.targetLatency,
+        enablePassthroughOptimization: settings.enablePassthroughOptimization,
     } as ProcessorSetParams);
 
     result.port.onmessage = (event: MessageEvent<ProcessorStats>) => {
@@ -164,7 +165,7 @@ async function initWorkletNode(context: AudioContext): Promise<AudioWorkletNode>
             throw new Error(`ISOLATED: Unknown message type from processor: ${JSON.stringify(message)}`);
         }
         workletProcessorNumUnderruns = message.numUnderruns;
-        workletProcessorIsFastPath = message.isFastPath;
+        workletProcessorFastPathActive = message.fastPathActive;
     };
 
     result.connect(context.destination);
@@ -318,6 +319,7 @@ async function applySettingsImpl(gotEnabled: boolean, gotDisabled: boolean) {
             type: 'pitch-changer-extension-processor-set-params',
             processingMode: settings.processingMode,
             pitchValue: settings.pitchValue,
+            enablePassthroughOptimization: settings.enablePassthroughOptimization,
         } as ProcessorSetParams);
     }
 }
@@ -327,7 +329,7 @@ function getStats(): StatsResult {
         numAudioElements: 0,
         numVideoElements: 0,
         numUnderruns: workletProcessorNumUnderruns,
-        isFastPath: workletProcessorIsFastPath,
+        fastPathActive: workletProcessorFastPathActive,
     };
     for (const node of nodesMap.keys()) {
         if (node instanceof HTMLAudioElement) {

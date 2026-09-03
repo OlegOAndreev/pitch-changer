@@ -73,7 +73,7 @@ import {
         private pitchChangerOverrideClosed = false;
         // Statistics reported by the processor of this context, read by getStats().
         pitchChangerOverrideNumUnderruns = 0;
-        pitchChangerOverrideIsFastPath = false;
+        pitchChangerOverrideFastPathActive = true;
 
         constructor(contextOptions?: AudioContextOptions | undefined) {
             super(contextOptions);
@@ -141,6 +141,7 @@ import {
                         processingMode: settings.processingMode,
                         pitchValue: settings.pitchValue,
                         targetLatency: settings.targetLatency,
+                        enablePassthroughOptimization: settings.enablePassthroughOptimization,
                     } as ProcessorSetParams);
                 }
             } else {
@@ -199,7 +200,7 @@ import {
                     throw new Error(`MAIN: Unknown message type from processor: ${JSON.stringify(message)}`);
                 }
                 this.pitchChangerOverrideNumUnderruns = message.numUnderruns;
-                this.pitchChangerOverrideIsFastPath = message.isFastPath;
+                this.pitchChangerOverrideFastPathActive = message.fastPathActive;
             };
 
             const audioProcessorClientPort = await createWorkerInIframe();
@@ -214,6 +215,7 @@ import {
                 type: 'pitch-changer-extension-processor-set-params',
                 processingMode: settings.processingMode,
                 pitchValue: settings.pitchValue,
+                enablePassthroughOptimization: settings.enablePassthroughOptimization,
             } as ProcessorSetParams);
             debugLog(`Loaded processor from ${processorUrl} and worker from ${audioProcessorWorkerUrl} in MAIN`);
 
@@ -235,15 +237,15 @@ import {
 
     function getStats(): OverrideStatsResult {
         let numUnderruns = 0;
-        let isFastPath = true;
+        let fastPathActive = true;
         for (const context of overridenAudioContexts) {
             numUnderruns += context.pitchChangerOverrideNumUnderruns;
-            isFastPath = isFastPath && context.pitchChangerOverrideIsFastPath;
+            fastPathActive = fastPathActive && context.pitchChangerOverrideFastPathActive;
         }
         return {
             numAudioContexts: overridenAudioContexts.length,
             numUnderruns,
-            isFastPath,
+            fastPathActive: fastPathActive,
         };
     }
 

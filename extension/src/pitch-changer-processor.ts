@@ -9,8 +9,11 @@ import {
     type ProcessorStats,
 } from './common.js';
 
-// Stats are sent back to content script after every STATS_MESSAGE_INTERVAL_SAMPLES samples processed.
-const STATS_MESSAGE_INTERVAL_SAMPLES = 48000;
+// How many seconds to wait before switching on passthrough optimization.
+const PASSTHROUGH_AFTER_SEC = 3;
+
+// How many seconds to wait before sending next stats.
+const STATS_MESSAGE_EVERY_SEC = 1;
 
 // PitchProcessor sends data to a separate AudioProcessorWorker and receives the result. It maintains a fixed latency
 // ('normal' = fft size * 1.5, 'high' = fft size * 3 for ~70msec and ~150msec latency respectively).
@@ -38,15 +41,23 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
 
     private numUnderruns = 0;
 
-    // Number of input samples received since the last stats message was sent.
-    private samplesSinceStatsMessage = 0;
-    // Do not send messages if we are in the zero fast path and have already reported that we are in the fast path.
-    private fastPathStatsSent = false;
+    private passthroughEnabled = false;
+    // We do not immediately switch to passthrough mode: unlike the zero-only fast path, switching to passthrough fast
+    // path and back results in an audible click.
+    private passthroughRunSamples = 0;
+    // After we enable passthrough or zero-only fast path, we need to reset worker state and flush the queue contents.
+    private resetRequired = false;
 
     // Number of consecutive zero input samples, used to switch to the zero-only fast path.
     private zeroRunSamples = 0;
     // The threshold which the zeroRunSamples must exceed in order to switch to the zero-only fast path.
     private zeroPathThreshold = 0;
+
+    private fastPathActive = true;
+    // Number of input samples received since the last stats message was sent.
+    private samplesSinceStatsMessage = 0;
+    // Do not send messages if we are in the zero fast path and have already reported that we are in the fast path.
+    private fastPathStatsSent = false;
 
     constructor(options: AudioWorkletNodeOptions) {
         super();
@@ -90,6 +101,12 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
                 this.requiredLatency = fftSize * 3;
                 break;
         }
+        this.passthroughEnabled = params.enablePassthroughOptimization && params.pitchValue == 1.0;
+        if (this.passthroughEnabled && this.currentLatency === 0) {
+            // Hack: if we are just setting params, immediately enable passthrough so that we do not get a click on new
+            // pages with pitch value = 1.0.
+            this.passthroughRunSamples = PASSTHROUGH_AFTER_SEC * sampleRate;
+        }
         // The threshold must be large enough that all non-zero data is processed by PitchShifter. This depends on pitch
         // value: the output_accum_buf in TimeStretcher is shifted by syn_hop_size, which depends not only on fft_size,
         // but also on time_stretch (which equals pitch_shift). Shifting the full fft_size "out of" output_accum_buf
@@ -112,62 +129,59 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
             return true;
         }
 
-        const blockSize = input[0].length;
+        const inputLen = input[0].length;
+
+        // Fast path: do a direct copy if the pitch value = 1.0.
+        if (this.passthroughEnabled) {
+            this.passthroughRunSamples += inputLen;
+            if (this.passthroughRunSamples >= PASSTHROUGH_AFTER_SEC * sampleRate) {
+                this.copySamples(output, input);
+                // When the pitch value changes, clear both the client and the queue from old data.
+                this.resetRequired = true;
+                this.fastPathActive = true;
+                this.maybeSendStats(inputLen);
+                return true;
+            }
+        } else {
+            this.passthroughRunSamples = 0;
+        }
+
+        // Fast path: do a direct zeroing if the input is zero.
         if (this.isAllZeros(input)) {
-            // With sampling rate < 100k we have billions of seconds until this addition becomes a problem.
-            this.zeroRunSamples += blockSize;
+            this.zeroRunSamples += inputLen;
             if (this.zeroRunSamples >= this.zeroPathThreshold) {
                 // Do not touch queue or currentLatency: the queue should contain only zeros and will be used as soon as
-                // we receive the first non-zero input sample.
-                //
-                // The async part of filling the queue does not matter as well: essentially we reorder zeros with zeros.
+                // we receive the first non-zero input sample. The async part of filling the queue does not matter as
+                // well: essentially we reorder zeros with zeros.
                 this.fillZeros(output);
-                this.maybeSendStats(blockSize);
+                this.fastPathActive = true;
+                this.maybeSendStats(inputLen);
                 return true;
             }
         } else {
             this.zeroRunSamples = 0;
-            // Do a reset: at least PeakCorrector can have a slow recovery (up to hundreds of ms).
+        }
+
+        // Do a reset+flush after returning from passthrough fast path.
+        if (this.resetRequired) {
             this.client.reset();
+            this.queue.skip(this.queue.length);
+            // This requires that client is reset beforehand.
+            this.currentLatency = 0;
+            this.resetRequired = false;
         }
 
         this.sendInput(input);
         this.writeOutput(output);
-        this.maybeSendStats(blockSize);
+        this.fastPathActive = false;
+        this.maybeSendStats(inputLen);
         return true;
-    }
-
-    private maybeSendStats(numSamples: number): void {
-        const isFastPath = this.zeroRunSamples >= this.zeroPathThreshold;
-        if (isFastPath && this.fastPathStatsSent) {
-            return;
-        }
-
-        this.samplesSinceStatsMessage += numSamples;
-        if (this.samplesSinceStatsMessage < STATS_MESSAGE_INTERVAL_SAMPLES) {
-            return;
-        }
-
-        this.samplesSinceStatsMessage = 0;
-        this.port.postMessage({
-            type: 'pitch-changer-extension-processor-stats',
-            numUnderruns: this.numUnderruns,
-            isFastPath: isFastPath,
-        } as ProcessorStats);
-        if (isFastPath) {
-            this.fastPathStatsSent = true;
-        }
     }
 
     private copySamples(output: Float32Array[], input: Float32Array[]) {
         const numChannels = Math.min(input.length, this.numChannels);
-        const blockSize = output[0].length;
         for (let ch = 0; ch < numChannels; ch++) {
-            const inputChannel = input[ch];
-            const outputChannel = output[ch];
-            for (let i = 0; i < blockSize; i++) {
-                outputChannel[i] = inputChannel[i] * 2.0;
-            }
+            output[ch].set(input[ch], 0);
         }
     }
 
@@ -230,6 +244,25 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
         for (const channel of outputChannels) {
             channel.fill(0.0);
         }
+    }
+
+    private maybeSendStats(numSamples: number): void {
+        if (this.fastPathActive && this.fastPathStatsSent) {
+            return;
+        }
+
+        this.samplesSinceStatsMessage += numSamples;
+        if (this.samplesSinceStatsMessage < STATS_MESSAGE_EVERY_SEC * sampleRate) {
+            return;
+        }
+
+        this.samplesSinceStatsMessage = 0;
+        this.port.postMessage({
+            type: 'pitch-changer-extension-processor-stats',
+            numUnderruns: this.numUnderruns,
+            fastPathActive: this.fastPathActive,
+        } as ProcessorStats);
+        this.fastPathStatsSent = this.fastPathActive;
     }
 }
 

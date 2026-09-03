@@ -13,19 +13,20 @@ export interface ExtensionSettings {
     processingMode: ProcessingMode;
     pitchValue: number;
     targetLatency: TargetLatency;
+    enablePassthroughOptimization: boolean;
 }
 
 export interface StatsResult {
     numAudioElements: number;
     numVideoElements: number;
     numUnderruns: number;
-    isFastPath: boolean;
+    fastPathActive: boolean;
 }
 
 export interface OverrideStatsResult {
     numAudioContexts: number;
     numUnderruns: number;
-    isFastPath: boolean;
+    fastPathActive: boolean;
 }
 
 const defaultSettings: ExtensionSettings = {
@@ -34,6 +35,7 @@ const defaultSettings: ExtensionSettings = {
     processingMode: 'pitch',
     pitchValue: 1.0,
     targetLatency: 'normal',
+    enablePassthroughOptimization: true,
 };
 
 export interface PitchChangerOverrideInit {
@@ -59,12 +61,13 @@ export interface ProcessorSetParams {
     processingMode: ProcessingMode;
     pitchValue: number;
     targetLatency: TargetLatency;
+    enablePassthroughOptimization: boolean;
 }
 
 export interface ProcessorStats {
     type: 'pitch-changer-extension-processor-stats';
     numUnderruns: number;
-    isFastPath: boolean;
+    fastPathActive: boolean;
 }
 
 export type ProcessorRequest = ProcessorInit | ProcessorSetParams;
