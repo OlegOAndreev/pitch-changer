@@ -94,13 +94,6 @@ export class SamplesQueue {
         return skipped;
     }
 
-    // Drops all data from the queue.
-    clear() {
-        this.chunks.length = 0;
-        this.firstChunkOffset = 0;
-        this.totalSamples = 0;
-    }
-
     // Reads samples without removing them from the queue. It fills the output array with interleaved samples from the
     // queue (the tail of the array is filled with zeros if there is not enough data).
     readNonInterleaved(output: Float32Array) {

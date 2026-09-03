@@ -401,63 +401,6 @@ describe('SamplesQueue', () => {
         });
     });
 
-    describe('clear', () => {
-        test('clears empty queue', () => {
-            const queue = new SamplesQueue(2);
-
-            queue.clear();
-
-            expect(queue.length).toBe(0);
-        });
-
-        test('clears all data', () => {
-            const queue = new SamplesQueue(1);
-            queue.pushInterleaved(new Float32Array([1, 2, 3, 4]));
-            queue.pushInterleaved(new Float32Array([5, 6]));
-            expect(queue.length).toBe(6);
-
-            queue.clear();
-
-            expect(queue.length).toBe(0);
-
-            const outputChannels = [new Float32Array(2)];
-            const written = queue.popNonInterleaved(outputChannels);
-            expect(written).toBe(0);
-            expect(outputChannels[0]).toEqual(new Float32Array([0, 0]));
-        });
-
-        test('clears data with offset within chunk', () => {
-            const queue = new SamplesQueue(2);
-            queue.pushInterleaved(new Float32Array([1, 2, 3, 4, 5, 6]));
-            queue.skip(1);
-            expect(queue.length).toBe(2);
-
-            queue.clear();
-
-            expect(queue.length).toBe(0);
-
-            const output = new Float32Array(4);
-            queue.readNonInterleaved(output);
-            expect(output).toEqual(new Float32Array([0, 0, 0, 0]));
-        });
-
-        test('queue is usable after clear', () => {
-            const queue = new SamplesQueue(2);
-            queue.pushInterleaved(new Float32Array([1, 2, 3, 4]));
-
-            queue.clear();
-
-            queue.pushInterleaved(new Float32Array([5, 6, 7, 8]));
-            expect(queue.length).toBe(2);
-
-            const outputChannels = [new Float32Array(2), new Float32Array(2)];
-            const written = queue.popNonInterleaved(outputChannels);
-            expect(written).toBe(2);
-            expect(outputChannels[0]).toEqual(new Float32Array([5, 7]));
-            expect(outputChannels[1]).toEqual(new Float32Array([6, 8]));
-        });
-    });
-
     describe('read', () => {
         test('reads without removing data mono', () => {
             const queue = new SamplesQueue(1);
