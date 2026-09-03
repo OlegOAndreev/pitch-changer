@@ -1,7 +1,7 @@
 // SamplesQueue stores incoming chunks of float32 data and allows popping and reading the data.
 export class SamplesQueue {
-    private chunks: Float32Array[] = [];
     private numChannels: number;
+    private chunks: Float32Array[] = [];
     private firstChunkOffset = 0;
     private totalSamples = 0;
 
@@ -92,6 +92,13 @@ export class SamplesQueue {
         this.totalSamples -= skipped;
 
         return skipped;
+    }
+
+    // Drops all data from the queue.
+    clear() {
+        this.chunks.length = 0;
+        this.firstChunkOffset = 0;
+        this.totalSamples = 0;
     }
 
     // Reads samples without removing them from the queue. It fills the output array with interleaved samples from the
