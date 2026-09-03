@@ -37,6 +37,7 @@ const isFastPathValue = document.getElementById('isFastPath') as HTMLSpanElement
 
 const SAVE_SETTINGS_DEBOUNCE = 50;
 const HIDE_ERROR_AFTER = 10000;
+const STATS_UPDATE_INTERVAL = 200;
 
 function showStatus(message: string) {
     statusValue.style.display = 'flex';
@@ -281,6 +282,12 @@ async function init(): Promise<void> {
             updateDebugStats();
         }
     });
+
+    setInterval(() => {
+        if (advancedSection.open) {
+            updateDebugStats();
+        }
+    }, STATS_UPDATE_INTERVAL);
 
     modeButtons.forEach((btn) => {
         btn.addEventListener('click', () => {
