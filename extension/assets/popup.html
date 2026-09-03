@@ -15,20 +15,20 @@
       body {
         width: 320px;
         min-height: 100px;
-        padding: 12px;
+        padding: 12px 12px 8px 12px;
         font-family: system-ui, sans-serif;
-        font-size: 14px;
+        font-size: 13px;
       }
 
       .container {
         display: flex;
         flex-direction: column;
-        gap: 12px;
+        gap: 8px;
       }
 
       .status {
         background: #ffcdd2;
-        padding: 8px;
+        padding: 6px;
         color: #a91919;
         border: 1px solid #ef9a9a;
         border-radius: 8px;
@@ -42,7 +42,7 @@
       }
 
       .title {
-        font-size: 15px;
+        font-size: 14px;
         font-weight: bold;
       }
 
@@ -96,7 +96,7 @@
       }
 
       #noteValue {
-        font-size: 16px;
+        font-size: 14px;
         color: #666;
       }
 
@@ -104,8 +104,8 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        margin-bottom: 12px;
-        margin-top: 12px;
+        margin-bottom: 8px;
+        margin-top: 8px;
       }
 
       #pitchSliderContainer {
@@ -187,37 +187,54 @@
         color: #666;
       }
 
-      #modeSelector {
+      .segmented {
         display: flex;
-        gap: 8px;
+      }
+
+      .segmented button {
+        border: 1px solid #bbb;
+        background: transparent;
+        cursor: pointer;
+        text-align: center;
+      }
+
+      .segmented button:first-child {
+        border-radius: var(--segmented-radius, 8px) 0 0 var(--segmented-radius, 8px);
+      }
+
+      .segmented button + button {
+        margin-left: -1px;
+      }
+
+      .segmented button:last-child {
+        border-radius: 0 var(--segmented-radius, 8px) var(--segmented-radius, 8px) 0;
+      }
+
+      .segmented button:hover {
+        background-color: rgba(0, 0, 0, 0.05);
+      }
+
+      .segmented button.active {
+        z-index: 1;
+        border-color: #039be5;
+        background: #039be5;
+        color: #fff;
+      }
+
+      .segmented button.active.disabled {
+        border-color: #999;
+        background: #999;
+        color: #fff;
+      }
+
+      #modeSelector {
         margin-top: 12px;
       }
 
       #modeSelector button {
         flex: 1;
-        padding: 8px;
-        border: 1px solid #bbb;
-        background: transparent;
-        border-radius: 8px;
-        cursor: pointer;
+        padding: 6px;
         font-size: 14px;
-        text-align: center;
-        margin: 4px;
-      }
-
-      #modeSelector button:hover {
-        background-color: rgba(0, 0, 0, 0.05);
-      }
-
-      #modeSelector button.active {
-        border: 0px solid #fff;
-        background: #039be5;
-        color: #fff;
-      }
-
-      #modeSelector button.active.disabled {
-        border: 0px solid #fff;
-        background: #999;
       }
 
       #advancedSection {
@@ -230,20 +247,20 @@
         padding: 8px 0;
       }
 
-      .debug-checkbox {
+      #debugCheckbox {
         margin-top: 8px;
         display: flex;
         align-items: center;
         gap: 8px;
       }
 
-      .debug-checkbox input[type='checkbox'] {
+      #debugCheckbox input[type='checkbox'] {
         width: 14px;
         height: 14px;
         cursor: pointer;
       }
 
-      .debug-checkbox label {
+      #debugCheckbox label {
         cursor: pointer;
       }
 
@@ -259,37 +276,10 @@
         margin-top: 8px;
       }
 
-      #latencySelector {
-        display: flex;
-      }
-
       #latencySelector button {
         padding: 4px 12px;
-        border: 1px solid #bbb;
-        background: transparent;
-        cursor: pointer;
         font-size: 12px;
-        text-align: center;
-      }
-
-      #latencySelector button:first-child {
-        border-radius: 8px 0 0 8px;
-      }
-
-      #latencySelector button + button {
-        margin-left: -1px;
-        border-radius: 0 8px 8px 0;
-      }
-
-      #latencySelector button:hover {
-        background-color: rgba(0, 0, 0, 0.05);
-      }
-
-      #latencySelector button.active {
-        z-index: 1;
-        border-color: #039be5;
-        background: #039be5;
-        color: #fff;
+        --segmented-radius: 6px;
       }
     </style>
     <script src="popup.js" type="module"></script>
@@ -319,7 +309,7 @@
           </div>
         </div>
 
-        <div id="modeSelector">
+        <div id="modeSelector" class="segmented">
           <button class="active" data-mode="pitch">Pitch</button>
           <button data-mode="formant-preserving-pitch">Speech Pitch</button>
         </div>
@@ -332,12 +322,12 @@
           <summary>Advanced</summary>
           <div id="latencyRow">
             <span>Latency:</span>
-            <div id="latencySelector">
+            <div id="latencySelector" class="segmented">
               <button class="active" id="latencyNormal" data-latency="normal">Normal</button>
               <button id="latencyHigh" data-latency="high">High</button>
             </div>
           </div>
-          <div class="debug-checkbox">
+          <div id="debugCheckbox">
             <input type="checkbox" id="debugLogging" />
             <label for="debugLogging">Enable debug logging</label>
           </div>
