@@ -3,6 +3,7 @@ import { fftSizeForSampleRate } from '../../src/common-utils.js';
 import { SamplesQueue } from '../../src/samples-queue.js';
 import {
     PROCESSOR_NAME,
+    type ProcessingMode,
     type ProcessorOptions,
     type ProcessorRequest,
     type ProcessorSetParams,
@@ -32,6 +33,7 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
     private readonly numChannels: number;
     private readonly queue: SamplesQueue;
     private client: AudioProcessorClient | null = null;
+    private prevProcessingMode: ProcessingMode | null = null;
 
     // requiredLatency is in samples
     private requiredLatency = 0;
@@ -101,6 +103,15 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
                 this.requiredLatency = fftSize * 3;
                 break;
         }
+        if (params.processingMode === 'formant-preserving-pitch') {
+            // Envelope shifting takes another fftSize latency: the internal buffer of the envelope shifter.
+            this.requiredLatency += fftSize;
+        }
+        if (this.prevProcessingMode && this.prevProcessingMode !== params.processingMode) {
+            // Flush the queues if we changed the processing mode, otherwise we get the incorrect latency.
+            this.resetRequired = true;
+        }
+        this.prevProcessingMode = params.processingMode;
         this.passthroughEnabled = params.enablePassthroughOptimization && params.pitchValue == 1.0;
         if (this.passthroughEnabled && this.currentLatency === 0) {
             // Hack: if we are just setting params, immediately enable passthrough so that we do not get a click on new

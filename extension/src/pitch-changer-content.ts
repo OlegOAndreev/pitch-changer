@@ -319,6 +319,7 @@ async function applySettingsImpl(gotEnabled: boolean, gotDisabled: boolean) {
             type: 'pitch-changer-extension-processor-set-params',
             processingMode: settings.processingMode,
             pitchValue: settings.pitchValue,
+            targetLatency: settings.targetLatency,
             enablePassthroughOptimization: settings.enablePassthroughOptimization,
         } as ProcessorSetParams);
     }

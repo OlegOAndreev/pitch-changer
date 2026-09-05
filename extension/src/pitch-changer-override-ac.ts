@@ -215,6 +215,7 @@ import {
                 type: 'pitch-changer-extension-processor-set-params',
                 processingMode: settings.processingMode,
                 pitchValue: settings.pitchValue,
+                targetLatency: settings.targetLatency,
                 enablePassthroughOptimization: settings.enablePassthroughOptimization,
             } as ProcessorSetParams);
             debugLog(`Loaded processor from ${processorUrl} and worker from ${audioProcessorWorkerUrl} in MAIN`);

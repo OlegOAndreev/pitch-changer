@@ -137,7 +137,7 @@ async function applySettingsToTabs() {
         }
         debugLog(`Applying to ${tab.url}`);
         try {
-            chrome.scripting.executeScript({
+            await chrome.scripting.executeScript({
                 func: (settings) => {
                     const applySettings = (globalThis as unknown as ContentScriptExports).exportApplySettings;
                     // Skip the frames we did not get injected into for whatever reason.
@@ -149,7 +149,7 @@ async function applySettingsToTabs() {
                 target: { tabId: tab.id!, allFrames: true },
                 world: 'ISOLATED',
             });
-            chrome.scripting.executeScript({
+            await chrome.scripting.executeScript({
                 func: (settings) => {
                     const applySettings = (globalThis as unknown as OverrideScriptExports)
                         .exportPitchChangerExtensionOverrideApplySettings;

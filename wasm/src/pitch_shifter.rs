@@ -180,6 +180,7 @@ impl PitchShifter {
     fn update_params(&mut self, params: &PitchShiftParams) -> Result<()> {
         Self::validate_params(params)?;
 
+        let fft_size_changed = params.fft_size != self.params.fft_size;
         self.params = *params;
         let time_stretch_params = self.params.make_time_stretch();
         self.time_stretcher.update_params(&time_stretch_params)?;
@@ -191,7 +192,7 @@ impl PitchShifter {
         let cepstrum_cutoff_samples =
             (params.quefrency_cutoff * params.sample_rate as f32 / (1000.0 * params.pitch_shift)) as usize;
         // We either regenerate the enveloper processing or update hte parameters.
-        if params.fft_size != self.params.fft_size {
+        if fft_size_changed {
             let envelope_fft_size = params.fft_size / 2;
             self.envelope_hop_size = envelope_fft_size / params.overlap as usize;
             self.envelope_stft = Stft::new(envelope_fft_size, params.window_type);
