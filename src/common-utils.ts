@@ -51,7 +51,7 @@ export function debounce<T extends unknown[]>(
         }
 
         curTimer = setTimeout(async () => {
-            // Copy the resolves/rejects so that they do not get changesd
+            // Copy the resolves/rejects so that they do not get changes
             const resolves = curResolves;
             const rejects = curRejects;
             curResolves = [];
