@@ -180,10 +180,9 @@ impl PitchShifter {
     fn update_params(&mut self, params: &PitchShiftParams) -> Result<()> {
         Self::validate_params(params)?;
 
-        let fft_size_changed = params.fft_size != self.params.fft_size;
-        self.params = *params;
-        let time_stretch_params = self.params.make_time_stretch();
+        let time_stretch_params = params.make_time_stretch();
         self.time_stretcher.update_params(&time_stretch_params)?;
+
         // See comment in new()
         let resampling_ratio = 1.0 / params.pitch_shift as f64
             * (time_stretch_params.time_stretch as f64 / self.time_stretcher.actual_time_stretch());
@@ -191,18 +190,9 @@ impl PitchShifter {
         self.envelope_shift_enabled = params.quefrency_cutoff != 0.0;
         let cepstrum_cutoff_samples =
             (params.quefrency_cutoff * params.sample_rate as f32 / (1000.0 * params.pitch_shift)) as usize;
-        // We either regenerate the enveloper processing or update hte parameters.
-        if fft_size_changed {
-            let envelope_fft_size = params.fft_size / 2;
-            self.envelope_hop_size = envelope_fft_size / params.overlap as usize;
-            self.envelope_stft = Stft::new(envelope_fft_size, params.window_type);
-            let envelope_num_bins = envelope_fft_size / 2 + 1;
-            // We normalize the quefrency cutoff by pitch shift because we analyze the pitch shifted spectrum.
-            self.envelope_shifter =
-                EnvelopeShifter::new(envelope_num_bins, cepstrum_cutoff_samples, params.pitch_shift);
-        } else {
-            self.envelope_shifter.update_params(cepstrum_cutoff_samples, params.pitch_shift);
-        }
+        self.envelope_shifter.update_params(cepstrum_cutoff_samples, params.pitch_shift);
+
+        self.params = *params;
 
         Ok(())
     }

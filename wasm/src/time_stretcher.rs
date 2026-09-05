@@ -137,6 +137,12 @@ impl TimeStretcher {
         use crate::window::generate_tail_window;
 
         Self::validate_params(params)?;
+        if params.fft_size != self.params.fft_size {
+            bail!("Changing fft_size via update_params not supported");
+        }
+        if params.window_type != self.params.window_type {
+            bail!("Changing window_type via update_params not supported");
+        }
 
         // Always update fields which do not contain the data. We want to be able to dynamically change the
         // shift/stretch factor without clearing the data.
@@ -144,14 +150,6 @@ impl TimeStretcher {
         self.syn_hop_size = (self.ana_hop_size as f32 * params.time_stretch) as usize;
         let tail_len = params.fft_size / self.ana_hop_size * self.syn_hop_size;
         self.tail_window = generate_tail_window(params.window_type, tail_len);
-
-        // Regenerate the following only if rarely changed parameters do change.
-        if self.params.fft_size != params.fft_size || self.params.window_type != params.window_type {
-            self.stft = Stft::new(params.fft_size, params.window_type);
-            self.phase_gradient_vocoder = PhaseGradientTimeStretch::new(params.fft_size);
-            self.input_buf = Vec::with_capacity(params.fft_size);
-            self.output_accum_buf = StftAccumBuf::new(params.fft_size);
-        }
 
         self.params = *params;
 
