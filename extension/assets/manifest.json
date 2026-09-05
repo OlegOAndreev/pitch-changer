@@ -3,7 +3,7 @@
   "name": "Audio Pitch Changer",
   "version": "0.0.1",
   "description": "A simple audio pitch changer",
-  "permissions": ["scripting", "storage", "tabs", "webNavigation"],
+  "permissions": ["scripting", "storage", "tabs"],
   "host_permissions": ["<all_urls>"],
   "content_scripts": [
     {
