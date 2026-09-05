@@ -33,18 +33,20 @@ const debugLoggingCheckbox = document.getElementById('debugLogging') as HTMLInpu
 const numAudioElementsValue = document.getElementById('numAudioElements') as HTMLSpanElement;
 const numVideoElementsValue = document.getElementById('numVideoElements') as HTMLSpanElement;
 const numAudioContextDestinationsValue = document.getElementById('numAudioContextDestinations') as HTMLSpanElement;
-const numUnderrunsValue = document.getElementById('numUnderruns') as HTMLSpanElement;
 const fastPathActiveValue = document.getElementById('fastPathActive') as HTMLSpanElement;
+const maxCurrentLatencyMsValue = document.getElementById('maxCurrentLatencyMs') as HTMLSpanElement;
+const numUnderrunsValue = document.getElementById('numUnderruns') as HTMLSpanElement;
+const maxQueueLengthValue = document.getElementById('maxQueueLength') as HTMLSpanElement;
 
 const SAVE_SETTINGS_DEBOUNCE = 50;
 const HIDE_ERROR_AFTER = 10000;
-const STATS_UPDATE_INTERVAL = 200;
+const STATS_UPDATE_INTERVAL = 100;
 
-function showStatus(message: string) {
-    statusValue.style.display = 'flex';
-    statusValue.textContent = message;
+function showStatus(error: unknown) {
+    statusValue.textContent = JSON.stringify(error);
+    statusValue.hidden = false;
     setTimeout(() => {
-        statusValue.style.display = 'none';
+        statusValue.hidden = true;
     }, HIDE_ERROR_AFTER);
 }
 
@@ -53,17 +55,23 @@ const saveSettings = debounce(SAVE_SETTINGS_DEBOUNCE, async () => {
         await chrome.storage.local.set({ [SETTINGS_KEY]: currentSettings });
     } catch (error) {
         console.error('Error saving settings:', error);
-        showStatus(error as string);
+        showStatus(error);
     }
 });
 
 function setEnabled() {
     if (currentSettings.enabled) {
         modeButtons.forEach((btn) => btn.classList.remove('disabled'));
+        latencyButtons.forEach((btn) => btn.classList.remove('disabled'));
         pitchSlider.classList.remove('disabled');
+        passthroughCheckbox.classList.remove('disabled');
+        debugLoggingCheckbox.classList.remove('disabled');
     } else {
         modeButtons.forEach((btn) => btn.classList.add('disabled'));
+        latencyButtons.forEach((btn) => btn.classList.add('disabled'));
         pitchSlider.classList.add('disabled');
+        passthroughCheckbox.classList.add('disabled');
+        debugLoggingCheckbox.classList.add('disabled');
     }
 }
 
@@ -107,7 +115,10 @@ function updateActiveLatencyDisplay(latency: TargetLatency): void {
     });
 }
 
-function shouldApplyToTab(tab: chrome.tabs.Tab): boolean {
+function shouldApplyToTab(tab: chrome.tabs.Tab | undefined): boolean {
+    if (!tab) {
+        return false;
+    }
     if (!tab.id) {
         return false;
     }
@@ -169,21 +180,22 @@ async function applySettingsToTabs() {
                 console.debug(`Could not apply settings to tab ${tab.url}, skipping`, error);
             } else {
                 console.error(`Could not apply settings to tab ${tab.url} ISOLATED`, error);
-                showStatus(error as string);
+                showStatus(error);
             }
         }
     }
 }
 
 async function updateDebugStats() {
-    const [tab] = await chrome.tabs.query({ active: true });
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     let numAudioElements = 0;
     let numVideoElements = 0;
     let numAudioContextDestinations = 0;
-    let numUnderruns = 0;
     let fastPathActive = true;
+    let maxCurrentLatencyMs = 0;
+    let numUnderruns = 0;
+    let maxQueueLength = 0;
     if (shouldApplyToTab(tab)) {
-        console.debug('Running for tab', tab);
         try {
             // We need to call two functions: one in pitch-changer-content.ts and one in pitch-changer-override.ac.ts
             const results = await chrome.scripting.executeScript({
@@ -207,8 +219,10 @@ async function updateDebugStats() {
                 if (data) {
                     numAudioElements += data.numAudioElements;
                     numVideoElements += data.numVideoElements;
-                    numUnderruns += data.numUnderruns;
                     fastPathActive = fastPathActive && data.fastPathActive;
+                    maxCurrentLatencyMs = Math.max(maxCurrentLatencyMs, data.currentLatencyMs);
+                    numUnderruns += data.numUnderruns;
+                    maxQueueLength = Math.max(maxQueueLength, data.queueLength);
                 }
             }
 
@@ -233,20 +247,24 @@ async function updateDebugStats() {
                 const data = result.result as OverrideStatsResult;
                 if (data) {
                     numAudioContextDestinations += data.numAudioContexts;
-                    numUnderruns += data.numUnderruns;
                     fastPathActive = fastPathActive && data.fastPathActive;
+                    maxCurrentLatencyMs = Math.max(maxCurrentLatencyMs, data.currentLatencyMs);
+                    numUnderruns += data.numUnderruns;
+                    maxQueueLength = Math.max(maxQueueLength, data.queueLength);
                 }
             }
         } catch (error) {
             console.error(`Could not get stats from tab ${tab.url}`, error);
-            showStatus(error as string);
+            showStatus(error);
         }
     }
     numAudioElementsValue.textContent = numAudioElements.toString();
     numVideoElementsValue.textContent = numVideoElements.toString();
     numAudioContextDestinationsValue.textContent = numAudioContextDestinations.toString();
-    numUnderrunsValue.textContent = numUnderruns.toString();
     fastPathActiveValue.textContent = fastPathActive.toString();
+    maxCurrentLatencyMsValue.textContent = Math.round(maxCurrentLatencyMs).toString();
+    numUnderrunsValue.textContent = numUnderruns.toString();
+    maxQueueLengthValue.textContent = maxQueueLength.toString();
 }
 
 async function init(): Promise<void> {

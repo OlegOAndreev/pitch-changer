@@ -135,14 +135,7 @@
       }
 
       #pitchSlider.disabled::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        appearance: none;
-        width: 20px;
-        height: 20px;
-        border-radius: 50%;
         background: #aaa;
-        cursor: pointer;
-        border: 2px solid white;
       }
 
       #pitchSlider:hover::-webkit-slider-thumb {
@@ -163,12 +156,7 @@
       }
 
       #pitchSlider.disabled::-moz-range-thumb {
-        width: 20px;
-        height: 20px;
-        border-radius: 50%;
         background: #aaa;
-        cursor: pointer;
-        border: 2px solid white;
       }
 
       #pitchSlider:hover::-moz-range-thumb {
@@ -266,6 +254,10 @@
         cursor: pointer;
       }
 
+      .checkbox-row input[type='checkbox'].disabled {
+        accent-color: #888;
+      }
+
       .num-elements {
         margin-left: 4px;
         user-select: text;
@@ -316,7 +308,7 @@
         </div>
       </div>
 
-      <div class="status" id="status" style="display: none"></div>
+      <div class="status" id="status" hidden></div>
 
       <div>
         <details id="advancedSection">
@@ -341,8 +333,10 @@
           <div>
             <span>Number of AudioContexts:</span><span id="numAudioContextDestinations" class="num-elements"></span>
           </div>
-          <div><span>Number of underruns:</span><span id="numUnderruns" class="num-elements"></span></div>
           <div><span>Fast path active:</span><span id="fastPathActive" class="num-elements"></span></div>
+          <div><span>Current latency (ms):</span><span id="maxCurrentLatencyMs" class="num-elements"></span></div>
+          <div><span>Number of underruns:</span><span id="numUnderruns" class="num-elements"></span></div>
+          <div><span>Queue length (samples):</span><span id="maxQueueLength" class="num-elements"></span></div>
         </details>
       </div>
     </div>

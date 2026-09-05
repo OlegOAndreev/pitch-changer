@@ -4,7 +4,7 @@ export const PROCESSOR_NAME = 'pitch-changer-extension-processor';
 
 export type ProcessingMode = 'pitch' | 'formant-preserving-pitch';
 
-// Latency matters if if your system is under load: the chances of skipping/cracks are higher with lower latencies.
+// Latency matters if your system is under load: the chances of skipping/cracks are higher with lower latencies.
 export type TargetLatency = 'normal' | 'high';
 
 export interface ExtensionSettings {
@@ -19,14 +19,18 @@ export interface ExtensionSettings {
 export interface StatsResult {
     numAudioElements: number;
     numVideoElements: number;
-    numUnderruns: number;
     fastPathActive: boolean;
+    currentLatencyMs: number;
+    numUnderruns: number;
+    queueLength: number;
 }
 
 export interface OverrideStatsResult {
     numAudioContexts: number;
-    numUnderruns: number;
     fastPathActive: boolean;
+    currentLatencyMs: number;
+    numUnderruns: number;
+    queueLength: number;
 }
 
 const defaultSettings: ExtensionSettings = {
@@ -66,8 +70,10 @@ export interface ProcessorSetParams {
 
 export interface ProcessorStats {
     type: 'pitch-changer-extension-processor-stats';
-    numUnderruns: number;
     fastPathActive: boolean;
+    currentLatencyMs: number;
+    numUnderruns: number;
+    queueLength: number;
 }
 
 export type ProcessorRequest = ProcessorInit | ProcessorSetParams;

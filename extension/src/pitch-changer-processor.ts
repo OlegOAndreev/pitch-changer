@@ -23,13 +23,13 @@ const STATS_MESSAGE_EVERY_SEC = 1;
 // must be processed before returning the first results. The output quantum is fftSize/4 (the hop size), but we want
 // to account for scheduling hitches.
 //
-// Optimization: if the input has been only zeros consecutive samples, all the internal buffers are guaranteed to
-// contain only zeros. In this case we switch to the fast path: the output is zeroed without any processing at all. This
-// optimization is especially important because once started the processor never stops: there is currently no way to
-// declare that the processor should be run only if non-zero values are passed to it.
+// Optimization: if the input has been only zeros for a few consecutive samples, all the internal buffers are guaranteed
+// to contain only zeros. In this case we switch to the fast path: the output is zeroed without any processing at all.
+// This optimization is especially important because once started the processor never stops: there is currently no way
+// to declare that the processor should be run only if non-zero values are passed to it.
 class PitchChangerProcessor extends AudioWorkletProcessor {
     // The worklet node is created with explicit channel count, so WebAudio up/downmixes the input into exactly
-    // numChannels channels. Unlike the main app, we set all parameters from inside the worklet processor, which require
+    // numChannels channels.
     private readonly numChannels: number;
     private readonly queue: SamplesQueue;
     private client: AudioProcessorClient | null = null;
@@ -87,7 +87,7 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
                 break;
 
             default:
-                throw new Error(`PlayerProcessor: Unknown message type: ${JSON.stringify(message)}`);
+                throw new Error(`PitchChangerProcessor: Unknown message type: ${JSON.stringify(message)}`);
         }
     }
 
@@ -270,8 +270,11 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
         this.samplesSinceStatsMessage = 0;
         this.port.postMessage({
             type: 'pitch-changer-extension-processor-stats',
-            numUnderruns: this.numUnderruns,
             fastPathActive: this.fastPathActive,
+            // The queue and latency are stale/meaningless when the fast path is active, report them as zero.
+            currentLatencyMs: this.fastPathActive ? 0 : (this.currentLatency / sampleRate) * 1000,
+            numUnderruns: this.numUnderruns,
+            queueLength: this.fastPathActive ? 0 : this.queue.length,
         } as ProcessorStats);
         this.fastPathStatsSent = this.fastPathActive;
     }

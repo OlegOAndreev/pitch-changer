@@ -17,8 +17,8 @@ import {
     let processorUrl: string;
     let workerIframeUrl: string;
     let audioProcessorWorkerUrl: string;
-    // We push the AudioContext only when the destination() is called first time.
-    const overridenAudioContexts: PitchChangerOverrideAudioContext[] = [];
+    // We push the AudioContext only when the destination() is called for the first time.
+    const overriddenAudioContexts: PitchChangerOverrideAudioContext[] = [];
 
     function debugLog(...args: unknown[]): void {
         if (settings?.debugLogging) {
@@ -60,8 +60,7 @@ import {
     // We override global AudioContext constructor to insert our worklet node before the destination
     //
     // We insert a GainNode as a fake destination node before real destination node: this simplifies
-    // connecting/disconnecting our worklet In theory we could have made our worklet passthrough, but this simplifies
-    // code. Adding a single GainNode should not be too resource consuming.
+    // connecting/disconnecting our worklet. Adding a single GainNode should not be too resource consuming.
     class PitchChangerOverrideAudioContext extends AudioContext {
         // All fields are prefixed because they are visible to user scripts.
         private pitchChangerOverrideRealDestination: AudioDestinationNode | null = null;
@@ -72,29 +71,31 @@ import {
         private pitchChangerOverrideWasEnabled = false;
         private pitchChangerOverrideClosed = false;
         // Statistics reported by the processor of this context, read by getStats().
-        pitchChangerOverrideNumUnderruns = 0;
         pitchChangerOverrideFastPathActive = true;
+        pitchChangerOverrideCurrentLatencyMs = 0;
+        pitchChangerOverrideNumUnderruns = 0;
+        pitchChangerOverrideQueueLength = 0;
 
         constructor(contextOptions?: AudioContextOptions | undefined) {
             super(contextOptions);
-            debugLog('OverridingAudioContext constructed with:', contextOptions);
+            debugLog('PitchChangerOverrideAudioContext constructed with:', contextOptions);
         }
 
         get destination(): AudioDestinationNode {
             if (!this.pitchChangerOverrideRealDestination) {
-                debugLog('OverridingAudioContext getting destination');
+                debugLog('PitchChangerOverrideAudioContext getting destination');
 
                 this.pitchChangerOverrideRealDestination = super.destination;
                 const gainNode = this.createGain();
                 gainNode.connect(this.pitchChangerOverrideRealDestination);
                 // GainNode does not satisfy AudioDestinationNode, because it does not have one property. We simply add
-                // this property to it. All the other solutions did not get accept by other AudioNode.connect() for some
-                // reason.
+                // this property to it. All the other solutions did not get accepted by other AudioNode.connect() for
+                // some reason.
                 //@ts-expect-error We are monkey-patching the live object,
                 gainNode.maxChannelCount = this.pitchChangerOverrideRealDestination.maxChannelCount;
                 this.pitchChangerOverrideGainNode = gainNode as unknown as AudioDestinationNode;
 
-                overridenAudioContexts.push(this);
+                overriddenAudioContexts.push(this);
 
                 this.pitchChangerOverrideApplySettings();
             }
@@ -103,13 +104,13 @@ import {
         }
 
         async close(): Promise<void> {
-            debugLog('OverridingAudioContext close');
+            debugLog('PitchChangerOverrideAudioContext close');
             if (this.pitchChangerOverrideRealDestination) {
-                const idx = overridenAudioContexts.indexOf(this);
+                const idx = overriddenAudioContexts.indexOf(this);
                 if (idx === -1) {
-                    console.error('Could not find this context in pitchChangerOverridenAudioContexts');
+                    console.error('Could not find this context in overriddenAudioContexts');
                 } else {
-                    overridenAudioContexts.splice(idx, 1);
+                    overriddenAudioContexts.splice(idx, 1);
                 }
                 this.pitchChangerOverrideClosed = true;
             }
@@ -130,7 +131,7 @@ import {
                 if (settings.enabled && !this.pitchChangerOverrideClosed) {
                     if (!this.pitchChangerOverrideWasEnabled) {
                         // We cannot reach this point if the destination() has not been called: this means that
-                        // PitchChangerOverrideAudioContext has not been published in overridenAudioContexts.
+                        // PitchChangerOverrideAudioContext has not been published in overriddenAudioContexts.
                         this.pitchChangerOverrideGainNode!.disconnect();
                         this.pitchChangerOverrideGainNode!.connect(pitchChangerOverrideWorkletNode);
                         pitchChangerOverrideWorkletNode.connect(this.pitchChangerOverrideRealDestination!);
@@ -154,7 +155,7 @@ import {
                         if (this.pitchChangerOverrideWasEnabled) {
                             pitchChangerOverrideWorkletNode.disconnect();
                             // We cannot reach this point if the destination() has not been called: this means that
-                            // PitchChangerOverrideAudioContext has not been published in overridenAudioContexts.
+                            // PitchChangerOverrideAudioContext has not been published in overriddenAudioContexts.
                             this.pitchChangerOverrideGainNode!.disconnect();
                             this.pitchChangerOverrideGainNode!.connect(this.pitchChangerOverrideRealDestination!);
                             this.pitchChangerOverrideWasEnabled = false;
@@ -175,7 +176,7 @@ import {
             await this.audioWorklet.addModule(processorUrl);
 
             // We cannot reach this point if the destination() has not been called: this means that
-            // PitchChangerOverrideAudioContext has not been published in overridenAudioContexts.
+            // PitchChangerOverrideAudioContext has not been published in overriddenAudioContexts.
             const destChannelCount = this.pitchChangerOverrideRealDestination!.channelCount;
             const result = new AudioWorkletNode(this, PROCESSOR_NAME, {
                 // Force the WebAudio do up/downmixing for us.
@@ -185,9 +186,6 @@ import {
                 processorOptions: {
                     numChannels: destChannelCount,
                 } as ProcessorOptions,
-                parameterData: {
-                    pitchValue: settings.pitchValue,
-                },
             });
             result.onprocessorerror = (event: ErrorEvent) => {
                 console.error(
@@ -199,8 +197,10 @@ import {
                 if (message.type !== 'pitch-changer-extension-processor-stats') {
                     throw new Error(`MAIN: Unknown message type from processor: ${JSON.stringify(message)}`);
                 }
-                this.pitchChangerOverrideNumUnderruns = message.numUnderruns;
                 this.pitchChangerOverrideFastPathActive = message.fastPathActive;
+                this.pitchChangerOverrideCurrentLatencyMs = message.currentLatencyMs;
+                this.pitchChangerOverrideNumUnderruns = message.numUnderruns;
+                this.pitchChangerOverrideQueueLength = message.queueLength;
             };
 
             const audioProcessorClientPort = await createWorkerInIframe();
@@ -230,23 +230,29 @@ import {
         );
         settings = newSettings;
 
-        for (const context of overridenAudioContexts) {
+        for (const context of overriddenAudioContexts) {
             // We intentionally do not await this.
             context.pitchChangerOverrideApplySettings();
         }
     }
 
     function getStats(): OverrideStatsResult {
-        let numUnderruns = 0;
         let fastPathActive = true;
-        for (const context of overridenAudioContexts) {
-            numUnderruns += context.pitchChangerOverrideNumUnderruns;
+        let currentLatencyMs = 0;
+        let numUnderruns = 0;
+        let queueLength = 0;
+        for (const context of overriddenAudioContexts) {
             fastPathActive = fastPathActive && context.pitchChangerOverrideFastPathActive;
+            currentLatencyMs = Math.max(currentLatencyMs, context.pitchChangerOverrideCurrentLatencyMs);
+            numUnderruns += context.pitchChangerOverrideNumUnderruns;
+            queueLength = Math.max(queueLength, context.pitchChangerOverrideQueueLength);
         }
         return {
-            numAudioContexts: overridenAudioContexts.length,
-            numUnderruns,
+            numAudioContexts: overriddenAudioContexts.length,
             fastPathActive: fastPathActive,
+            currentLatencyMs: currentLatencyMs,
+            numUnderruns: numUnderruns,
+            queueLength: queueLength,
         };
     }
 
@@ -276,7 +282,7 @@ import {
                 workerIframeUrl = init.workerIframeUrl;
                 audioProcessorWorkerUrl = init.audioProcessorWorkerUrl;
 
-                for (const context of overridenAudioContexts) {
+                for (const context of overriddenAudioContexts) {
                     // We intentionally do not await this.
                     context.pitchChangerOverrideApplySettings();
                 }

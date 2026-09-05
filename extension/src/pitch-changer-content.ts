@@ -28,7 +28,7 @@ function debugLog(...args: unknown[]): void {
 //
 // We want to process all frames (it's extremely frequent that audio/video elements are inside iframes) in the tab.
 //
-// The AudioWorklet overriding script must be ran as soon as possible, before the page script: the easiest way to do it
+// The AudioWorklet overriding script must be run as soon as possible, before the page script: the easiest way to do it
 // is by adding to manifest.json. The alternative of calling executeScript() is harder to pull off: getting current tab
 // is an async operation, getting current frame is non-trivial.
 //
@@ -44,9 +44,9 @@ function debugLog(...args: unknown[]): void {
 // We run processing of all audio and video elements through a single AudioWorkletNode, that the elements connect to. It
 // is lazily initialized.
 //
-// Each overriden AudioContext has its own AudioWorkletNode.
+// Each overridden AudioContext has its own AudioWorkletNode.
 //
-// MAIN world content script is ran first before all the other scripts are loaded to override the AudioContext
+// MAIN world content script is run first before all the other scripts are loaded to override the AudioContext
 // constructor, the ISOLATED content script is ran much later, because it needs to complete initialization of MAIN world
 // content script. Unlike the ISOLATED world content script, MAIN world content script cannot access chrome.runtime APIs
 // and cannot get the URLs of extension scripts/wasm files or current settings.
@@ -59,6 +59,8 @@ let globalWorkletNode: Promise<AudioWorkletNode> | null = null;
 // Statistics reported by the worklet processor via messages.
 let workletProcessorNumUnderruns = 0;
 let workletProcessorFastPathActive = true;
+let workletProcessorQueueLength = 0;
+let workletProcessorCurrentLatencyMs = 0;
 
 // WeakMap would have been nice here, but it is not iterable and we have a MutationObserver anyway.
 //
@@ -87,7 +89,7 @@ async function getWorkletAudioContext(): Promise<AudioContext> {
 
 // Unfortunately due to https://issues.chromium.org/issues/41098022 we cannot directly create a worker using the script
 // from the extension. One workaround is starting the worker from blob URL, but it does not work consistently: the page
-// CSP may prevent loading the blob URL. Out workaround is rather horrible: we create an iframe inside the page, create
+// CSP may prevent loading the blob URL. Our workaround is rather horrible: we create an iframe inside the page, create
 // a worker inside it and communicate with it.
 //
 // Inspired by https://github.com/Rob--W/chrome-api/tree/master/worker_proxy
@@ -138,9 +140,6 @@ async function initWorkletNode(context: AudioContext): Promise<AudioWorkletNode>
         processorOptions: {
             numChannels: destChannelCount,
         } as ProcessorOptions,
-        parameterData: {
-            pitchValue: settings.pitchValue,
-        },
     });
 
     const audioProcessorClientPort = await createWorkerInIframe();
@@ -164,8 +163,10 @@ async function initWorkletNode(context: AudioContext): Promise<AudioWorkletNode>
         if (message.type !== 'pitch-changer-extension-processor-stats') {
             throw new Error(`ISOLATED: Unknown message type from processor: ${JSON.stringify(message)}`);
         }
-        workletProcessorNumUnderruns = message.numUnderruns;
         workletProcessorFastPathActive = message.fastPathActive;
+        workletProcessorCurrentLatencyMs = message.currentLatencyMs;
+        workletProcessorNumUnderruns = message.numUnderruns;
+        workletProcessorQueueLength = message.queueLength;
     };
 
     result.connect(context.destination);
@@ -305,11 +306,13 @@ async function applySettingsImpl(gotEnabled: boolean, gotDisabled: boolean) {
         }
     }
     if (gotDisabled) {
-        // Route all nodes through default destination.
-        const context = await getWorkletAudioContext();
-        for (const sourceNode of nodesMap.values()) {
-            sourceNode.disconnect();
-            sourceNode.connect(context.destination);
+        if (nodesMap.size > 0) {
+            // Route all nodes through default destination.
+            const context = await getWorkletAudioContext();
+            for (const sourceNode of nodesMap.values()) {
+                sourceNode.disconnect();
+                sourceNode.connect(context.destination);
+            }
         }
     }
 
@@ -329,8 +332,10 @@ function getStats(): StatsResult {
     const response: StatsResult = {
         numAudioElements: 0,
         numVideoElements: 0,
-        numUnderruns: workletProcessorNumUnderruns,
         fastPathActive: workletProcessorFastPathActive,
+        currentLatencyMs: workletProcessorCurrentLatencyMs,
+        numUnderruns: workletProcessorNumUnderruns,
+        queueLength: workletProcessorQueueLength,
     };
     for (const node of nodesMap.keys()) {
         if (node instanceof HTMLAudioElement) {
@@ -373,7 +378,9 @@ async function init(): Promise<void> {
         for (const mutation of mutations) {
             if (settings.enabled && mutation.addedNodes) {
                 mutation.addedNodes.forEach((node) => {
-                    if (node instanceof Element) {
+                    if (node instanceof HTMLMediaElement) {
+                        applyWorklet(node);
+                    } else if (node instanceof Element) {
                         applyWorkletToChildren(node);
                     }
                 });
