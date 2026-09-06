@@ -27,7 +27,7 @@ pub struct PitchShiftParams {
     /// Window type to use for STFT
     pub window_type: WindowType,
     /// Cepstral lifter cutoff for formant preservation. Controls the separation between spectral envelope (formants)
-    /// and fine structure (pitch harmonics). Lower values preserve more formant detail, higher values smooth more.
+    /// and fine structure (pitch harmonics). Higher values preserve more formant detail, lower values smooth more.
     /// Typical range: 0.5-1.5, try 1.0 for speech.
     ///
     /// If the default value of 0.0 is used, no formant preservation is applied.
@@ -104,8 +104,8 @@ impl PitchShifter {
 
         let envelope_shift_enabled = params.quefrency_cutoff != 0.0;
         let envelope_num_bins = params.fft_size / 2 + 1;
-        let cepstrum_cutoff_samples = (params.quefrency_cutoff * params.sample_rate as f32 / 1000.0) as usize;
-        let envelope_shifter = EnvelopeShifter::new(envelope_num_bins, cepstrum_cutoff_samples, params.pitch_shift);
+        let cepstrum_cutoff_bins = (params.quefrency_cutoff * params.sample_rate as f32 / 1000.0) as usize;
+        let envelope_shifter = EnvelopeShifter::new(envelope_num_bins, cepstrum_cutoff_bins, params.pitch_shift);
 
         Ok(Self {
             params: *params,
@@ -170,8 +170,8 @@ impl PitchShifter {
             * (time_stretch_params.time_stretch as f64 / self.time_stretcher.actual_time_stretch());
         self.resampler.set_ratio(resampling_ratio);
         self.envelope_shift_enabled = params.quefrency_cutoff != 0.0;
-        let cepstrum_cutoff_samples = (params.quefrency_cutoff * params.sample_rate as f32 / 1000.0) as usize;
-        self.envelope_shifter.update_params(cepstrum_cutoff_samples, params.pitch_shift);
+        let cepstrum_cutoff_bins = (params.quefrency_cutoff * params.sample_rate as f32 / 1000.0) as usize;
+        self.envelope_shifter.update_params(cepstrum_cutoff_bins, params.pitch_shift);
 
         self.params = *params;
 

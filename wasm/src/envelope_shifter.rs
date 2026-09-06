@@ -29,6 +29,7 @@ impl EnvelopeShifter {
     const DOWNSAMPLE_BY: usize = 4;
 
     const MAX_GAIN: f32 = 10.0;
+    const MIN_GAIN: f32 = 0.1;
 
     pub fn new(num_bins: usize, cepstrum_cutoff_bins: usize, shift_ratio: f32) -> Self {
         let full_size = num_bins - 1;
@@ -99,7 +100,7 @@ impl EnvelopeShifter {
                 let shifted_envelope = shifted_sample.sample(&self.new_magnitudes_buf);
                 let alpha = (k - start_bin) as f32 / (peak_bin - start_bin) as f32;
                 let ratio = (shifted_envelope / cur_envelope) * alpha + 1.0 - alpha;
-                freq[k] *= ratio;
+                freq[k] *= ratio.clamp(Self::MIN_GAIN, Self::MAX_GAIN);
             }
             cur_sample.step();
             shifted_sample.step();
@@ -109,11 +110,7 @@ impl EnvelopeShifter {
             if cur_envelope > 1e-5 {
                 let shifted_envelope = shifted_sample.sample(&self.new_magnitudes_buf);
                 let mut ratio = shifted_envelope / cur_envelope;
-                // Limit the gain for upper parts of spectrum
-                if k > peak_bin * 10 && ratio > Self::MAX_GAIN {
-                    ratio = Self::MAX_GAIN;
-                }
-                freq[k] *= ratio;
+                freq[k] *= ratio.clamp(Self::MIN_GAIN, Self::MAX_GAIN);
             }
             cur_sample.step();
             shifted_sample.step();

@@ -574,8 +574,8 @@ fn main() -> Result<()> {
             histogram.compute_vec(audio_slice, input.channels, &mut spectrum);
 
             let mut envelope = vec![];
-            let cepstrum_cutoff_samples = (quefrency_cutoff * input.sample_rate as f32 / 1000.0) as usize;
-            let mut envelope_shifter = EnvelopeShifter::new(spectrum.len(), cepstrum_cutoff_samples, 1.0);
+            let cepstrum_cutoff_bins = (quefrency_cutoff * input.sample_rate as f32 / 1000.0) as usize;
+            let mut envelope_shifter = EnvelopeShifter::new(spectrum.len(), cepstrum_cutoff_bins, 1.0);
             envelope_shifter.compute_envelope(&spectrum, &mut envelope);
             let spectrum_peak = EnvelopeShifter::find_peak(&spectrum);
             let envelope_peak = EnvelopeShifter::find_peak(&envelope);

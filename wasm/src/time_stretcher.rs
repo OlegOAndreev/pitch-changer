@@ -202,7 +202,6 @@ impl TimeStretcher {
     {
         let norm_factor = self.stft.get_norm_factor(self.syn_hop_size);
         let output = self.stft.process(&self.input_buf, |ana_freq, syn_freq| {
-            // syn_freq.copy_from_slice(ana_freq);
             self.phase_gradient_vocoder
                 .process(ana_freq, self.ana_hop_size, syn_freq, self.syn_hop_size);
             modify_spectrum(syn_freq);
