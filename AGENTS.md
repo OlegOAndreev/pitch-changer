@@ -4,7 +4,7 @@
 
 - This is a web audio pitch modifier, which can either record audio from microphone or upload from file
 - General information about this project is in README.md
-- The code is written in TypeScript and Rust with minimal dependencies, pure CSS and HTML, bundled using esbuild
+- The code is written in TypeScript and Rust with minimal dependencies, pure CSS and HTML, bundled using vite
 
 ## Code location
 

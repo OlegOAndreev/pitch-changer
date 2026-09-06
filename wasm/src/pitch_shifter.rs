@@ -5,7 +5,6 @@ use anyhow::{Result, anyhow, bail};
 use crate::envelope_shifter::EnvelopeShifter;
 use crate::peak_corrector::PeakCorrector;
 use crate::resampler::StreamingResampler;
-use crate::stft::{Stft, StftAccumBuf};
 use crate::time_stretcher::{TimeStretchParams, TimeStretcher};
 use crate::util::{deinterleave_samples, interleave_samples};
 use crate::web::{Float32Vec, WrapAnyhowError};
@@ -80,16 +79,11 @@ pub struct PitchShifter {
 
     // Formant processing, used if quefrency_cutoff != 0.0
     envelope_shift_enabled: bool,
-    envelope_fft_size: usize,
-    envelope_hop_size: usize,
-    envelope_stft: Stft,
     envelope_shifter: EnvelopeShifter,
 
     // Scratch buffers. See TimeStretcher for description on how the output_accum_buf is filled. Unlike TimeStretcher,
     // we have a single hop size.
     stretched_buf: Vec<f32>,
-    shifted_buf: Vec<f32>,
-    envelope_output_accum_buf: StftAccumBuf,
 }
 
 impl PitchShifter {
@@ -109,14 +103,8 @@ impl PitchShifter {
         let resampler = StreamingResampler::new(resampling_ratio)?;
 
         let envelope_shift_enabled = params.quefrency_cutoff != 0.0;
-        // Envelope correction is a heavy process with lots of artifacts, optimize it by halving the fft size.
-        let envelope_fft_size = params.fft_size / 2;
-        let envelope_hop_size = envelope_fft_size / params.overlap as usize;
-        let envelope_stft = Stft::new(envelope_fft_size, params.window_type);
-        let envelope_num_bins = envelope_fft_size / 2 + 1;
-        // We normalize the quefrency cutoff by pitch shift because we analyze the pitch shifted spectrum.
-        let cepstrum_cutoff_samples =
-            (params.quefrency_cutoff * params.sample_rate as f32 / (1000.0 * params.pitch_shift)) as usize;
+        let envelope_num_bins = params.fft_size / 2 + 1;
+        let cepstrum_cutoff_samples = (params.quefrency_cutoff * params.sample_rate as f32 / 1000.0) as usize;
         let envelope_shifter = EnvelopeShifter::new(envelope_num_bins, cepstrum_cutoff_samples, params.pitch_shift);
 
         Ok(Self {
@@ -124,13 +112,8 @@ impl PitchShifter {
             time_stretcher,
             resampler,
             envelope_shift_enabled,
-            envelope_fft_size,
-            envelope_hop_size,
-            envelope_stft,
             envelope_shifter,
             stretched_buf: vec![],
-            shifted_buf: vec![],
-            envelope_output_accum_buf: StftAccumBuf::new(envelope_fft_size),
         })
     }
 
@@ -141,13 +124,14 @@ impl PitchShifter {
         }
 
         self.stretched_buf.clear();
-        self.time_stretcher.process(input, &mut self.stretched_buf);
         if self.envelope_shift_enabled {
-            self.resampler.resample(&self.stretched_buf, &mut self.shifted_buf);
-            self.do_envelope_processing(output);
+            self.time_stretcher.process_with_modify(input, &mut self.stretched_buf, &mut |syn_freq| {
+                self.envelope_shifter.shift_envelope(syn_freq);
+            });
         } else {
-            self.resampler.resample(&self.stretched_buf, output);
+            self.time_stretcher.process(input, &mut self.stretched_buf);
         }
+        self.resampler.resample(&self.stretched_buf, output);
     }
 
     fn finish(&mut self, output: &mut Vec<f32>) {
@@ -157,15 +141,15 @@ impl PitchShifter {
         }
 
         self.stretched_buf.clear();
-        self.time_stretcher.finish(&mut self.stretched_buf);
         if self.envelope_shift_enabled {
-            self.resampler.resample(&self.stretched_buf, &mut self.shifted_buf);
-            self.resampler.finish(&mut self.shifted_buf);
-            self.finish_envelope_processing(output);
+            self.time_stretcher.finish_with_modify(&mut self.stretched_buf, &mut |syn_freq| {
+                self.envelope_shifter.shift_envelope(syn_freq);
+            });
         } else {
-            self.resampler.resample(&self.stretched_buf, output);
-            self.resampler.finish(output);
+            self.time_stretcher.finish(&mut self.stretched_buf);
         }
+        self.resampler.resample(&self.stretched_buf, output);
+        self.resampler.finish(output);
         self.reset();
     }
 
@@ -173,8 +157,6 @@ impl PitchShifter {
         self.time_stretcher.reset();
         self.resampler.reset();
         self.stretched_buf.clear();
-        self.shifted_buf.clear();
-        self.envelope_output_accum_buf.reset();
     }
 
     fn update_params(&mut self, params: &PitchShiftParams) -> Result<()> {
@@ -188,8 +170,7 @@ impl PitchShifter {
             * (time_stretch_params.time_stretch as f64 / self.time_stretcher.actual_time_stretch());
         self.resampler.set_ratio(resampling_ratio);
         self.envelope_shift_enabled = params.quefrency_cutoff != 0.0;
-        let cepstrum_cutoff_samples =
-            (params.quefrency_cutoff * params.sample_rate as f32 / (1000.0 * params.pitch_shift)) as usize;
+        let cepstrum_cutoff_samples = (params.quefrency_cutoff * params.sample_rate as f32 / 1000.0) as usize;
         self.envelope_shifter.update_params(cepstrum_cutoff_samples, params.pitch_shift);
 
         self.params = *params;
@@ -211,43 +192,6 @@ impl PitchShifter {
         }
         // Most of the parameter validation will be done by TimeStretcher.
         Ok(())
-    }
-
-    fn do_envelope_processing(&mut self, output: &mut Vec<f32>) {
-        assert!(self.envelope_shift_enabled);
-
-        let output_capacity = self.shifted_buf.len() / self.envelope_hop_size * self.envelope_hop_size;
-        output.reserve(output_capacity);
-
-        let mut shifted_pos = 0;
-        while shifted_pos + self.envelope_fft_size <= self.shifted_buf.len() {
-            // Do one STFT iteration.
-            self.do_envelope_stft(shifted_pos);
-            self.envelope_output_accum_buf.output_next(self.envelope_hop_size, output);
-
-            shifted_pos += self.envelope_hop_size;
-        }
-        self.shifted_buf.drain(..shifted_pos);
-    }
-
-    fn finish_envelope_processing(&mut self, output: &mut Vec<f32>) {
-        self.do_envelope_processing(output);
-        // Process the remainder in self.shifted_buf by doing the simplest thing: the end has already been windowed by
-        // TimeStretcher, so we do not care about pops/cracks.
-        let remainder = self.shifted_buf.len();
-        self.shifted_buf.resize(self.envelope_fft_size, 0.0);
-        self.do_envelope_stft(0);
-        self.envelope_output_accum_buf.output_next(remainder, output);
-    }
-
-    fn do_envelope_stft(&mut self, shifted_buf_pos: usize) {
-        let norm_factor = self.envelope_stft.get_norm_factor(self.envelope_hop_size);
-        let input = &self.shifted_buf[shifted_buf_pos..shifted_buf_pos + self.envelope_fft_size];
-        let stft_output = self.envelope_stft.process(input, |ana_freq, syn_freq| {
-            syn_freq.copy_from_slice(ana_freq);
-            self.envelope_shifter.shift_envelope(syn_freq);
-        });
-        self.envelope_output_accum_buf.add(stft_output, norm_factor);
     }
 }
 

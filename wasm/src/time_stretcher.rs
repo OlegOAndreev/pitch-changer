@@ -1,4 +1,5 @@
 use anyhow::{Result, bail};
+use rustfft::num_complex::Complex;
 
 use crate::phase_gradient_time_stretch::PhaseGradientTimeStretch;
 use crate::stft::{Stft, StftAccumBuf};
@@ -79,6 +80,14 @@ impl TimeStretcher {
     }
 
     pub(crate) fn process(&mut self, input: &[f32], output: &mut Vec<f32>) {
+        self.process_with_modify(input, output, &mut |_| {});
+    }
+
+    // modify_spectrum allow updating the spectrum before doing backward FFT
+    pub(crate) fn process_with_modify<F>(&mut self, input: &[f32], output: &mut Vec<f32>, modify_spectrum: &mut F)
+    where
+        F: FnMut(&mut [Complex<f32>]),
+    {
         // This is an approximation
         let output_capacity = (input.len()) / self.ana_hop_size * self.syn_hop_size;
         output.reserve(output_capacity);
@@ -93,13 +102,20 @@ impl TimeStretcher {
             input_pos += n;
 
             if self.input_buf.len() == self.params.fft_size {
-                self.do_stft();
+                self.do_stft(modify_spectrum);
                 self.output_and_shift(output);
             }
         }
     }
 
     pub(crate) fn finish(&mut self, output: &mut Vec<f32>) {
+        self.finish_with_modify(output, &mut |_| {});
+    }
+
+    pub(crate) fn finish_with_modify<F>(&mut self, output: &mut Vec<f32>, modify_spectrum: &mut F)
+    where
+        F: FnMut(&mut [Complex<f32>]),
+    {
         // We want to process all data remaining in input_buf, which is done by running stft fft_size/ana_hop_size times
         // and padding with zeros after each iteration. We want to fade out this tail to zero by applying half-window
         // stored in tail_window.
@@ -115,7 +131,7 @@ impl TimeStretcher {
         let iters = self.params.fft_size / self.ana_hop_size;
         for i in 0..iters {
             self.input_buf.resize(self.params.fft_size, 0.0);
-            self.do_stft();
+            self.do_stft(modify_spectrum);
 
             let tail_window_offset = i * self.syn_hop_size;
             let tail_window_slice = &self.tail_window[tail_window_offset..tail_window_offset + self.syn_hop_size];
@@ -180,12 +196,16 @@ impl TimeStretcher {
     }
 
     /// Do one iteration of stft
-    fn do_stft(&mut self) {
+    fn do_stft<F>(&mut self, modify_spectrum: &mut F)
+    where
+        F: FnMut(&mut [Complex<f32>]),
+    {
         let norm_factor = self.stft.get_norm_factor(self.syn_hop_size);
         let output = self.stft.process(&self.input_buf, |ana_freq, syn_freq| {
             // syn_freq.copy_from_slice(ana_freq);
             self.phase_gradient_vocoder
                 .process(ana_freq, self.ana_hop_size, syn_freq, self.syn_hop_size);
+            modify_spectrum(syn_freq);
             // Ensure conjugate symmetry for real-valued inverse FFT. The first bin and last bin should have zero
             // imaginary part. After processing, they may become non-zero (even if very small).
             syn_freq[0].im = 0.0;
