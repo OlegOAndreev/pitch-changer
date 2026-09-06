@@ -109,7 +109,7 @@ impl EnvelopeShifter {
             let cur_envelope = cur_sample.sample(&self.new_magnitudes_buf);
             if cur_envelope > 1e-5 {
                 let shifted_envelope = shifted_sample.sample(&self.new_magnitudes_buf);
-                let mut ratio = shifted_envelope / cur_envelope;
+                let ratio = shifted_envelope / cur_envelope;
                 freq[k] *= ratio.clamp(Self::MIN_GAIN, Self::MAX_GAIN);
             }
             cur_sample.step();
