@@ -171,7 +171,7 @@ impl PitchShifter {
             * (time_stretch_params.time_stretch as f64 / self.time_stretcher.actual_time_stretch());
         self.resampler.set_ratio(resampling_ratio);
         self.envelope_shift_enabled = params.quefrency_cutoff != 0.0;
-        let cepstrum_cutoff_bins = (params.quefrency_cutoff * params.sample_rate as f32 / 1000.0) as usize;
+        let cepstrum_cutoff_bins = (params.quefrency_cutoff * params.sample_rate as f32 / 2000.0) as usize;
         self.envelope_shifter.update_params(cepstrum_cutoff_bins, params.pitch_shift);
 
         self.params = *params;
