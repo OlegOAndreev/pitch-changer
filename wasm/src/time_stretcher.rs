@@ -80,11 +80,11 @@ impl TimeStretcher {
     }
 
     pub(crate) fn process(&mut self, input: &[f32], output: &mut Vec<f32>) {
-        self.process_with_modify(input, output, &mut |_| {});
+        self.process_with_post(input, output, &mut |_| {});
     }
 
-    // modify_spectrum allow updating the spectrum before doing backward FFT
-    pub(crate) fn process_with_modify<F>(&mut self, input: &[f32], output: &mut Vec<f32>, modify_spectrum: &mut F)
+    // postprocess allow updating the spectrum before doing backward FFT
+    pub(crate) fn process_with_post<F>(&mut self, input: &[f32], output: &mut Vec<f32>, postprocess: &mut F)
     where
         F: FnMut(&mut [Complex<f32>]),
     {
@@ -102,17 +102,18 @@ impl TimeStretcher {
             input_pos += n;
 
             if self.input_buf.len() == self.params.fft_size {
-                self.do_stft(modify_spectrum);
+                self.do_stft(postprocess);
                 self.output_and_shift(output);
             }
         }
     }
 
     pub(crate) fn finish(&mut self, output: &mut Vec<f32>) {
-        self.finish_with_modify(output, &mut |_| {});
+        self.finish_with_post(output, &mut |_| {});
     }
 
-    pub(crate) fn finish_with_modify<F>(&mut self, output: &mut Vec<f32>, modify_spectrum: &mut F)
+    // postprocess allow updating the spectrum before doing backward FFT
+    pub(crate) fn finish_with_post<F>(&mut self, output: &mut Vec<f32>, postprocess: &mut F)
     where
         F: FnMut(&mut [Complex<f32>]),
     {
@@ -131,7 +132,7 @@ impl TimeStretcher {
         let iters = self.params.fft_size / self.ana_hop_size;
         for i in 0..iters {
             self.input_buf.resize(self.params.fft_size, 0.0);
-            self.do_stft(modify_spectrum);
+            self.do_stft(postprocess);
 
             let tail_window_offset = i * self.syn_hop_size;
             let tail_window_slice = &self.tail_window[tail_window_offset..tail_window_offset + self.syn_hop_size];
@@ -196,7 +197,7 @@ impl TimeStretcher {
     }
 
     /// Do one iteration of stft
-    fn do_stft<F>(&mut self, modify_spectrum: &mut F)
+    fn do_stft<F>(&mut self, postprocess: &mut F)
     where
         F: FnMut(&mut [Complex<f32>]),
     {
@@ -204,7 +205,7 @@ impl TimeStretcher {
         let output = self.stft.process(&self.input_buf, |ana_freq, syn_freq| {
             self.phase_gradient_vocoder
                 .process(ana_freq, self.ana_hop_size, syn_freq, self.syn_hop_size);
-            modify_spectrum(syn_freq);
+            postprocess(syn_freq);
             // Ensure conjugate symmetry for real-valued inverse FFT. The first bin and last bin should have zero
             // imaginary part. After processing, they may become non-zero (even if very small).
             syn_freq[0].im = 0.0;

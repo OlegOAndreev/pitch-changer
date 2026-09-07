@@ -33,7 +33,7 @@ impl EnvelopeShifter {
 
     pub fn new(num_bins: usize, cepstrum_cutoff_bins: usize, shift_ratio: f32) -> Self {
         let full_size = num_bins - 1;
-        assert!(full_size.is_power_of_two());
+        assert!(full_size.is_power_of_two() && full_size >= 256);
         let downsample_size = full_size / Self::DOWNSAMPLE_BY;
 
         let forward_plan = FftRealToComplex::new(downsample_size).expect("failed FftRealToComplex::new");
@@ -81,7 +81,7 @@ impl EnvelopeShifter {
         // > the formants that may be observed for lower pitched signals will be smoothed such that the sound is
         // > perceived as dull.
         let peak_bin = (Self::find_peak(&self.new_magnitudes_buf) + 1) * Self::DOWNSAMPLE_BY;
-        let start_bin = if self.shift_ratio < 1.0 { (peak_bin as f32 * self.shift_ratio) as usize } else { 1 };
+        let start_bin = if self.shift_ratio < 1.0 { ((peak_bin as f32 * self.shift_ratio) as usize).max(1) } else { 1 };
         let upper_bin = num_bins * 3 / 4;
 
         // new_magnitudes_buf now contains the spectral envelope at small resolution. Use linear interpolation to sample
@@ -96,22 +96,18 @@ impl EnvelopeShifter {
         // Introduce envelope shift after start_bin
         for k in start_bin..peak_bin {
             let cur_envelope = cur_sample.sample(&self.new_magnitudes_buf);
-            if cur_envelope > 1e-5 {
-                let shifted_envelope = shifted_sample.sample(&self.new_magnitudes_buf);
-                let alpha = (k - start_bin) as f32 / (peak_bin - start_bin) as f32;
-                let ratio = (shifted_envelope / cur_envelope) * alpha + 1.0 - alpha;
-                freq[k] *= ratio.clamp(Self::MIN_GAIN, Self::MAX_GAIN);
-            }
+            let shifted_envelope = shifted_sample.sample(&self.new_magnitudes_buf);
+            let alpha = (k - start_bin) as f32 / (peak_bin - start_bin) as f32;
+            let ratio = (shifted_envelope / cur_envelope) * alpha + 1.0 - alpha;
+            freq[k] *= ratio.clamp(Self::MIN_GAIN, Self::MAX_GAIN);
             cur_sample.step();
             shifted_sample.step();
         }
         for k in peak_bin..upper_bin {
             let cur_envelope = cur_sample.sample(&self.new_magnitudes_buf);
-            if cur_envelope > 1e-5 {
-                let shifted_envelope = shifted_sample.sample(&self.new_magnitudes_buf);
-                let ratio = shifted_envelope / cur_envelope;
-                freq[k] *= ratio.clamp(Self::MIN_GAIN, Self::MAX_GAIN);
-            }
+            let shifted_envelope = shifted_sample.sample(&self.new_magnitudes_buf);
+            let ratio = shifted_envelope / cur_envelope;
+            freq[k] *= ratio.clamp(Self::MIN_GAIN, Self::MAX_GAIN);
             cur_sample.step();
             shifted_sample.step();
         }
@@ -214,7 +210,7 @@ impl EnvelopeShifter {
         const EPSILON: f32 = 1e-6;
         // This code implements true envelope estimation by doing multiple iterations of spectrum -> cepstrum ->
         // cepstrum cutoff -> spectrum loop. The more iterations you set, the larger is the performance hit. Also, the
-        // we envelope may become much larger for lower frequencies.
+        // envelope may become much larger for lower frequencies.
         const ITERATIONS: usize = 3;
 
         for magn in &mut self.orig_magnitudes_buf {
@@ -240,15 +236,17 @@ impl EnvelopeShifter {
             }
             self.forward_plan
                 .process(&mut self.magnitudes_buf, &mut self.cepstrum_buf, &mut self.scratch_forward)
-                .expect("failed forward STFT pass");
+                .expect("failed forward FFT pass");
 
             self.cepstrum_buf[cutoff..].fill(Complex::ZERO);
 
             self.inverse_plan
                 .process(&mut self.cepstrum_buf, &mut self.new_magnitudes_buf, &mut self.scratch_inverse)
-                .expect("failed inverse STFT pass");
+                .expect("failed inverse FFT pass");
         }
 
+        // There may be a desire to put max(orig_magnitudes_buf, new_magnitudes_buf) here, but it is a bad idea: the
+        // resulting envelope will be very uneven and "peaky", which just leads to more artifacts.
         let upper_bin = self.downsample_size * 3 / 4;
         for magn in &mut self.new_magnitudes_buf[0..upper_bin] {
             *magn = approx_exp2(*magn * norm);
@@ -261,7 +259,7 @@ impl EnvelopeShifter {
         }
     }
 
-    // The returns the id of peak, which is defined as a bin which is greater than 4 bins before and after it or 0 if no
+    // The returns the peak bin, which is defined as a bin which is greater than 4 bins before and after it or 0 if no
     // such bin exist.
     pub fn find_peak(spectrum: &[f32]) -> usize {
         assert!(spectrum.len() >= 9);
@@ -288,7 +286,7 @@ impl EnvelopeShifter {
             }
             return i;
         }
-        // Process the last part (we ignore the tail)
+        // Process the main part (we ignore the tail)
         for i in 4..spectrum.len() - 4 {
             if spectrum[i] < spectrum[i + 1]
                 || spectrum[i] < spectrum[i + 2]

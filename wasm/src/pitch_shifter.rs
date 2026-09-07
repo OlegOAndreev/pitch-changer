@@ -125,7 +125,7 @@ impl PitchShifter {
 
         self.stretched_buf.clear();
         if self.envelope_shift_enabled {
-            self.time_stretcher.process_with_modify(input, &mut self.stretched_buf, &mut |syn_freq| {
+            self.time_stretcher.process_with_post(input, &mut self.stretched_buf, &mut |syn_freq| {
                 self.envelope_shifter.shift_envelope(syn_freq);
             });
         } else {
@@ -142,7 +142,7 @@ impl PitchShifter {
 
         self.stretched_buf.clear();
         if self.envelope_shift_enabled {
-            self.time_stretcher.finish_with_modify(&mut self.stretched_buf, &mut |syn_freq| {
+            self.time_stretcher.finish_with_post(&mut self.stretched_buf, &mut |syn_freq| {
                 self.envelope_shifter.shift_envelope(syn_freq);
             });
         } else {
