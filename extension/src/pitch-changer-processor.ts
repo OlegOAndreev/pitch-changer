@@ -103,10 +103,6 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
                 this.requiredLatency = fftSize * 3;
                 break;
         }
-        if (params.processingMode === 'formant-preserving-pitch') {
-            // Envelope shifting takes another fftSize latency: the internal buffer of the envelope shifter.
-            this.requiredLatency += fftSize;
-        }
         if (this.prevProcessingMode && this.prevProcessingMode !== params.processingMode) {
             // Flush the queues if we changed the processing mode, otherwise we get the incorrect latency.
             this.resetRequired = true;

@@ -404,7 +404,7 @@ struct PitchShift {
     #[argh(option, default = "\"shifted.wav\".to_string()")]
     output: String,
 
-    /// cepstrum cutoff, either 0.0 to disable formant preservation or somewhere in 0.5-5.0 for preserving formants
+    /// cepstrum cutoff, either 0.0 to disable formant preservation or somewhere in 1.0-5.0 for preserving formants
     #[argh(option, default = "0.0")]
     quefrency_cutoff: f32,
 

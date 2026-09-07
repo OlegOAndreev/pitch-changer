@@ -89,7 +89,7 @@ function processAudio(input: InterleavedAudio, processingMode: ProcessingMode, p
 
     const params = new PitchShiftParams(sampleRate, pitchShift, timeStretch);
     if (processingMode === 'formant-preserving-pitch') {
-        params.quefrency_cutoff = 1.0;
+        params.quefrency_cutoff = 2.0;
     }
     try {
         processor = new MultiPitchShifter(params, numChannels);

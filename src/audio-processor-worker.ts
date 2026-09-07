@@ -187,7 +187,7 @@ class AudioProcessorWorker {
         params.fft_size = this.params.fftSize;
         try {
             if (this.params.processingMode === 'formant-preserving-pitch') {
-                params.quefrency_cutoff = 1.0;
+                params.quefrency_cutoff = 2.0;
             }
 
             if (this.processor && this.processorNumChannels === this.params.numChannels) {

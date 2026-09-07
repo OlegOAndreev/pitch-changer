@@ -28,7 +28,7 @@ pub struct PitchShiftParams {
     pub window_type: WindowType,
     /// Cepstral lifter cutoff for formant preservation. Controls the separation between spectral envelope (formants)
     /// and fine structure (pitch harmonics). Higher values preserve more formant detail, lower values smooth more.
-    /// Typical range: 0.5-1.5, try 1.0 for speech.
+    /// Typical range: 1.0-5.0, try 2.0 for speech.
     ///
     /// If the default value of 0.0 is used, no formant preservation is applied.
     pub quefrency_cutoff: f32,
@@ -104,7 +104,8 @@ impl PitchShifter {
 
         let envelope_shift_enabled = params.quefrency_cutoff != 0.0;
         let envelope_num_bins = params.fft_size / 2 + 1;
-        let cepstrum_cutoff_bins = (params.quefrency_cutoff * params.sample_rate as f32 / 1000.0) as usize;
+        // Cepstrum bin k corresponds to the quefrency = (2*k) / f_sample, regardless of cepstrum number of bins.
+        let cepstrum_cutoff_bins = (params.quefrency_cutoff * params.sample_rate as f32 / 2000.0) as usize;
         let envelope_shifter = EnvelopeShifter::new(envelope_num_bins, cepstrum_cutoff_bins, params.pitch_shift);
 
         Ok(Self {
