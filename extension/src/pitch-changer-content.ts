@@ -70,7 +70,14 @@ let workletProcessorCurrentLatencyMs = 0;
 //
 // Basically, we try not to add worklets to elements if extension is disabled, but we never remove them from active
 // elements.
-const nodesMap = new Map<HTMLMediaElement, MediaElementAudioSourceNode>();
+const nodesMap = new Map<HTMLMediaElement, AudioNode>();
+
+// We do not immediately disconnect and remove elements in MutationObserver: they may get reparented immediately or
+// after short amount of time. Instead we put the element into the "queue" and disconnect them only after delay.
+const nodesPendingRemove = new Map<HTMLMediaElement, number>();
+// A single timeout shared by all pending removals.
+let pendingRemoveTimer: number | null = null;
+const PENDING_REMOVE_DELAY_MS = 10_000;
 
 async function initAudioContext(): Promise<AudioContext> {
     const newAudioContext = new AudioContext();
@@ -191,6 +198,11 @@ async function applyWorklet(element: HTMLMediaElement) {
             // Re-check if a concurrent applyWorklet already added the element.
             return;
         }
+        if (!element.isConnected) {
+            // The element was removed from the document while we were awaiting audio context or workletNode; if it is
+            // re-inserted, the observer will call applyWorklet again.
+            return;
+        }
 
         // This event registers as user interaction in Chrome apparently.
         element.addEventListener('play', () => {
@@ -229,13 +241,65 @@ function removeWorklet(element: HTMLMediaElement) {
     }
 }
 
-function applyWorkletToChildren(rootNode: Element | Document) {
-    const elements = rootNode.querySelectorAll('audio, video');
-    if (elements.length === 0) {
-        debugLog(`Found no audio/video elements in ${rootNode}`);
+function setPendingRemoveTimer() {
+    if (pendingRemoveTimer !== null) {
+        // The timer is already armed, skip it.
         return;
     }
-    debugLog(`Found ${elements.length} audio/video elements in ${rootNode}, adding worklet`);
+    pendingRemoveTimer = setTimeout(doPendingRemove, PENDING_REMOVE_DELAY_MS);
+}
+
+function doPendingRemove() {
+    pendingRemoveTimer = null;
+    const now = performance.now();
+    nodesPendingRemove.forEach((removedAt, element) => {
+        if (removedAt + PENDING_REMOVE_DELAY_MS > now) {
+            return;
+        }
+        nodesPendingRemove.delete(element);
+        if (element.isConnected) {
+            debugLog(`Element ${element.id} is connected again, keeping its worklet`);
+            return;
+        }
+        if (!nodesMap.has(element)) {
+            return;
+        }
+        debugLog(`Grace period for element ${element.id} expired, removing worklet`);
+        removeWorklet(element);
+    })
+
+    // Re-arm the timer if the map is still non-empty.
+    if (nodesPendingRemove.size > 0) {
+        setPendingRemoveTimer();
+    }
+}
+
+function schedulePendingRemove(element: HTMLMediaElement) {
+    if (!nodesMap.has(element)) {
+        return;
+    }
+    nodesPendingRemove.set(element, performance.now());
+    setPendingRemoveTimer();
+    debugLog(`Scheduled worklet removal for element ${element.id} in ${PENDING_REMOVE_DELAY_MS / 1000}s`);
+}
+
+function cancelPendingRemove(element: HTMLMediaElement) {
+    if (nodesPendingRemove.delete(element)) {
+        debugLog(`Canceled pending worklet removal for element ${element.id}`);
+    }
+}
+
+function applyWorkletToChildren(node: Element | Document) {
+    if (node instanceof HTMLMediaElement) {
+        applyWorklet(node);
+        return;
+    }
+    const elements = node.querySelectorAll('audio, video');
+    if (elements.length === 0) {
+        debugLog(`Found no audio/video elements in ${node}`);
+        return;
+    }
+    debugLog(`Found ${elements.length} audio/video elements in ${node}, adding worklet`);
 
     elements.forEach(async (e) => {
         if (e instanceof HTMLMediaElement) {
@@ -248,21 +312,38 @@ function applyWorkletToChildren(rootNode: Element | Document) {
     });
 }
 
-function removeWorkletFromChildren(rootNode: Element) {
-    const elements = rootNode.querySelectorAll('audio, video');
-    if (elements.length === 0) {
-        debugLog(`Found no audio/video elements in ${rootNode}`);
+function schedulePendingRemoveOfChildren(node: Element) {
+    if (node instanceof HTMLMediaElement) {
+        schedulePendingRemove(node);
         return;
     }
-    debugLog(`Found ${elements.length} audio/video elements in ${rootNode}, removing worklet`);
+    const elements = node.querySelectorAll('audio, video');
+    if (elements.length === 0) {
+        debugLog(`Found no audio/video elements in ${node}`);
+        return;
+    }
+    debugLog(`Found ${elements.length} audio/video elements in ${node}, scheduling worklet removal`);
 
-    elements.forEach(async (e) => {
+    elements.forEach((e) => {
         if (e instanceof HTMLMediaElement) {
-            if (nodesMap.get(e)) {
-                removeWorklet(e);
-            }
+            schedulePendingRemove(e);
         } else {
             console.error('Got element which is not audio/video', e);
+        }
+    });
+}
+
+function cancelPendingRemoveOfChildren(node: Element) {
+    if (nodesPendingRemove.size === 0) {
+        return;
+    }
+    if (node instanceof HTMLMediaElement) {
+        cancelPendingRemove(node);
+        return;
+    }
+    node.querySelectorAll('audio, video').forEach((e) => {
+        if (e instanceof HTMLMediaElement) {
+            cancelPendingRemove(e);
         }
     });
 }
@@ -376,19 +457,22 @@ async function init(): Promise<void> {
 
     const observer = new MutationObserver((mutations) => {
         for (const mutation of mutations) {
-            if (settings.enabled && mutation.addedNodes) {
+            // Canceling pending removals must not depend on settings.enabled: removals are scheduled regardless
+            // of it, and a re-parented element must not end up disconnected after the grace period.
+            if (mutation.addedNodes) {
                 mutation.addedNodes.forEach((node) => {
-                    if (node instanceof HTMLMediaElement) {
-                        applyWorklet(node);
-                    } else if (node instanceof Element) {
-                        applyWorkletToChildren(node);
+                    if (node instanceof Element) {
+                        cancelPendingRemoveOfChildren(node);
+                        if (settings.enabled) {
+                            applyWorkletToChildren(node);
+                        }
                     }
                 });
             }
             if (mutation.removedNodes) {
                 mutation.removedNodes.forEach((node) => {
                     if (node instanceof Element) {
-                        removeWorkletFromChildren(node);
+                        schedulePendingRemoveOfChildren(node);
                     }
                 });
             }
