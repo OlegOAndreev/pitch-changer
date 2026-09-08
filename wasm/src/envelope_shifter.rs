@@ -306,3 +306,104 @@ impl EnvelopeShifter {
         0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::rngs::SmallRng;
+    use rand::{RngExt, SeedableRng};
+    use std::f32::consts::PI;
+
+    const SAMPLE_RATE: u32 = 48000;
+    const FFT_SIZE: usize = 2048;
+    const NUM_BINS: usize = FFT_SIZE / 2 + 1;
+    const QUEFRENCY_CUTOFF: f32 = 2.0;
+    const FORMANT_BIN: usize = 200;
+    const FORMANT_WIDTH: f32 = 120.0;
+
+    /// A harmonic spectrum with magnitudes following a single Gaussian formant centered at FORMANT_BIN.
+    fn harmonic_spectrum() -> Vec<Complex<f32>> {
+        let mut result = vec![Complex::ZERO];
+        for bin in 1..NUM_BINS {
+            let offset = bin as f32 - FORMANT_BIN as f32;
+            let magnitude = (-offset * offset / (2.0 * FORMANT_WIDTH * FORMANT_WIDTH)).exp();
+            result.push(Complex::new(magnitude, 0.0));
+        }
+        result
+    }
+
+    fn max_bin(spectrum: &[Complex<f32>]) -> usize {
+        let mut max_idx = 0;
+        let mut max_sqr = 0.0;
+        for (i, &value) in spectrum.iter().enumerate() {
+            let v = value.norm_sqr();
+            if v > max_sqr {
+                max_idx = i;
+                max_sqr = v;
+            }
+        }
+        max_idx
+    }
+
+    #[test]
+    fn test_shift_envelope_random_params_finite() {
+        const ITERATIONS: usize = 100;
+        for iteration in 0..ITERATIONS {
+            let mut rng = SmallRng::seed_from_u64(iteration as u64);
+            let sample_rate = rng.random_range(10000..=100000);
+            // fft_size must be a power of two with fft_size / 2 >= 256
+            let fft_size = 1 << rng.random_range(9..=12);
+            let num_bins = fft_size / 2 + 1;
+            let quefrency_cutoff = rng.random_range(0.0..5.0);
+            let shift_ratio = rng.random_range(0.25..=4.0);
+            let mut shifter = EnvelopeShifter::new(num_bins, quefrency_cutoff, sample_rate, shift_ratio);
+
+            let mut freq: Vec<Complex<f32>> = (0..num_bins)
+                .map(|_| {
+                    let magnitude = 10.0_f32.powf(rng.random_range(-6.0..6.0));
+                    let phase = rng.random_range(-PI..PI);
+                    Complex::from_polar(magnitude, phase)
+                })
+                .collect();
+            shifter.shift_envelope(&mut freq);
+            for bin in &freq {
+                assert!(bin.re.is_finite() && bin.im.is_finite(), "iteration {iteration}: non-finite shifted spectrum");
+            }
+
+            // Shift the already shifted spectrum again with fresh parameters
+            shifter.update_params(rng.random_range(0.0..5.0), sample_rate, rng.random_range(0.25..=4.0));
+            shifter.shift_envelope(&mut freq);
+            for bin in &freq {
+                assert!(bin.re.is_finite() && bin.im.is_finite(), "iteration {iteration}: non-finite shifted spectrum");
+            }
+
+            let magnitudes: Vec<f32> = (0..num_bins).map(|_| 10.0_f32.powf(rng.random_range(-6.0..6.0))).collect();
+            let mut envelope = vec![];
+            shifter.compute_envelope(&magnitudes, &mut envelope);
+            assert_eq!(envelope.len(), num_bins);
+            for value in &envelope {
+                assert!(value.is_finite(), "iteration {iteration}: non-finite envelope");
+            }
+        }
+    }
+
+    #[test]
+    fn test_shift_envelope_moves_formant() {
+        // The output envelope value at bin k is the input envelope value at bin k * shift_ratio, so the largest
+        // output harmonic must move from FORMANT_BIN to FORMANT_BIN / shift_ratio.
+        for shift_ratio in [0.5, 0.8, 0.9, 1.1, 1.3, 1.5, 2.0] {
+            let mut shifter = EnvelopeShifter::new(NUM_BINS, QUEFRENCY_CUTOFF, SAMPLE_RATE, shift_ratio);
+            let mut freq = harmonic_spectrum();
+            shifter.shift_envelope(&mut freq);
+
+            // Non-harmonic bins stay at zero, so the argmax over the output magnitudes is the largest harmonic
+            let peak = max_bin(&freq);
+            let expected_peak = (FORMANT_BIN as f32 / shift_ratio) as usize;
+            println!("Got peak {} for shift ratio {} (expected {})", peak, shift_ratio, expected_peak);
+            assert!(
+                peak.abs_diff(expected_peak) < NUM_BINS / 20,
+                "shift ratio {shift_ratio}: expected formant peak near bin {expected_peak}, got {peak}"
+            );
+        }
+    }
+}
