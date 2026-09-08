@@ -39,8 +39,8 @@ impl FftRealToComplex {
         vec![Complex::ZERO; self.get_scratch_len()]
     }
 
-    /// Process input and store the result in output. Output is sized the same way as realfft does: the first element
-    /// is DC and the last element is Nyquist, both have zero immediate component. The input is used as a scratch buffer.
+    /// Process input and store the result in output. Output is sized the same way as realfft does: the first element is
+    /// DC and the last element is Nyquist, both have zero immediate component. The input is used as a scratch buffer.
     #[inline(never)]
     pub fn process(&self, input: &mut [f32], output: &mut [Complex<f32>], scratch: &mut [Complex<f32>]) -> Result<()> {
         if input.len() != self.size {

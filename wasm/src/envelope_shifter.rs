@@ -31,10 +31,12 @@ impl EnvelopeShifter {
     const MAX_GAIN: f32 = 10.0;
     const MIN_GAIN: f32 = 0.1;
 
-    pub fn new(num_bins: usize, cepstrum_cutoff_bins: usize, shift_ratio: f32) -> Self {
+    pub fn new(num_bins: usize, quefrency_cutoff: f32, sample_rate: u32, shift_ratio: f32) -> Self {
         let full_size = num_bins - 1;
         assert!(full_size.is_power_of_two() && full_size >= 256);
         let downsample_size = full_size / Self::DOWNSAMPLE_BY;
+        // Cepstrum bin k corresponds to the quefrency = (2*k) / f_sample, regardless of cepstrum number of bins.
+        let cepstrum_cutoff_bins = (quefrency_cutoff * sample_rate as f32 / 2000.0) as usize;
 
         let forward_plan = FftRealToComplex::new(downsample_size).expect("failed FftRealToComplex::new");
         let inverse_plan = FftComplexToReal::new(downsample_size).expect("failed FftComplexToReal::new");
@@ -130,8 +132,8 @@ impl EnvelopeShifter {
     }
 
     /// Update the pitch shift ratio.
-    pub fn update_params(&mut self, cepstrum_cutoff_bins: usize, shift_ratio: f32) {
-        self.cepstrum_cutoff_bins = cepstrum_cutoff_bins;
+    pub fn update_params(&mut self, quefrency_cutoff: f32, sample_rate: u32, shift_ratio: f32) {
+        self.cepstrum_cutoff_bins = (quefrency_cutoff * sample_rate as f32 / 2000.0) as usize;
         self.shift_ratio = shift_ratio;
     }
 

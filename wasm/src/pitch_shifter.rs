@@ -104,9 +104,8 @@ impl PitchShifter {
 
         let envelope_shift_enabled = params.quefrency_cutoff != 0.0;
         let envelope_num_bins = params.fft_size / 2 + 1;
-        // Cepstrum bin k corresponds to the quefrency = (2*k) / f_sample, regardless of cepstrum number of bins.
-        let cepstrum_cutoff_bins = (params.quefrency_cutoff * params.sample_rate as f32 / 2000.0) as usize;
-        let envelope_shifter = EnvelopeShifter::new(envelope_num_bins, cepstrum_cutoff_bins, params.pitch_shift);
+        let envelope_shifter =
+            EnvelopeShifter::new(envelope_num_bins, params.quefrency_cutoff, params.sample_rate, params.pitch_shift);
 
         Ok(Self {
             params: *params,
@@ -171,8 +170,8 @@ impl PitchShifter {
             * (time_stretch_params.time_stretch as f64 / self.time_stretcher.actual_time_stretch());
         self.resampler.set_ratio(resampling_ratio);
         self.envelope_shift_enabled = params.quefrency_cutoff != 0.0;
-        let cepstrum_cutoff_bins = (params.quefrency_cutoff * params.sample_rate as f32 / 2000.0) as usize;
-        self.envelope_shifter.update_params(cepstrum_cutoff_bins, params.pitch_shift);
+        self.envelope_shifter
+            .update_params(params.quefrency_cutoff, params.sample_rate, params.pitch_shift);
 
         self.params = *params;
 
@@ -678,6 +677,17 @@ mod tests {
                 len_diff
             );
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_spectral_envelope() -> Result<()> {
+        const F0: f32 = 500.0;
+        const MAGNITUDE: f32 = 0.5;
+        const SAMPLE_RATE: f32 = 48000.0;
+        const FFT_SIZE: usize = 2048;
+        const OVERLAP: u32 = 8;
 
         Ok(())
     }
