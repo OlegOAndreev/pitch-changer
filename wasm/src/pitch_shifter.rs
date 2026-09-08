@@ -680,4 +680,66 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_simple_quefrency_cutoff() -> Result<()> {
+        // Basic test that the peak stays the same after pitch shift.
+        const DURATION: f32 = 1.5;
+        const SAMPLE_RATE: f32 = 48000.0;
+        const QUEFRENCY_CUTOFF: f32 = 2.0;
+        const FFT_SIZE: usize = 4096;
+        const BIN_WIDTH: f32 = SAMPLE_RATE / (FFT_SIZE as f32 * 2.0) * 20.0;
+        const NUM_BINS: usize = 21;
+        const MID_BIN: usize = NUM_BINS / 2;
+        const EXPECTED_PEAK: f32 = BIN_WIDTH * MID_BIN as f32;
+
+        let mut input = generate_sine_wave(0.0, SAMPLE_RATE, 0.0, DURATION);
+        for bin in 1..NUM_BINS {
+            let freq = bin as f32 * BIN_WIDTH;
+            let magnitude = if bin == MID_BIN { 1.0 } else { 0.1 };
+            let sine = generate_sine_wave(freq, SAMPLE_RATE, magnitude, DURATION);
+            for (o, i) in input.iter_mut().zip(&sine) {
+                *o += *i;
+            }
+        }
+
+        for pitch_shift in [0.6, 1.3] {
+            let mut params = PitchShiftParams::new(SAMPLE_RATE as u32, pitch_shift, 1.0);
+            params.fft_size = FFT_SIZE;
+            params.quefrency_cutoff = QUEFRENCY_CUTOFF;
+            let mut shifter = PitchShifter::new(&params)?;
+
+            let output = process_all(&mut shifter, &input);
+            let peak = compute_dominant_frequency(&output, SAMPLE_RATE);
+            println!("Got shifted peak {} for shift ratio {} (expected {})", peak, pitch_shift, EXPECTED_PEAK);
+            assert!(
+                (peak - EXPECTED_PEAK).abs() < EXPECTED_PEAK * 0.05,
+                "expected shifted peak {} to be {} for shift pitch {}",
+                peak,
+                EXPECTED_PEAK,
+                pitch_shift
+            );
+
+            // Test without quefrency as a sanity check.
+            params.quefrency_cutoff = 0.0;
+            let mut shifter = PitchShifter::new(&params)?;
+
+            let shifted_output = process_all(&mut shifter, &input);
+            let shifted_peak = compute_dominant_frequency(&shifted_output, SAMPLE_RATE);
+            let expected_shifted_peak = EXPECTED_PEAK * pitch_shift;
+            println!(
+                "Got shifted peak without envelope shifting {} for shift ratio {} (expected {})",
+                shifted_peak, pitch_shift, expected_shifted_peak
+            );
+            assert!(
+                (shifted_peak - expected_shifted_peak).abs() < expected_shifted_peak * 0.05,
+                "expected shifted peak without envelope shifting {} to be {} for shift pitch {}",
+                shifted_peak,
+                expected_shifted_peak,
+                pitch_shift
+            );
+        }
+
+        Ok(())
+    }
 }
