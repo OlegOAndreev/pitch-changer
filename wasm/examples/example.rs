@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::time::Instant;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use argh::FromArgs;
 use hound::{WavSpec, WavWriter};
 use plotters::prelude::*;
@@ -17,6 +17,22 @@ fn parse_window_type(s: &str) -> Result<WindowType> {
         "sqrt-hann" => Ok(WindowType::SqrtHann),
         "sqrt-blackman" => Ok(WindowType::SqrtBlackman),
         _ => bail!("Unknown window type '{}'. Supported: hann, sqrt-hann, sqrt-blackman", s),
+    }
+}
+
+fn normalize_samples(samples: &mut [f32]) {
+    let mut max_value = 0.0;
+    for v in samples.iter_mut() {
+        let abs = v.abs();
+        if abs > max_value {
+            max_value = abs;
+        }
+    }
+    if max_value <= 1.0 {
+        return;
+    }
+    for v in samples.iter_mut() {
+        *v /= max_value;
     }
 }
 
@@ -347,9 +363,9 @@ enum Commands {
 #[derive(FromArgs)]
 #[argh(subcommand, name = "generate")]
 struct Generate {
-    /// frequency in Hz
-    #[argh(option, default = "440.0")]
-    frequency: f32,
+    /// frequencies in Hz, separated by commas
+    #[argh(option, default = "\"440.0\".to_string()")]
+    frequencies: String,
 
     /// sample rate in Hz
     #[argh(option, default = "44100.0")]
@@ -442,24 +458,34 @@ fn main() -> Result<()> {
     let cli: Cli = argh::from_env();
 
     match cli.command {
-        Commands::Generate(Generate { frequency, sample_rate, duration, channels, output, magnitude }) => {
+        Commands::Generate(Generate { frequencies, sample_rate, duration, channels, output, magnitude }) => {
             println!(
                 "Generating sine wave: {} Hz, {} samples/sec, {} seconds, {} channels",
-                frequency, sample_rate, duration, channels
+                frequencies, sample_rate, duration, channels
             );
-            let mut sine_wave = vec![];
-            for ch in 0..channels {
-                // Generate same frequency for all channels (could be modified)
-                let channel_data = generate_sine_wave(frequency, sample_rate, magnitude, duration);
-                if ch == 0 {
-                    sine_wave = channel_data;
+            let mut channel_data = vec![];
+            for (idx, freq_str) in frequencies.split_terminator(",").enumerate() {
+                // Each next frequency is generated with halved magnitude.
+                let freq = freq_str
+                    .parse::<f32>()
+                    .map_err(|e| anyhow!("frequency {} is not a string: {}", freq_str, e))?;
+                let samples = generate_sine_wave(freq, sample_rate, magnitude / (idx + 1) as f32, duration);
+                if idx == 0 {
+                    channel_data = samples;
                 } else {
-                    sine_wave.extend(channel_data);
+                    for (o, a) in channel_data.iter_mut().zip(&samples) {
+                        *o += *a;
+                    }
                 }
             }
+            normalize_samples(&mut channel_data);
+            let mut result = vec![];
+            for _ in 0..channels {
+                result.extend(&channel_data);
+            }
             // Interleave the channels
-            let mut interleaved_sine = Vec::with_capacity(sine_wave.len());
-            interleave_samples(&sine_wave, channels, &mut interleaved_sine);
+            let mut interleaved_sine = Vec::with_capacity(result.len());
+            interleave_samples(&result, channels, &mut interleaved_sine);
             println!(
                 "Generated {} samples ({} per channel)",
                 interleaved_sine.len(),
@@ -574,8 +600,7 @@ fn main() -> Result<()> {
             histogram.compute_vec(audio_slice, input.channels, &mut spectrum);
 
             let mut envelope = vec![];
-            let cepstrum_cutoff_bins = (quefrency_cutoff * input.sample_rate as f32 / 1000.0) as usize;
-            let mut envelope_shifter = EnvelopeShifter::new(spectrum.len(), cepstrum_cutoff_bins, 1.0);
+            let mut envelope_shifter = EnvelopeShifter::new(spectrum.len(), quefrency_cutoff, input.sample_rate, 1.0);
             envelope_shifter.compute_envelope(&spectrum, &mut envelope);
             let spectrum_peak = EnvelopeShifter::find_peak(&spectrum);
             let envelope_peak = EnvelopeShifter::find_peak(&envelope);

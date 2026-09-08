@@ -683,11 +683,39 @@ mod tests {
 
     #[test]
     fn test_spectral_envelope() -> Result<()> {
-        const F0: f32 = 500.0;
-        const MAGNITUDE: f32 = 0.5;
         const SAMPLE_RATE: f32 = 48000.0;
-        const FFT_SIZE: usize = 2048;
-        const OVERLAP: u32 = 8;
+        const FFT_SIZE: usize = 4096;
+        const DURATION: f32 = 0.5;
+        const FUNDAMENTAL_FREQ: f32 = 200.0;
+        const FORMANT_WIDTH: f32 = 800.0;
+        const PITCH_SHIFT: f32 = 0.75;
+        const NUM_HARMONICS: usize = 50;
+        const CENTER_FREQ: f32 = FUNDAMENTAL_FREQ * NUM_HARMONICS as f32 / 2.0;
+
+        let mut input = vec![0.0; (SAMPLE_RATE * DURATION) as usize];
+        for harmonic in 1..NUM_HARMONICS {
+            let frequency = FUNDAMENTAL_FREQ * harmonic as f32;
+            let distance = (frequency - CENTER_FREQ) / FORMANT_WIDTH;
+            let magnitude = 0.001 + 0.1 * (-distance.abs()).exp();
+            let sine = generate_sine_wave(frequency, SAMPLE_RATE, magnitude, DURATION);
+            for i in 0..input.len() {
+                input[i] += sine[i];
+            }
+        }
+
+        let mut params = PitchShiftParams::new(SAMPLE_RATE as u32, PITCH_SHIFT, 1.0);
+        params.fft_size = FFT_SIZE;
+        params.quefrency_cutoff = 2.0;
+        let mut shifter = PitchShifter::new(&params)?;
+        let output = process_all(&mut shifter, &input);
+        let peak = compute_dominant_frequency(&output, SAMPLE_RATE);
+
+        assert!(
+            (peak - CENTER_FREQ).abs() < FORMANT_WIDTH * 0.5,
+            "expected preserved spectral envelope peak near {} Hz, got {} Hz",
+            CENTER_FREQ,
+            peak
+        );
 
         Ok(())
     }
