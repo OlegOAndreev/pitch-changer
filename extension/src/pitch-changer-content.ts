@@ -79,8 +79,6 @@ const nodesPendingRemove = new Map<HTMLMediaElement, number>();
 let pendingRemoveTimer: number | null = null;
 const PENDING_REMOVE_DELAY_MS = 10_000;
 
-let numPlayingElements = 0;
-
 async function initAudioContext(): Promise<AudioContext> {
     const newAudioContext = new AudioContext();
     const processorUrl = chrome.runtime.getURL('pitch-changer-processor.js');
@@ -178,6 +176,8 @@ async function initWorkletNode(context: AudioContext): Promise<AudioWorkletNode>
         workletProcessorQueueLength = message.queueLength;
     };
 
+    result.connect(context.destination);
+
     debugLog(`Created shared worklet node, channelCount ${destChannelCount}`);
     return result;
 }
@@ -204,12 +204,7 @@ async function applyWorklet(element: HTMLMediaElement) {
             return;
         }
 
-        const sourceNode = context.createMediaElementSource(element);
-        nodesMap.set(element, sourceNode);
-
-        // Connect node only on play, disconnect on pause. This way we do not make PitchChangerProcessor continuously
-        // process zeros (note that the all-zeros optimization is still important for overridden AudioContexts case, see
-        // pitch-changer-override-ac.ts).
+        // This event registers as user interaction in Chrome apparently.
         element.addEventListener('play', () => {
             if (!settings.enabled) {
                 return;
@@ -219,28 +214,11 @@ async function applyWorklet(element: HTMLMediaElement) {
                 debugLog('Context got suspended, resuming');
                 context.resume();
             }
-            numPlayingElements++;
-            if (numPlayingElements === 1) {
-                debugLog('Connecting worklet');
-                // Reconnect the worklet processor only when at least one element is playing.
-                workletNode.connect(context.destination);
-            }
-            sourceNode.disconnect();
-            sourceNode.connect(workletNode);
-        });
-        element.addEventListener('pause', () => {
-            if (!settings.enabled) {
-                return;
-            }
-            sourceNode.disconnect();
-            sourceNode.connect(context.destination);
-            numPlayingElements--;
-            if (numPlayingElements === 0) {
-                debugLog('Disconnecting worklet');
-                workletNode.disconnect();
-            }
         });
 
+        const sourceNode = context.createMediaElementSource(element);
+        sourceNode.connect(workletNode);
+        nodesMap.set(element, sourceNode);
         debugLog(`Added source to shared worklet for element ${element.id}, channelCount ${sourceNode.channelCount}`);
     } catch (error) {
         console.error('Error adding worklet to node', error);
@@ -398,16 +376,14 @@ async function applySettingsImpl(gotEnabled: boolean, gotDisabled: boolean) {
         applyWorkletToChildren(document);
 
         if (nodesMap.size > 0) {
-            // Route all playing nodes through our worklet (newly added nodes in applyWorkletToChildren are already
-            // routed through worklet, for those it will do a no-op).
+            // Route all nodes through our worklet (newly added nodes in applyWorkletToChildren are already routed
+            // through worklet, for those it will do a no-op).
             const context = await getWorkletAudioContext();
             const worklet = await getWorkletNode(context);
-            nodesMap.forEach((sourceNode, element) => {
-                if (!element.paused) {
-                    sourceNode.disconnect();
-                    sourceNode.connect(worklet);
-                }
-            })
+            for (const sourceNode of nodesMap.values()) {
+                sourceNode.disconnect();
+                sourceNode.connect(worklet);
+            }
         }
     }
     if (gotDisabled) {
