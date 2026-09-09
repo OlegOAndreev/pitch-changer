@@ -124,8 +124,6 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
     // On Chrome currently there seems to be no way to stop worklet from processing in background, even if it is not
     // connected to anything (both input and output).
     process(inputs: Float32Array[][], outputs: Float32Array[][], _parameters: Record<string, Float32Array>): boolean {
-        console.log('Doing process()', inputs[0].length);
-
         // numberOfInputs and numberOfOutputs are 1 by default, WebAudio does mixing of multiple connected nodes itself.
         const input = inputs[0];
         const output = outputs[0];
