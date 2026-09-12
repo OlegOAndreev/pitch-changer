@@ -70,7 +70,11 @@ let workletProcessorCurrentLatencyMs = 0;
 //
 // Basically, we try not to add worklets to elements if extension is disabled, but we never remove them from active
 // elements.
-const nodesMap = new Map<HTMLMediaElement, AudioNode>();
+const nodesMap = new Map<HTMLMediaElement, ElementState>();
+
+// The WebAudio source node is created (or not created, depending on CORS) lazily when the element first plays. Before
+// that the element in registered in nodesMap, but not touched in any way.
+type ElementState = { type: 'added' } | { type: 'initialized'; sourceNode: AudioNode };
 
 // We do not immediately disconnect and remove elements in MutationObserver: they may get reparented immediately or
 // after short amount of time. Instead we put the element into the "queue" and disconnect them only after delay.
@@ -182,8 +186,53 @@ async function initWorkletNode(context: AudioContext): Promise<AudioWorkletNode>
     return result;
 }
 
+// Rerouting an element through WebAudio (via createMediaElementSource()) silences it if the resource is cross-origin
+// and was not fetched with CORS. The routing cannot be undone, so we need to be sure that the element is safe to be
+// rerouted: the best way is to do this check inside 'play' handler, so that currentSrc is available.
+function isMediaElementSafeForWebAudio(element: HTMLMediaElement): boolean {
+    if (element.currentSrc === '') {
+        return true;
+    }
+    const url = new URL(element.currentSrc);
+    if (url.protocol === 'blob:' || url.protocol === 'data:') {
+        return true;
+    }
+    if (url.origin === location.origin) {
+        return true;
+    }
+    // For cross-origin URLs the media is fetched in CORS mode only if the crossorigin attribute is present. If it
+    // is present and the resource is playing back, the CORS check has passed (a CORS failure results in a load
+    // error, not in tainted playback). Corner case: an attribute which was added after the resource was already
+    // loaded in no-cors mode does not un-taint the already loaded data.
+    return element.crossOrigin !== null;
+}
+
+// Create the MediaElementAudioSourceNode for a registered element, if it is safe to do so. Assumes that the extension
+// is enabled and connects the newly created node to the worklet.
+function initializeSourceNode(element: HTMLMediaElement, context: AudioContext, workletNode: AudioWorkletNode) {
+    const state = nodesMap.get(element);
+    if (!state || state.type === 'initialized') {
+        return;
+    }
+
+    try {
+        if (!isMediaElementSafeForWebAudio(element)) {
+            // Leave the element playing unprocessed instead of silencing it.
+            debugLog(`Not attaching worklet to CORS-unsafe element ${element.id} (${element.currentSrc})`);
+            return;
+        }
+
+        const sourceNode = context.createMediaElementSource(element);
+        sourceNode.connect(workletNode);
+        nodesMap.set(element, { type: 'initialized', sourceNode });
+        debugLog(`Added source to shared worklet for element ${element.id}, channelCount ${sourceNode.channelCount}`);
+    } catch (error) {
+        console.error('Error adding worklet to node', error);
+    }
+}
+
 async function applyWorklet(element: HTMLMediaElement) {
-    if (nodesMap.get(element)) {
+    if (nodesMap.get(element)?.type === 'initialized') {
         return;
     }
     if (!settings.enabled) {
@@ -194,8 +243,8 @@ async function applyWorklet(element: HTMLMediaElement) {
     try {
         const context = await getWorkletAudioContext();
         const workletNode = await getWorkletNode(context);
-        if (nodesMap.get(element)) {
-            // Re-check if a concurrent applyWorklet already added the element.
+        if (nodesMap.get(element)?.type === 'initialized') {
+            // Re-check if a concurrent applyWorklet already attached the element.
             return;
         }
         if (!element.isConnected) {
@@ -204,38 +253,53 @@ async function applyWorklet(element: HTMLMediaElement) {
             return;
         }
 
-        // This event registers as user interaction in Chrome apparently.
-        element.addEventListener('play', () => {
-            if (!settings.enabled) {
-                return;
-            }
-            if (context.state === 'suspended') {
-                // Required for Chrome
-                debugLog('Context got suspended, resuming');
-                context.resume();
-            }
-        });
+        if (!nodesMap.get(element)) {
+            // This event registers as user interaction in Chrome apparently.
+            element.addEventListener('play', () => {
+                if (!nodesMap.has(element)) {
+                    // The element was detached from the document and dropped after PENDING_REMOVE_DELAY_MS, but still
+                    // played: print a warning.
+                    debugLog(`WARNING: Element ${element.id} (${element.currentSrc}) plays after being removed`);
+                    return;
+                }
+                if (!settings.enabled) {
+                    return;
+                }
+                if (context.state === 'suspended') {
+                    // Required for Chrome
+                    debugLog('Context got suspended, resuming');
+                    context.resume();
+                }
+                initializeSourceNode(element, context, workletNode);
+            });
 
-        const sourceNode = context.createMediaElementSource(element);
-        sourceNode.connect(workletNode);
-        nodesMap.set(element, sourceNode);
-        debugLog(`Added source to shared worklet for element ${element.id}, channelCount ${sourceNode.channelCount}`);
+            nodesMap.set(element, { type: 'added' });
+            debugLog(`Registered element ${element.id}`);
+        }
+
+        // The element may already be playing (e.g. it was playing before the extension was enabled): the play event has
+        // already fired, so initialize the element right away.
+        if (!element.paused) {
+            initializeSourceNode(element, context, workletNode);
+        }
     } catch (error) {
         console.error('Error adding worklet to node', error);
     }
 }
 
 function removeWorklet(element: HTMLMediaElement) {
-    const sourceNode = nodesMap.get(element);
-    if (!sourceNode) {
+    const state = nodesMap.get(element);
+    if (!state) {
         console.error('Removing non-added element', element);
         return;
     }
 
     try {
-        sourceNode.disconnect();
+        if (state.type === 'initialized') {
+            state.sourceNode.disconnect();
+        }
         nodesMap.delete(element);
-        debugLog(`Removed source from shared worklet for element ${element.id}`);
+        debugLog(`Removed element ${element.id}`);
     } catch (error) {
         console.error('Error removing worklet from element:', error);
     }
@@ -301,11 +365,9 @@ function applyWorkletToChildren(node: Element | Document) {
     }
     debugLog(`Found ${elements.length} audio/video elements in ${node}, adding worklet`);
 
-    elements.forEach(async (e) => {
+    elements.forEach((e) => {
         if (e instanceof HTMLMediaElement) {
-            if (!nodesMap.get(e)) {
-                await applyWorklet(e);
-            }
+            applyWorklet(e);
         } else {
             console.error('Got element which is not audio/video', e);
         }
@@ -380,9 +442,12 @@ async function applySettingsImpl(gotEnabled: boolean, gotDisabled: boolean) {
             // through worklet, for those it will do a no-op).
             const context = await getWorkletAudioContext();
             const worklet = await getWorkletNode(context);
-            for (const sourceNode of nodesMap.values()) {
-                sourceNode.disconnect();
-                sourceNode.connect(worklet);
+            for (const state of nodesMap.values()) {
+                if (state.type !== 'initialized') {
+                    continue;
+                }
+                state.sourceNode.disconnect();
+                state.sourceNode.connect(worklet);
             }
         }
     }
@@ -390,9 +455,12 @@ async function applySettingsImpl(gotEnabled: boolean, gotDisabled: boolean) {
         if (nodesMap.size > 0) {
             // Route all nodes through default destination.
             const context = await getWorkletAudioContext();
-            for (const sourceNode of nodesMap.values()) {
-                sourceNode.disconnect();
-                sourceNode.connect(context.destination);
+            for (const state of nodesMap.values()) {
+                if (state.type !== 'initialized') {
+                    continue;
+                }
+                state.sourceNode.disconnect();
+                state.sourceNode.connect(context.destination);
             }
         }
     }
