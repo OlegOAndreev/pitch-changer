@@ -1,18 +1,20 @@
 {
   "type": "module",
   "scripts": {
-    "build:extension": "npm run build:ts && npm run build:assets && npm run lint:webext",
-    "build:ts": "eslint -c ../eslint.config.ts src/*.ts && esbuild --bundle --target=chrome89,firefox89 --format=esm --outdir=dist src/*.ts && esbuild --bundle --target=chrome89,firefox89 --format=esm --outdir=dist ../src/audio-processor-worker.ts",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build:extension": "npm run clean && npm run build:ts && npm run build:assets && npm run lint:webext",
+    "build:ts": "eslint -c ../eslint.config.ts src/*.ts && npm run typecheck && esbuild --bundle --target=chrome89,firefox89 --format=esm --outdir=dist src/*.ts && esbuild --bundle --target=chrome89,firefox89 --format=esm --outdir=dist ../src/audio-processor-worker.ts",
     "build:assets": "cp -r assets/* dist/ && cp ../wasm/build/wasm_main_module_bg.wasm dist/",
     "lint:webext": "web-ext lint --source-dir dist",
     "package:extension": "npm run build:extension && web-ext sign --source-dir dist --channel unlisted && mv web-ext-artifacts/*.xpi audio-pitch-changer-`jq -r .version < ./assets/manifest.json`.xpi"
   },
   "devDependencies": {
-    "@eslint/css": "^0.14.1",
-    "@types/chrome": "^0.1.37",
-    "esbuild": "^0.27.3",
-    "eslint": "^9.39.2",
-    "typescript-eslint": "^8.56.0",
-    "web-ext": "^9.3.0"
+    "@eslint/css": "^2.0.0",
+    "@types/chrome": "^0.3.4",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.11.0",
+    "typescript-eslint": "^8.71.0",
+    "web-ext": "^10.7.0"
   }
 }

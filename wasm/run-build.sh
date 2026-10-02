@@ -7,8 +7,7 @@ set -e
 # Latest wasm-pack release was too long ago and now a few of dependencies are vulnerable, which is annoying.
 # Run wasm-bindgen and wasm-opt ourselves as outlined here: https://fourteenscrews.com/essays/look-ma-no-wasm-pack/
 
-BUILD_PROFILE="release"
-#BUILD_PROFILE="dev"
+BUILD_PROFILE=${BUILD_PROFILE:-release}
 
 echo "Building with profile: $BUILD_PROFILE"
 
@@ -26,6 +25,9 @@ case $BUILD_PROFILE in
   "release")
     WASM_INPUT="./target/$WASM_TARGET/release/wasm_main_module.wasm"
     ;;
+  *)
+    echo "Error: Unknown build profile \"$BUILD_PROFILE\", expected \"dev\" or \"release\""
+    exit 1
 esac
 if [ ! -f "$WASM_INPUT" ]; then
     echo "Error: WebAssembly file not found at $WASM_INPUT"

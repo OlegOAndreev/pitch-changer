@@ -241,7 +241,7 @@ async function runPlay(player: Player): Promise<void> {
                 underrunsLabel.textContent = `Got ${stats.numUnderruns} underruns`;
             }
         } catch (error) {
-            throw new Error(`Error getting latest samples: ${error}`);
+            throw new Error(`Error getting latest samples: ${error}`, { cause: error });
         }
     }, SPECTROGRAM_INTERVAL);
 
@@ -441,7 +441,7 @@ async function handleBenchmarkClick(withNoise: boolean) {
         await handleDebugPanelClick();
         console.log('Benchmark completed:', results);
     } catch (error) {
-        throw new Error(`Benchmark failed: ${error}`);
+        throw new Error(`Benchmark failed: ${error}`, { cause: error });
     } finally {
         benchmarkNoiseBtn.disabled = false;
         benchmarkSineBtn.disabled = false;
@@ -454,7 +454,7 @@ async function handleCopyDebugClick() {
     try {
         await navigator.clipboard.writeText(text);
     } catch (error) {
-        throw new Error(`Failed to copy to clipboard: ${error}`);
+        throw new Error(`Failed to copy to clipboard: ${error}`, { cause: error });
     }
 }
 
