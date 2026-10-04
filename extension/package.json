@@ -5,7 +5,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:extension": "npm run clean && npm run build:ts && npm run build:assets && npm run lint:webext",
     "build:ts": "eslint -c ../eslint.config.ts src/*.ts && npm run typecheck && esbuild --bundle --target=chrome89,firefox89 --format=esm --outdir=dist src/*.ts && esbuild --bundle --target=chrome89,firefox89 --format=esm --outdir=dist ../src/audio-processor-worker.ts",
-    "build:assets": "cp -r assets/* dist/ && cp ../wasm/build/wasm_main_module_bg.wasm dist/",
+    "build:assets": "cp -r assets/* dist/ && cp ../wasm/pkg/wasm_main_module_bg.wasm dist/",
     "lint:webext": "web-ext lint --source-dir dist",
     "package:extension": "npm run build:extension && web-ext sign --source-dir dist --channel unlisted && mv web-ext-artifacts/*.xpi audio-pitch-changer-`jq -r .version < ./assets/manifest.json`.xpi"
   },

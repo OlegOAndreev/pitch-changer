@@ -3,7 +3,7 @@
 set -ex
 
 cd `dirname $0`
-DEST_DIR="./build"
+DEST_DIR="./target/tools"
 
 mkdir -p "$DEST_DIR"
 

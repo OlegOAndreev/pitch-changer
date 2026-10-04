@@ -4,7 +4,7 @@ import initWasmModule, {
     get_settings,
     MultiPitchShifter,
     PitchShiftParams,
-} from '../wasm/build/wasm_main_module';
+} from '../wasm/pkg/wasm_main_module';
 import type {
     AudioProcessorClientRequest,
     AudioProcessorRequest,

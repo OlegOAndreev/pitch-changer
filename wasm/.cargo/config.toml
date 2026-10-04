@@ -1,14 +1,3 @@
+# Unfortunately we can't set this flag in Cargo.toml
 [target.wasm32-unknown-unknown]
 rustflags = ["-C", "target-feature=+simd128"]
-
-[profile.dev]
-# Never build without optimizations
-opt-level = 1
-# We do not debug anyway
-debug = "line-tables-only"
-
-[profile.release]
-# Enable backtrace info
-# debug = "line-tables-only"
-# Enable this for faster builds
-debug = "none"

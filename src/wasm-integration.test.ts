@@ -7,13 +7,13 @@ const runIntegrationTests = process.env.WASM_INTEGRATION === 'true';
 
 if (runIntegrationTests) {
     describe('Float32Vec', () => {
-        let Float32Vec: typeof import('../wasm/build/wasm_main_module').Float32Vec;
+        let Float32Vec: typeof import('../wasm/pkg/wasm_main_module').Float32Vec;
 
         beforeAll(async () => {
             // Dynamically import the wasm module only when tests are run
-            const wasmModule = await import('../wasm/build/wasm_main_module');
+            const wasmModule = await import('../wasm/pkg/wasm_main_module');
             // Use initSync with the wasm binary for Node.js environment
-            const wasmPath = join(__dirname, '../wasm/build/wasm_main_module_bg.wasm');
+            const wasmPath = join(__dirname, '../wasm/pkg/wasm_main_module_bg.wasm');
             const wasmBinary = readFileSync(wasmPath);
             wasmModule.initSync({ module: wasmBinary });
             Float32Vec = wasmModule.Float32Vec;

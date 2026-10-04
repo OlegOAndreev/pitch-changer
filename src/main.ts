@@ -1,4 +1,4 @@
-import initWasmModule, { get_settings } from '../wasm/build/wasm_main_module';
+import initWasmModule, { get_settings } from '../wasm/pkg/wasm_main_module';
 import { AudioProcessorManager } from './audio-processor';
 import audioProcessorURL from './audio-processor-worker.ts?worker&url';
 import { runBenchmark, type BenchmarkResults } from './benchmark';

@@ -1,4 +1,4 @@
-import { Float32Vec, MultiPitchShifter, PitchShiftParams } from '../wasm/build/wasm_main_module';
+import { Float32Vec, MultiPitchShifter, PitchShiftParams } from '../wasm/pkg/wasm_main_module';
 import type { InterleavedAudio, ProcessingMode } from './types';
 
 export interface BenchmarkResults {

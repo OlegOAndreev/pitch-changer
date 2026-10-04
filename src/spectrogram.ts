@@ -1,4 +1,4 @@
-import { Float32Vec, SpectralHistogram } from '../wasm/build/wasm_main_module';
+import { Float32Vec, SpectralHistogram } from '../wasm/pkg/wasm_main_module';
 
 // Size of the FFT window for spectrogram computation
 export const SPECTROGRAM_SIZE = 2048;
