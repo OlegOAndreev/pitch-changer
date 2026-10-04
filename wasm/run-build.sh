@@ -15,21 +15,24 @@ cd `dirname $0`
 TOOLS_DIR="./target/tools"
 BUILD_DIR="./pkg"
 WASM_TARGET="wasm32-unknown-unknown"
-
-echo "Building WebAssembly module..."
-cargo build --target $WASM_TARGET --profile $BUILD_PROFILE
+BINARY_NAME="wasm_main_module"
 
 case $BUILD_PROFILE in
   "dev")
-    WASM_INPUT="./target/$WASM_TARGET/debug/wasm_main_module.wasm"
+    OUT_DIR="target/wasm32-unknown-unknown/debug"
     ;;
   "release")
-    WASM_INPUT="./target/$WASM_TARGET/release/wasm_main_module.wasm"
+    OUT_DIR="target/wasm32-unknown-unknown/release"
     ;;
   *)
     echo "Error: Unknown build profile \"$BUILD_PROFILE\", expected \"dev\" or \"release\""
     exit 1
 esac
+
+echo "Building WebAssembly module..."
+cargo build --target $WASM_TARGET --profile $BUILD_PROFILE
+
+WASM_INPUT="$OUT_DIR/$BINARY_NAME.wasm"
 if [ ! -f "$WASM_INPUT" ]; then
     echo "Error: WebAssembly file not found at $WASM_INPUT"
     exit 1
@@ -37,7 +40,7 @@ fi
 
 # Do not run wasm-bindgen and wasm-opt on null builds.
 CURRENT_HASH=`sha256sum "$WASM_INPUT"`
-HASH_FILE="$BUILD_DIR/wasm_main_module.hash"
+HASH_FILE="$BUILD_DIR/$BINARY_NAME.hash"
 if [ -f "$HASH_FILE" ]; then
     PREVIOUS_HASH=`cat "$HASH_FILE"`
     if [ "$CURRENT_HASH" = "$PREVIOUS_HASH" ]; then
@@ -47,21 +50,23 @@ if [ -f "$HASH_FILE" ]; then
 fi
 
 echo "Running wasm-bindgen..."
-time "$TOOLS_DIR/bin/wasm-bindgen" --target web --out-dir "$BUILD_DIR" "$WASM_INPUT"
+time "$TOOLS_DIR/bin/wasm-bindgen" \
+    --target web --keep-debug --split-debug-info \
+    --out-dir "$BUILD_DIR" "$WASM_INPUT"
 
 # We disable FinalizationRegistry for performance: registering/unregistering every return object by wasm-bindgen is
 # very slow on Firefox and moderately slow on Chrome. FinalizationRegistry is a not so great idea anyway, e.g. see
 # https://blog.cloudflare.com/en-en/we-shipped-finalizationregistry-in-workers-why-you-should-never-use-it/
 #
 # It would've been nice if this could be configured via cli flags...
-echo "Patching wasm_main_module.js to disable FinalizationRegistry..."
+echo "Patching $BINARY_NAME.js to disable FinalizationRegistry..."
 # Use sed compatible with both macOS and Linux
-sed -i.bak "s/(typeof FinalizationRegistry === 'undefined')/(true)/g" "$BUILD_DIR/wasm_main_module.js" && rm -f "$BUILD_DIR/wasm_main_module.js.bak"
+sed -i.bak "s/(typeof FinalizationRegistry === 'undefined')/(true)/g" "$BUILD_DIR/$BINARY_NAME.js" && rm -f "$BUILD_DIR/$BINARY_NAME.js.bak"
 
 if [ $BUILD_PROFILE == "release" ]; then
   echo "Running wasm-opt for optimization..."
   WASM_OPT=../node_modules/binaryen/bin/wasm-opt
-  WASM_OUTPUT="$BUILD_DIR/wasm_main_module_bg.wasm"
+  WASM_OUTPUT="$BUILD_DIR/${BINARY_NAME}_bg.wasm"
   time $WASM_OPT -Os "$WASM_OUTPUT" -o "$WASM_OUTPUT"
 else
   echo "Skipping wasm-opt"
