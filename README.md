@@ -6,10 +6,6 @@ written in TypeScript and uses Web Audio + WASM in Web Workers. All processing i
 
 ## Development
 
-### General instructions
-
-See AGENTS.md for details on how to build and test the project.
-
 ### Preparing environment
 Install node.js and run to install all the required libraries and scripts.
 ```bash
@@ -17,19 +13,34 @@ npm install
 ./wasm/install-build-deps.sh
 ```
 
-### Building
+### Building and testing
+Full build, output in `dist/`:
 ```bash
 npm run build
 ```
 
-Builds in the `dist/` directory.
+Other useful commands:
+```bash
+npm run build:ts     # TypeScript/HTML/CSS only; use when Rust is unchanged
+npm test             # All tests
+npm run test:ts      # TypeScript tests
+npm run test:wasm    # Rust tests only
+```
 
 ### Running dev server
-```
-npx vite
+Start the local dev server with URL http://localhost:5173/pitch-changer/
+```bash
+npm run dev
 ```
 
-Starts the local dev server with URL http://localhost:5173/pitch-changer/
+
+### Audio formats
+Web Audio produces and accepts deinterleaved (planar) audio: one `Float32Array` per channel. Internally all audio is
+interleaved (see `InterleavedAudio`), including in `SamplesQueue` and when passing data to/from the WASM module.
+Conversion happens only at the Web Audio boundaries.
+
+### Conventions
+- Prefer id-based CSS selectors; add class-based rules only when they remove duplication.
 
 ## References
 
