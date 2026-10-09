@@ -17,8 +17,23 @@ import {
     let processorUrl: string;
     let workerIframeUrl: string;
     let audioProcessorWorkerUrl: string;
-    // We push the AudioContext only when the destination() is called for the first time.
-    const overriddenAudioContexts: PitchChangerOverrideAudioContext[] = [];
+    // We add the AudioContext only when the destination() is called for the first time. The contexts are held weakly:
+    // pages often drop contexts without calling close(), and we must not keep them alive.
+    const overriddenAudioContexts = new Set<WeakRef<PitchChangerOverrideAudioContext>>();
+
+    // Iterates over contexts which are still alive, dropping the collected ones.
+    function liveAudioContexts(): PitchChangerOverrideAudioContext[] {
+        const result = [];
+        for (const ref of overriddenAudioContexts) {
+            const context = ref.deref();
+            if (context) {
+                result.push(context);
+            } else {
+                overriddenAudioContexts.delete(ref);
+            }
+        }
+        return result
+    }
 
     function debugLog(...args: unknown[]): void {
         if (settings?.debugLogging) {
@@ -27,14 +42,15 @@ import {
     }
 
     // This is a copy of createWorkerInIframe from pitch-changer-content.ts, adapted to MAIN world.
-    async function createWorkerInIframe(): Promise<MessagePort> {
+    // Removing the returned iframe terminates the worker.
+    async function createWorkerInIframe(): Promise<{ iframe: HTMLIFrameElement; port: MessagePort }> {
         const workerIframe = document.createElement('iframe');
         const workerIframeUrlParsed = new URL(workerIframeUrl);
         // The parameters are parsed by worker-iframe.ts
         workerIframeUrlParsed.searchParams.append('worker_url', audioProcessorWorkerUrl);
 
-        let resolve: (value: MessagePort) => void;
-        const promise = new Promise<MessagePort>((res) => {
+        let resolve: (value: { iframe: HTMLIFrameElement; port: MessagePort }) => void;
+        const promise = new Promise<{ iframe: HTMLIFrameElement; port: MessagePort }>((res) => {
             resolve = res;
         });
         const onMessage = (event: MessageEvent) => {
@@ -45,7 +61,7 @@ import {
                 throw new Error(`MAIN: Unknown message type from worker iframe: ${JSON.stringify(event.data)}`);
             }
             const data = event.data as WorkerIframeInit;
-            resolve(data.audioProcessorClientPort);
+            resolve({ iframe: workerIframe, port: data.audioProcessorClientPort });
             window.removeEventListener('message', onMessage);
         };
         window.addEventListener('message', onMessage);
@@ -70,6 +86,9 @@ import {
         private pitchChangerOverrideWorkletNode: Promise<AudioWorkletNode> | null = null;
         private pitchChangerOverrideWasEnabled = false;
         private pitchChangerOverrideClosed = false;
+        // Hosts the worker for this context, removed on close().
+        private pitchChangerOverrideWorkerIframe: HTMLIFrameElement | null = null;
+        private readonly pitchChangerOverrideRef = new WeakRef(this);
         // Statistics reported by the processor of this context, read by getStats().
         pitchChangerOverrideFastPathActive = true;
         pitchChangerOverrideCurrentLatencyMs = 0;
@@ -95,7 +114,7 @@ import {
                 gainNode.maxChannelCount = this.pitchChangerOverrideRealDestination.maxChannelCount;
                 this.pitchChangerOverrideGainNode = gainNode as unknown as AudioDestinationNode;
 
-                overriddenAudioContexts.push(this);
+                overriddenAudioContexts.add(this.pitchChangerOverrideRef);
 
                 this.pitchChangerOverrideApplySettings();
             }
@@ -105,14 +124,11 @@ import {
 
         async close(): Promise<void> {
             debugLog('PitchChangerOverrideAudioContext close');
-            if (this.pitchChangerOverrideRealDestination) {
-                const idx = overriddenAudioContexts.indexOf(this);
-                if (idx === -1) {
-                    console.error('Could not find this context in overriddenAudioContexts');
-                } else {
-                    overriddenAudioContexts.splice(idx, 1);
-                }
-                this.pitchChangerOverrideClosed = true;
+            overriddenAudioContexts.delete(this.pitchChangerOverrideRef);
+            this.pitchChangerOverrideClosed = true;
+            if (this.pitchChangerOverrideWorkerIframe) {
+                this.pitchChangerOverrideWorkerIframe.remove();
+                this.pitchChangerOverrideWorkerIframe = null;
             }
 
             await super.close();
@@ -203,7 +219,13 @@ import {
                 this.pitchChangerOverrideQueueLength = message.queueLength;
             };
 
-            const audioProcessorClientPort = await createWorkerInIframe();
+            const { iframe, port: audioProcessorClientPort } = await createWorkerInIframe();
+            if (this.pitchChangerOverrideClosed) {
+                // close() was called while the worker iframe was loading.
+                iframe.remove();
+            } else {
+                this.pitchChangerOverrideWorkerIframe = iframe;
+            }
             result.port.postMessage(
                 {
                     type: 'pitch-changer-extension-processor-init',
@@ -230,7 +252,7 @@ import {
         );
         settings = newSettings;
 
-        for (const context of overriddenAudioContexts) {
+        for (const context of liveAudioContexts()) {
             // We intentionally do not await this.
             context.pitchChangerOverrideApplySettings();
         }
@@ -241,14 +263,16 @@ import {
         let currentLatencyMs = 0;
         let numUnderruns = 0;
         let queueLength = 0;
-        for (const context of overriddenAudioContexts) {
+        let numAudioContexts = 0;
+        for (const context of liveAudioContexts()) {
+            numAudioContexts++;
             fastPathActive = fastPathActive && context.pitchChangerOverrideFastPathActive;
             currentLatencyMs = Math.max(currentLatencyMs, context.pitchChangerOverrideCurrentLatencyMs);
             numUnderruns += context.pitchChangerOverrideNumUnderruns;
             queueLength = Math.max(queueLength, context.pitchChangerOverrideQueueLength);
         }
         return {
-            numAudioContexts: overriddenAudioContexts.length,
+            numAudioContexts: numAudioContexts,
             fastPathActive: fastPathActive,
             currentLatencyMs: currentLatencyMs,
             numUnderruns: numUnderruns,
@@ -282,7 +306,7 @@ import {
                 workerIframeUrl = init.workerIframeUrl;
                 audioProcessorWorkerUrl = init.audioProcessorWorkerUrl;
 
-                for (const context of overriddenAudioContexts) {
+                for (const context of liveAudioContexts()) {
                     // We intentionally do not await this.
                     context.pitchChangerOverrideApplySettings();
                 }
