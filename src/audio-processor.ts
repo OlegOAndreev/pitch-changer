@@ -78,6 +78,12 @@ export class AudioProcessorManager {
         this.worker!.postMessage(message);
     }
 
+    // Terminates the worker, the manager must not be used afterwards.
+    terminate(): void {
+        this.worker?.terminate();
+        this.worker = undefined;
+    }
+
     // A helper which processes the data all at once.
     async processAudio(data: Float32Array): Promise<Float32Array> {
         const chunks: Float32Array[] = [];

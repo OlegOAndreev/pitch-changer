@@ -76,6 +76,7 @@ export class Recorder {
         } catch (error) {
             this.rejectRecording!(error instanceof Error ? error : new Error(String(error)));
             this.cleanup();
+            return promise;
         }
 
         onStartRecord();

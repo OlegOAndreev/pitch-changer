@@ -108,7 +108,7 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
             this.resetRequired = true;
         }
         this.prevProcessingMode = params.processingMode;
-        this.passthroughEnabled = params.enablePassthroughOptimization && params.pitchValue == 1.0;
+        this.passthroughEnabled = params.enablePassthroughOptimization && params.pitchValue === 1.0;
         if (this.passthroughEnabled && this.currentLatency === 0) {
             // Hack: if we are just setting params, immediately enable passthrough so that we do not get a click on new
             // pages with pitch value = 1.0.

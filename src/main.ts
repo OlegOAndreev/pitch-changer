@@ -198,14 +198,25 @@ async function handleRecordClick(): Promise<void> {
     if (!recorder.isRecording) {
         await onBeforeSourceAudioDataSet();
 
-        appState.sourceAudio = await recorder.record(() => {
-            sourceLabel.textContent = 'Recording...';
-            recordBtn.disabled = false;
-            recordBtn.title = 'Stop';
-            recordBtn.classList.add('recording');
-            recordBtnEmoji.classList.remove(recordingBtnClass);
-            recordBtnEmoji.classList.add(stopBtnClass);
-        });
+        try {
+            appState.sourceAudio = await recorder.record(() => {
+                sourceLabel.textContent = 'Recording...';
+                recordBtn.disabled = false;
+                recordBtn.title = 'Stop';
+                recordBtn.classList.add('recording');
+                recordBtnEmoji.classList.remove(recordingBtnClass);
+                recordBtnEmoji.classList.add(stopBtnClass);
+            });
+        } catch (error) {
+            // Recording never started (e.g. microphone access denied): restore buttons for the previous source audio.
+            if (appState.sourceAudio) {
+                onAfterSourceAudioDataSet();
+            } else {
+                recordBtn.disabled = false;
+                loadBtn.disabled = false;
+            }
+            throw error;
+        }
 
         sourceLabel.textContent = `Recorded ${secondsToString(getAudioSeconds(appState.sourceAudio))}`;
         recordBtn.title = 'Record';
@@ -309,15 +320,20 @@ async function handleFileInputChange(file: File): Promise<void> {
 async function processAllAudio(): Promise<InterleavedAudio> {
     const startTime = performance.now();
     const manager = await AudioProcessorManager.create(audioProcessorURL, (e) => logError(e, null));
-    manager.setParams(
-        appState.settings.processingMode,
-        appState.settings.pitchValue,
-        appState.sourceAudio!.sampleRate,
-        appState.sourceAudio!.numChannels,
-        // Use higher fft size for offline audio processing quality.
-        fftSizeForSampleRate(appState.sourceAudio!.sampleRate, 80),
-    );
-    const processedData = await manager.processAudio(appState.sourceAudio!.data);
+    let processedData: Float32Array;
+    try {
+        manager.setParams(
+            appState.settings.processingMode,
+            appState.settings.pitchValue,
+            appState.sourceAudio!.sampleRate,
+            appState.sourceAudio!.numChannels,
+            // Use higher fft size for offline audio processing quality.
+            fftSizeForSampleRate(appState.sourceAudio!.sampleRate, 80),
+        );
+        processedData = await manager.processAudio(appState.sourceAudio!.data);
+    } finally {
+        manager.terminate();
+    }
     const endTime = performance.now();
     console.log(`Processed ${getAudioSeconds(appState.sourceAudio!)}s of audio in ${endTime - startTime}ms`);
     return {
