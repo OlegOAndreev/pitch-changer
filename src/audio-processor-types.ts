@@ -49,4 +49,8 @@ export interface ProcessSamplesResponse {
 
 export type AudioProcessorRequest = WorkerInitMessage | SetClientPortMessage | SetParamsMessage;
 export type AudioProcessorResponse = WorkerInitResponse;
-export type AudioProcessorClientRequest = ResetRequest | ProcessSamplesRequest | SetParamsMessage | FinishProcessRequest;
+export type AudioProcessorClientRequest =
+    | ResetRequest
+    | ProcessSamplesRequest
+    | SetParamsMessage
+    | FinishProcessRequest;

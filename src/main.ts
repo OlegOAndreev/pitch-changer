@@ -2,7 +2,15 @@ import initWasmModule, { get_settings } from '../wasm/pkg/wasm_main_module';
 import { AudioProcessorManager } from './audio-processor';
 import audioProcessorURL from './audio-processor-worker.ts?worker&url';
 import { runBenchmark, type BenchmarkResults } from './benchmark';
-import { debounce, fftSizeForSampleRate, getById, logError, setupWindowOnError, sleep, withButtonsDisabled } from './common-utils';
+import {
+    debounce,
+    fftSizeForSampleRate,
+    getById,
+    logError,
+    setupWindowOnError,
+    sleep,
+    withButtonsDisabled,
+} from './common-utils';
 import { decodeAudioFromBlob } from './media-decoder';
 import { encodeAudioToBlob } from './media-encoder';
 import { Player } from './player';

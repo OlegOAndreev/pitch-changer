@@ -32,7 +32,7 @@ import {
                 overriddenAudioContexts.delete(ref);
             }
         }
-        return result
+        return result;
     }
 
     function debugLog(...args: unknown[]): void {
