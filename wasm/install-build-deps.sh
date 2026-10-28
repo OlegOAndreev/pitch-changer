@@ -15,4 +15,4 @@ if [ -z "$WASM_BINDGEN_VERSION" ]; then
     echo "Error: Could not find wasm-bindgen version in Cargo.toml"
     exit 1
 fi
-cargo install wasm-bindgen-cli --version "=$WASM_BINDGEN_VERSION" --root "$DEST_DIR" --force
+cargo install wasm-bindgen-cli --version "=$WASM_BINDGEN_VERSION" --root "$DEST_DIR" --locked

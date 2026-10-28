@@ -46,7 +46,7 @@ pffft = ["dep:cc"]
 # Reading .iter().zip() chains is considerably harder for me, while the generated code is the same if we bound the
 # iteration upper bound.
 manual_range_contains = "allow"
-needless-range-loop = "allow"
+needless_range_loop = "allow"
 
 [profile.dev]
 # Never build without optimizations

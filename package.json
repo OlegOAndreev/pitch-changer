@@ -6,16 +6,17 @@
   "scripts": {
     "dev": "vite",
     "build": "npm run build:wasm && npm run build:ts",
+    "build:ts": "npm run check:ts && vite build",
     "build:wasm": "./wasm/run-build.sh",
-    "build:ts": "eslint ./src/** && tsc && vite build",
-    "preview": "vite preview",
-    "test": "npm run test:ts && npm run test:wasm",
+    "check:ts": "tsc && eslint src",
+    "test": "npm run test:wasm && npm run check:ts && npm run test:ts",
     "test:ts": "vitest run",
     "test:wasm": "cd wasm && cargo test --release",
     "test:wasm-integration": "npm run build:wasm && WASM_INTEGRATION=true vitest run src/wasm-integration.test.ts",
     "clippy": "cd wasm && cargo clippy",
-    "build:extension": "npm run build:wasm && npm run --prefix extension build:extension",
-    "package:extension": "npm run build:wasm && npm run --prefix extension package:extension"
+    "build:extension": "npm run build:wasm && npm run --prefix extension build",
+    "test:extension": "npm run --prefix extension test",
+    "package:extension": "npm run build:wasm && npm run --prefix extension package"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.3.1",
