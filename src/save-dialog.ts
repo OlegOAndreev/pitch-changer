@@ -1,38 +1,22 @@
 import { getById } from './common-utils';
 
-const saveDialogOverlay = getById<HTMLDivElement>('save-dialog-overlay');
+const saveDialog = getById<HTMLDialogElement>('save-dialog');
 const saveInput = getById<HTMLInputElement>('save-filename-input');
-const saveOkBtn = getById<HTMLButtonElement>('save-dialog-ok-btn');
-const saveCancelBtn = getById<HTMLButtonElement>('save-dialog-cancel-btn');
 
 // This callback is set when the dialog is open.
 let saveDialogResolve: ((filename: string | null) => void) | null;
 
-saveOkBtn.addEventListener('click', () => {
-    const filename = saveInput.value.trim();
-    saveDialogOverlay.style.display = 'none';
+saveDialog.addEventListener('close', () => {
     if (!saveDialogResolve) {
-        throw new Error('Save button is clicked even though the resolve is not set');
+        throw new Error('Save dialog is closed even though the resolve is not set');
     }
-    saveDialogResolve(filename);
+    if (saveDialog.returnValue === 'save') {
+        const filename = saveInput.value.trim();
+        saveDialogResolve(filename);
+    } else {
+        saveDialogResolve(null);
+    }
     saveDialogResolve = null;
-});
-
-saveCancelBtn.addEventListener('click', () => {
-    saveDialogOverlay.style.display = 'none';
-    if (!saveDialogResolve) {
-        throw new Error('Save button is clicked even though the resolve is not set');
-    }
-    saveDialogResolve(null);
-    saveDialogResolve = null;
-});
-
-saveInput.addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'Enter') {
-        saveOkBtn.click();
-    } else if (e.key === 'Escape') {
-        saveCancelBtn.click();
-    }
 });
 
 // Unlike the file upload, the browsers are split on saving files: Chrome supports file system access API, while Safari
@@ -61,7 +45,8 @@ export async function showSaveDialog(): Promise<[string | null, FileSystemFileHa
             throw error;
         }
     } else {
-        saveDialogOverlay.style.display = 'flex';
+        saveDialog.returnValue = '';
+        saveDialog.showModal();
         saveInput.focus();
         saveInput.select();
         const promise = new Promise<[string | null, FileSystemFileHandle | null]>((res) => {

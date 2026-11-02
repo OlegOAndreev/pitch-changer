@@ -68,16 +68,16 @@
     <input type="file" id="file-input" accept="audio/*" style="display: none" />
 
     <!-- Save filename dialog, used on non-Chrome browsers as workaround for showSaveFilePicker -->
-    <div id="save-dialog-overlay" class="dialog-overlay" style="display: none">
-      <div class="dialog">
+    <dialog id="save-dialog" class="dialog">
+      <form method="dialog">
         <label for="save-filename-input">Filename:</label>
         <input type="text" id="save-filename-input" value="scaled.mp3" />
         <div class="dialog-buttons">
-          <button id="save-dialog-cancel-btn" class="dialog-btn control-btn">Cancel</button>
-          <button id="save-dialog-ok-btn" class="dialog-btn control-btn">OK</button>
+          <button value="save" class="dialog-btn control-btn">OK</button>
+          <button value="cancel" class="dialog-btn control-btn">Cancel</button>
         </div>
-      </div>
-    </div>
+      </form>
+    </dialog>
     <a id="save-dialog-link" style="display: none"></a>
 
     <!-- Debug panel -->
