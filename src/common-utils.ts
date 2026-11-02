@@ -1,3 +1,5 @@
+import { showError } from './notify';
+
 // Returns "base name" from file path or URL
 export function getBaseName(name: string): string {
     if (name.endsWith('/')) {
@@ -112,12 +114,12 @@ export async function sleep(delay: number): Promise<void> {
 export function setupWindowOnError() {
     window.onerror = (event: Event | string, source?: string, lineno?: number, colno?: number, error?: Error) => {
         console.error('Error:', event, source, lineno, colno, error);
-        alert(`Error: ${event}, ${source}:${lineno}, ${error}`);
+        showError(`Error: ${event}, ${source}:${lineno}, ${error}`);
     };
 
     window.onunhandledrejection = (event: PromiseRejectionEvent) => {
         console.error('Unhandled rejection:', event);
-        alert(`Unhandled rejection: ${event.reason}`);
+        showError(`Unhandled rejection: ${event.reason}`);
     };
 }
 
@@ -125,10 +127,10 @@ export function setupWindowOnError() {
 export function logError(context: string, event: ErrorEvent | null) {
     if (!event) {
         console.error(`Error: ${context}`);
-        alert(`Error: ${context}`);
+        showError(`Error: ${context}`);
     } else {
         console.error(`Error from ${context}: ${event.message}, ${event.filename}:${event.lineno}, ${event.error}`);
-        alert(`Error from ${context}: ${event.message}, ${event.filename}:${event.lineno}, ${event.error}`);
+        showError(`Error from ${context}: ${event.message}, ${event.filename}:${event.lineno}, ${event.error}`);
     }
 }
 

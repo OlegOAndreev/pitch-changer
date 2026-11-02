@@ -13,6 +13,7 @@ import {
 } from './common-utils';
 import { decodeAudioFromBlob } from './media-decoder';
 import { encodeAudioToBlob } from './media-encoder';
+import { showError } from './notify';
 import { Player } from './player';
 import { Recorder } from './recorder';
 import { saveFile, showSaveDialog } from './save-dialog';
@@ -359,7 +360,7 @@ async function handleSaveClick(): Promise<void> {
 
     const fileType = filename.split('.').pop()?.toLowerCase();
     if (!fileType || (fileType !== 'mp3' && fileType !== 'ogg' && fileType !== 'wav')) {
-        alert('Unsupported file format. Please use .mp3, .ogg or .wav');
+        showError('Unsupported file format. Please use .mp3, .ogg or .wav');
         return;
     }
 
@@ -483,15 +484,15 @@ async function handleCopyDebugClick() {
 }
 
 async function init() {
+    setupWindowOnError();
+
     // Try initializing wasm before setting onerror as it breaks webviews for some reason.
     try {
         await initWasmModule();
     } catch (error) {
-        alert(`WASM init failed: ${error}`);
+        showError(`WASM init failed: ${error}`);
         throw error;
     }
-
-    setupWindowOnError();
 
     appState = new AppState();
     applySettingsToUI(appState.settings);
