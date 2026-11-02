@@ -17,6 +17,7 @@ const STYLES = `
     max-width: min(400px, calc(100vw - 40px));
     max-height: calc(100vh - 40px);
     overflow-y: auto;
+    font-family: sans-serif;
     z-index: 10001;
 }
 
