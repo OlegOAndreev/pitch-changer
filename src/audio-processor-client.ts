@@ -20,10 +20,10 @@ export class AudioProcessorClient {
         this.port = port;
         this.port.onmessage = (event: MessageEvent<ProcessSamplesResponse>) => {
             const message = event.data;
-            if (message.type !== 'processSamplesResponse') {
-                return;
+            switch (message.type) {
+                case 'processSamplesResponse':
+                    onProcessedSamples(message.samples, message.finished);
             }
-            onProcessedSamples(message.samples, message.finished);
         };
     }
 

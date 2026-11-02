@@ -12,6 +12,7 @@ import type {
     WorkerInitResponse,
     WorkerParams,
 } from './audio-processor-types';
+import { anyToString } from './common-utils';
 
 class AudioProcessorWorker {
     private params: WorkerParams = {
@@ -55,7 +56,7 @@ class AudioProcessorWorker {
         // Start the client event loop
         // console.debug(`Starting client loop`);
         this.clientPort.onmessage = (event: MessageEvent<AudioProcessorClientRequest>) => {
-            this.onMessage(event.data);
+            void this.onMessage(event.data);
         };
     }
 
@@ -88,7 +89,7 @@ class AudioProcessorWorker {
                 break;
 
             default:
-                throw new Error(`Player worker: Unknown message type: ${JSON.stringify(message)}`);
+                throw new Error(`Player worker: Unknown message type: ${anyToString(message)}`);
         }
     }
 
@@ -207,7 +208,7 @@ class AudioProcessorWorker {
         this.processorNumChannels = this.params.numChannels;
         this.paramsAreDirty = false;
 
-        return this.processor!;
+        return this.processor;
     }
 
     private sendResult(samples: Float32Array, finished: boolean) {
@@ -243,9 +244,10 @@ function init() {
                 break;
 
             default:
-                throw new Error(`Player worker: Unknown message type: ${message}`);
+                throw new Error(`Player worker: Unknown message type: ${anyToString(message)}`);
         }
     };
+    onunhandledrejection = (event) => reportError(event.reason);
 }
 
 init();

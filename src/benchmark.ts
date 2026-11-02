@@ -184,5 +184,5 @@ export function runBenchmark(
         }
     }
 
-    return results as BenchmarkResults;
+    return results;
 }

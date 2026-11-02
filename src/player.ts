@@ -41,7 +41,7 @@ export class Player {
 
     private workletNode: AudioWorkletNode | null = null;
 
-    private playResolve: ((value?: void) => void) | null = null;
+    private playResolve: (() => void) | null = null;
     private latestSamplesResolves: Array<(stats: PlayerStats) => void> = [];
 
     private constructor(audioContext: AudioContext, processorManager: AudioProcessorManager, fftSize: number) {
@@ -116,6 +116,7 @@ export class Player {
         });
         this.workletNode.onprocessorerror = (event: ErrorEvent) => {
             logError('PlayerProcessor', event);
+            event.preventDefault();
         };
 
         this.workletNode.port.onmessage = (event: MessageEvent<PlayerResponse>) => {

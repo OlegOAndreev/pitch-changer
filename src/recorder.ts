@@ -1,4 +1,4 @@
-import { logError } from './common-utils';
+import { anyToString, logError } from './common-utils';
 import recorderProcessor from './recorder-processor.ts?worker&url';
 import { recorderProcessorName, type RecordedSamplesMessage } from './recorder-types';
 import type { InterleavedAudio } from './types';
@@ -70,11 +70,11 @@ export class Recorder {
             console.log('Microphone access granted');
 
             this.mediaStreamSourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
-            this.mediaStreamSourceNode.connect(this.audioWorkletNode!);
+            this.mediaStreamSourceNode.connect(this.audioWorkletNode);
 
             console.log('Recording started');
         } catch (error) {
-            this.rejectRecording!(error instanceof Error ? error : new Error(String(error)));
+            this.rejectRecording!(error instanceof Error ? error : new Error(anyToString(error)));
             this.cleanup();
             return promise;
         }
@@ -111,7 +111,7 @@ export class Recorder {
             this.resolveRecording(audio);
         } catch (error) {
             if (this.rejectRecording) {
-                this.rejectRecording(error instanceof Error ? error : new Error(String(error)));
+                this.rejectRecording(error instanceof Error ? error : new Error(anyToString(error)));
             }
         } finally {
             this.cleanup();

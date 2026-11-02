@@ -42,7 +42,7 @@ describe('debounce', () => {
         const mockFn = vi.fn();
         const debounced = debounce(100, mockFn);
 
-        debounced();
+        void debounced();
         expect(mockFn).not.toHaveBeenCalled();
 
         vi.advanceTimersByTime(99);
@@ -68,11 +68,11 @@ describe('debounce', () => {
         const mockFn = vi.fn();
         const debounced = debounce(100, mockFn);
 
-        debounced('first');
+        void debounced('first');
         vi.advanceTimersByTime(50);
-        debounced('second');
+        void debounced('second');
         vi.advanceTimersByTime(50);
-        debounced('third');
+        void debounced('third');
 
         expect(mockFn).not.toHaveBeenCalled();
 
@@ -127,7 +127,7 @@ describe('debounce', () => {
 
     it('propagates errors from async callback', async () => {
         const error = new Error('Async error');
-        const debounced = debounce(100, async () => {
+        const debounced = debounce(100, () => {
             throw error;
         });
 
@@ -143,7 +143,7 @@ describe('debounce', () => {
         const mockFn = vi.fn();
         const debounced = debounce(100, mockFn);
 
-        debounced(1, 'two', { three: 3 });
+        void debounced(1, 'two', { three: 3 });
         vi.advanceTimersByTime(100);
 
         expect(mockFn).toHaveBeenCalledWith(1, 'two', { three: 3 });
@@ -152,7 +152,7 @@ describe('debounce', () => {
     it('new call during async execution does not hang', async () => {
         // Simulate an async callback that takes time to complete. A new debounced call arrives while the first callback
         // is still running. Both promises must settle (not hang forever).
-        let resolve;
+        let resolve: () => void;
         const promise = new Promise<void>((res) => {
             resolve = res;
         });

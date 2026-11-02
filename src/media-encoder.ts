@@ -8,15 +8,13 @@ import {
     OggOutputFormat,
     Output,
     OutputFormat,
-    QUALITY_HIGH,
+    Quality,
     WavOutputFormat,
     type AudioCodec,
 } from 'mediabunny';
 import type { InterleavedAudio } from './types';
 
-if (!(await canEncodeAudio('mp3'))) {
-    registerMp3Encoder();
-}
+let registeredMp3Encoder = false;
 
 // Encode interleaved PCM data into a blob.
 export async function encodeAudioToBlob(fileType: string, audio: InterleavedAudio): Promise<Blob> {
@@ -25,6 +23,12 @@ export async function encodeAudioToBlob(fileType: string, audio: InterleavedAudi
 
     const startTime = performance.now();
     if (fileType === 'mp3') {
+        if (!registeredMp3Encoder) {
+            if (!(await canEncodeAudio('mp3'))) {
+                registerMp3Encoder();
+            }
+            registeredMp3Encoder = true;
+        }
         encodedData = await encodeAudioToBuffer(audio, new Mp3OutputFormat(), 'mp3');
         mimeType = 'audio/mpeg';
     } else if (fileType === 'ogg') {
@@ -64,7 +68,7 @@ async function encodeAudioToBuffer(
     try {
         const audioSource = new AudioSampleSource({
             codec: codec,
-            bitrate: QUALITY_HIGH,
+            quality: new Quality('high'),
         });
 
         output.addAudioTrack(audioSource);

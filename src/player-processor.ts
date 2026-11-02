@@ -1,5 +1,6 @@
 // AudioWorklet processor for Player.
 import { AudioProcessorClient } from './audio-processor-client';
+import { anyToString } from './common-utils';
 import {
     playerProcessorName,
     type PlayerStatsMessage,
@@ -87,7 +88,7 @@ class PlayerProcessor extends AudioWorkletProcessor {
                 this.playbackFinished = true;
                 break;
             default:
-                throw new Error(`PlayerProcessor: Unknown message type: ${JSON.stringify(message)}`);
+                throw new Error(`PlayerProcessor: Unknown message type: ${anyToString(message)}`);
         }
     }
 

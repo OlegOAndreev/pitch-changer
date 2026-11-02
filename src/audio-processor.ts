@@ -6,6 +6,7 @@ import type {
     SetParamsMessage,
     WorkerInitMessage,
 } from './audio-processor-types';
+import { anyToString } from './common-utils';
 import type { ProcessingMode } from './types';
 import { concatArrays } from './utils';
 
@@ -23,10 +24,13 @@ export class AudioProcessorManager {
     private workerInit(audioProcessorURL: string, onError: (e: string) => void): Promise<void> {
         this.worker = new Worker(audioProcessorURL, { type: 'module' });
         this.worker.onerror = (event: ErrorEvent) => {
-            onError(`AudioProcessorWorker: ${event.message}, ${event.filename}:${event.lineno}, ${event.error}`);
+            onError(
+                `AudioProcessorWorker: ${event.message}, ${event.filename}:${event.lineno}, ${anyToString(event.error)}`,
+            );
+            event.preventDefault();
         };
 
-        let resolve: (value?: void) => void;
+        let resolve: () => void;
         const promise = new Promise<void>((res) => {
             resolve = res;
         });

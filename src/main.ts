@@ -3,6 +3,7 @@ import { AudioProcessorManager } from './audio-processor';
 import audioProcessorURL from './audio-processor-worker.ts?worker&url';
 import { runBenchmark, type BenchmarkResults } from './benchmark';
 import {
+    anyToString,
     debounce,
     fftSizeForSampleRate,
     getById,
@@ -67,7 +68,7 @@ class AppState {
         try {
             Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}'));
         } catch (error) {
-            console.error(`Failed to parse settings from localStorage, using defaults: ${error}`);
+            console.error(`Failed to parse settings from localStorage, using defaults: ${anyToString(error)}`);
         }
         if (!settings.processingMode) {
             settings.processingMode = DEFAULT_PROCESSING_MODE;
@@ -76,7 +77,7 @@ class AppState {
     }
 
     async updateSettings() {
-        this.saveSettings();
+        void this.saveSettings();
         const player = await this.getPlayer();
         player.setParams(this.settings.processingMode, this.settings.pitchValue);
     }
@@ -90,7 +91,7 @@ class AppState {
             this.audioContext = new AudioContext({ latencyHint: 'interactive' });
             console.log(`AudioContext created, sample rate ${this.audioContext.sampleRate}Hz`);
         }
-        return this.audioContext!;
+        return this.audioContext;
     }
 
     async getRecorder(): Promise<Recorder> {
@@ -190,9 +191,9 @@ function applySettingsToUI(settings: AppSettings): void {
     pitchSlider.max = MAX_PITCH_VALUE.toString();
     pitchSlider.step = PITCH_VALUE_STEP.toString();
     pitchSlider.value = settings.pitchValue.toString();
-    pitchLabel.textContent = settings.pitchValue + 'x';
-    minPitchScaleLabel.textContent = MIN_PITCH_VALUE + 'x';
-    maxPitchScaleLabel.textContent = MAX_PITCH_VALUE + 'x';
+    pitchLabel.textContent = `${settings.pitchValue}x`;
+    minPitchScaleLabel.textContent = `${MIN_PITCH_VALUE}x`;
+    maxPitchScaleLabel.textContent = `${MAX_PITCH_VALUE}x`;
 
     // Show the content container after settings are applied
     contentContainer.style.visibility = 'visible';
@@ -261,7 +262,8 @@ async function runPlay(player: Player): Promise<void> {
                 underrunsLabel.textContent = `Got ${stats.numUnderruns} underruns`;
             }
         } catch (error) {
-            throw new Error(`Error getting latest samples: ${error}`, { cause: error });
+            clearInterval(spectrogramTimer);
+            throw new Error(`Error getting latest samples: ${anyToString(error)}`, { cause: error });
         }
     }, SPECTROGRAM_INTERVAL);
 
@@ -316,7 +318,7 @@ async function handleFileInputChange(file: File): Promise<void> {
         sourceLabel.textContent = `Loaded ${secondsToString(getAudioSeconds(appState.sourceAudio))} of ${file.name}`;
         onAfterSourceAudioDataSet();
     } catch (error) {
-        sourceLabel.textContent = `Error loading audio file: ${String(error)}`;
+        sourceLabel.textContent = `Error loading audio file: ${anyToString(error)}`;
         // In case of error, play and save buttons should stay disabled.
         recordBtn.disabled = false;
         loadBtn.disabled = false;
@@ -387,28 +389,28 @@ async function handleSaveClick(): Promise<void> {
 function handlePitchModeChange(): void {
     if (pitchModeRadio.checked) {
         appState.settings.processingMode = 'pitch';
-        appState.updateSettings();
+        void appState.updateSettings();
     }
 }
 
 function handleTimeModeChange(): void {
     if (timeModeRadio.checked) {
         appState.settings.processingMode = 'time';
-        appState.updateSettings();
+        void appState.updateSettings();
     }
 }
 
 function handleFormantModeChange(): void {
     if (formantPitchModeRadio.checked) {
         appState.settings.processingMode = 'formant-preserving-pitch';
-        appState.updateSettings();
+        void appState.updateSettings();
     }
 }
 
 function handlePitchSliderInput(): void {
     pitchLabel.textContent = pitchSlider.value + 'x';
     appState.settings.pitchValue = parseFloat(pitchSlider.value);
-    appState.updateSettings();
+    void appState.updateSettings();
 }
 
 async function handleDebugPanelClick() {
@@ -418,7 +420,7 @@ async function handleDebugPanelClick() {
             const wasm = await initWasmModule();
             info += `\n\nWASM settings: ${get_settings()}\n\nWASM memory: ${wasm.memory.buffer.byteLength}`;
         } catch (error) {
-            info += `\n\nWASM error: ${error}`;
+            info += `\n\nWASM error: ${anyToString(error)}`;
         }
         // Add benchmark results if available
         if (appState.benchmarkTimes) {
@@ -466,7 +468,7 @@ async function handleBenchmarkClick(withNoise: boolean) {
         await handleDebugPanelClick();
         console.log('Benchmark completed:', results);
     } catch (error) {
-        throw new Error(`Benchmark failed: ${error}`, { cause: error });
+        throw new Error(`Benchmark failed: ${anyToString(error)}`, { cause: error });
     } finally {
         benchmarkNoiseBtn.disabled = false;
         benchmarkSineBtn.disabled = false;
@@ -479,7 +481,7 @@ async function handleCopyDebugClick() {
     try {
         await navigator.clipboard.writeText(text);
     } catch (error) {
-        throw new Error(`Failed to copy to clipboard: ${error}`, { cause: error });
+        throw new Error(`Failed to copy to clipboard: ${anyToString(error)}`, { cause: error });
     }
 }
 
@@ -490,7 +492,7 @@ async function init() {
     try {
         await initWasmModule();
     } catch (error) {
-        showError(`WASM init failed: ${error}`);
+        showError(`WASM init failed: ${anyToString(error)}`);
         throw error;
     }
 
@@ -526,4 +528,4 @@ async function init() {
     debugInfo.addEventListener('click', () => handleDebugPanelClick());
 }
 
-init();
+void init();
