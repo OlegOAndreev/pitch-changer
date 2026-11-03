@@ -415,7 +415,8 @@ function handlePitchSliderInput(): void {
 
 async function handleDebugPanelClick() {
     if (debugPanel.style.display === 'none') {
-        let info = `User-agent: ${navigator.userAgent}\n\ndevicePixelRatio: ${window.devicePixelRatio}`;
+        let info = `Build: ${import.meta.env.VITE_BUILD_COMMIT} (${import.meta.env.VITE_BUILD_DATE})`;
+        info += `\n\nUser-agent: ${navigator.userAgent}\n\ndevicePixelRatio: ${window.devicePixelRatio}`;
         try {
             const wasm = await initWasmModule();
             info += `\n\nWASM settings: ${get_settings()}\n\nWASM memory: ${wasm.memory.buffer.byteLength}`;
