@@ -114,9 +114,8 @@ export class Player {
             processorOptions: options,
             outputChannelCount: [this.inputNumChannels],
         });
-        this.workletNode.onprocessorerror = (event: ErrorEvent) => {
+        this.workletNode.onprocessorerror = (event) => {
             logError('PlayerProcessor', event);
-            event.preventDefault();
         };
 
         this.workletNode.port.onmessage = (event: MessageEvent<PlayerResponse>) => {

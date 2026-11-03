@@ -128,15 +128,19 @@ export async function sleep(delay: number): Promise<void> {
 
 // Setup a few common error handlers (onerror must still be setup in each worker/worklet).
 export function setupWindowOnError() {
-    window.onerror = (event: Event | string, source?: string, lineno?: number, colno?: number, error?: Error) => {
-        console.error('Error:', event, source, lineno, colno, error);
-        showError(`Error: ${anyToString(event)}, ${source}:${lineno}, ${anyToString(error)}`);
-    };
+    window.addEventListener('error', (event) => {
+        console.error('Error:', event);
+        showError(
+            `Error: ${anyToString(event.message)}, ${event.filename}:${event.lineno}, ${anyToString(event.error)}`,
+        );
+        event.preventDefault();
+    });
 
-    window.onunhandledrejection = (event: PromiseRejectionEvent) => {
+    window.addEventListener('unhandledrejection', (event) => {
         console.error('Unhandled rejection:', event);
         showError(`Unhandled rejection: ${anyToString(event.reason)}`);
-    };
+        event.preventDefault();
+    });
 }
 
 // Log error, suitable for global error catching
@@ -145,12 +149,8 @@ export function logError(context: string, event: ErrorEvent | null) {
         console.error(`Error: ${context}`);
         showError(`Error: ${context}`);
     } else {
-        console.error(
-            `Error from ${context}: ${event.message}, ${event.filename}:${event.lineno}, ${anyToString(event.error)}`,
-        );
-        showError(
-            `Error from ${context}: ${event.message}, ${event.filename}:${event.lineno}, ${anyToString(event.error)}`,
-        );
+        console.error(`Error from ${context}: ${event.message}, ${event.filename}:${event.lineno}`);
+        showError(`Error from ${context}: ${event.message}, ${event.filename}:${event.lineno}`);
     }
 }
 

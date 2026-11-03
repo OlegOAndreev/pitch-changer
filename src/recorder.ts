@@ -57,7 +57,7 @@ export class Recorder {
 
         try {
             this.audioWorkletNode = new AudioWorkletNode(this.audioContext, recorderProcessorName);
-            this.audioWorkletNode.onprocessorerror = (event: ErrorEvent) => {
+            this.audioWorkletNode.onprocessorerror = (event) => {
                 logError('RecorderProcessor', event);
             };
 
