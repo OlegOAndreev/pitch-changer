@@ -7,7 +7,7 @@ import type {
     WorkerInitMessage,
 } from './audio-processor-types';
 import type { ProcessingMode } from './types';
-import { concatArrays } from './utils';
+import { concatArrays } from './common-utils';
 
 export class AudioProcessorManager {
     private worker: Worker | undefined;

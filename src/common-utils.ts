@@ -1,6 +1,6 @@
 import { showError } from './notify';
 
-// Converts an arbitrary value into a string for messages.
+// Convert an arbitrary value into a string for messages.
 export function anyToString(value: unknown): string {
     if (value instanceof Error) {
         return value.stack ?? `${value.name}: ${value.message}`;
@@ -15,7 +15,7 @@ export function anyToString(value: unknown): string {
     return String(value);
 }
 
-// Returns "base name" from file path or URL
+// Return "base name" from file path or URL
 export function getBaseName(name: string): string {
     if (name.endsWith('/')) {
         name = name.substring(0, name.length - 1);
@@ -39,7 +39,7 @@ export function getById<T extends HTMLElement>(elementId: string): T {
     return element as T;
 }
 
-// Converts a function into a function which is run after a fixed timeout.
+// Convert a function into a function which is run after a fixed timeout.
 //
 // Source code taken from https://tech.reverse.hr/articles/debounce-function-in-typescript
 //
@@ -94,7 +94,7 @@ export function debounce<T extends unknown[]>(
     };
 }
 
-// Wraps an async event handler to disable a button while the handler is executing.
+// Wrap an async event handler to disable a button while the handler is executing.
 export function withButtonsDisabled<T extends Event>(
     buttons: HTMLButtonElement[],
     handler: (event: T) => Promise<void> | void,
@@ -154,12 +154,26 @@ export function logError(context: string, event: ErrorEvent | null) {
     }
 }
 
-// Compute the minimal fft size for given sample rate which covers window size (in milliseconds).
-export function fftSizeForSampleRate(sampleRate: number, windowSizeMs: number): number {
-    let result = 128;
-    const targetSize = (sampleRate * windowSizeMs) / 1000;
-    while (result < targetSize) {
-        result *= 2;
+// Convert number of seconds into a string representation.
+export function secondsToString(sec: number): string {
+    const rounded = Math.max(0, Math.round(sec));
+    const minutes = Math.floor(rounded / 60);
+    const seconds = rounded % 60;
+    if (minutes > 0) {
+        return `${minutes}m${seconds}s`;
+    } else {
+        return `${seconds}s`;
+    }
+}
+
+// Concatenate multiple Float32Arrays in one
+export function concatArrays(arrays: Float32Array[]): Float32Array {
+    const totalLength = arrays.reduce((sum, chunk) => sum + chunk.length, 0);
+    const result = new Float32Array(totalLength);
+    let offset = 0;
+    for (const arr of arrays) {
+        result.set(arr, offset);
+        offset += arr.length;
     }
     return result;
 }

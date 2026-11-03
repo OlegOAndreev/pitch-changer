@@ -1,23 +1,9 @@
-// Convert number of seconds into a string representation.
-export function secondsToString(sec: number): string {
-    const rounded = Math.max(0, Math.round(sec));
-    const minutes = Math.floor(rounded / 60);
-    const seconds = rounded % 60;
-    if (minutes > 0) {
-        return `${minutes}m${seconds}s`;
-    } else {
-        return `${seconds}s`;
-    }
-}
-
-// Concatenate multiple Float32Arrays in one
-export function concatArrays(arrays: Float32Array[]): Float32Array {
-    const totalLength = arrays.reduce((sum, chunk) => sum + chunk.length, 0);
-    const result = new Float32Array(totalLength);
-    let offset = 0;
-    for (const arr of arrays) {
-        result.set(arr, offset);
-        offset += arr.length;
+// Compute the minimal fft size for given sample rate which covers window size (in milliseconds).
+export function fftSizeForSampleRate(sampleRate: number, windowSizeMs: number): number {
+    let result = 128;
+    const targetSize = (sampleRate * windowSizeMs) / 1000;
+    while (result < targetSize) {
+        result *= 2;
     }
     return result;
 }

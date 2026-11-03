@@ -5,9 +5,9 @@ import { runBenchmark, type BenchmarkResults } from './benchmark';
 import {
     anyToString,
     debounce,
-    fftSizeForSampleRate,
     getById,
     logError,
+    secondsToString,
     setupWindowOnError,
     sleep,
     withButtonsDisabled,
@@ -20,7 +20,7 @@ import { Recorder } from './recorder';
 import { saveFile, showSaveDialog } from './save-dialog';
 import { Spectrogram } from './spectrogram';
 import { getAudioLength, getAudioSeconds, type InterleavedAudio, type ProcessingMode } from './types';
-import { secondsToString } from './utils';
+import { fftSizeForSampleRate } from './utils';
 
 const MAX_PITCH_VALUE = 2.0;
 const MIN_PITCH_VALUE = 0.5;
