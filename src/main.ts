@@ -29,6 +29,8 @@ const DEFAULT_PITCH_VALUE = 1.25;
 const DEFAULT_PROCESSING_MODE = 'pitch';
 
 const SAVE_SETTINGS_DEBOUNCE = 500;
+// Delay before showing the loading overlay: avoids flashing it on fast WASM initialization.
+const LOADING_OVERLAY_DELAY = 250;
 
 const SETTINGS_KEY = 'pitch-changer-settings';
 
@@ -125,6 +127,7 @@ let appState: AppState;
 // UI elements
 //
 
+const loadingOverlay = getById<HTMLDivElement>('loading-overlay');
 const contentContainer = getById<HTMLDivElement>('content-container');
 const recordBtn = getById<HTMLButtonElement>('record-btn');
 const recordBtnEmoji = getById<HTMLButtonElement>('record-btn-emoji');
@@ -489,12 +492,18 @@ async function handleCopyDebugClick() {
 async function init() {
     setupWindowOnError();
 
-    // Try initializing wasm before setting onerror as it breaks webviews for some reason.
+    // Initialize wasm
+    const loadingOverlayTimer = setTimeout(() => {
+        loadingOverlay.style.visibility = 'visible';
+    }, LOADING_OVERLAY_DELAY);
     try {
         await initWasmModule();
     } catch (error) {
         showError(`WASM init failed: ${anyToString(error)}`);
         throw error;
+    } finally {
+        clearTimeout(loadingOverlayTimer);
+        loadingOverlay.remove();
     }
 
     appState = new AppState();
