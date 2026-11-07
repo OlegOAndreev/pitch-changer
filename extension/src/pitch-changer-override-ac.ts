@@ -10,6 +10,7 @@ import {
     type ProcessorStats,
     type WorkerIframeInit,
 } from './common.js';
+import { anyToString } from '../../src/common-utils.js';
 
 // Do IIFE to prevent symbols from leaking into main user script.
 (function () {
@@ -49,26 +50,38 @@ import {
         // The parameters are parsed by worker-iframe.ts
         workerIframeUrlParsed.searchParams.append('worker_url', audioProcessorWorkerUrl);
 
-        let resolve: (value: { iframe: HTMLIFrameElement; port: MessagePort }) => void;
-        const promise = new Promise<{ iframe: HTMLIFrameElement; port: MessagePort }>((res) => {
+        type WorkerIframeResult = { iframe: HTMLIFrameElement; port: MessagePort };
+        let resolve: (value: WorkerIframeResult) => void;
+        let reject: (reason?: unknown) => void;
+        const promise = new Promise<WorkerIframeResult>((res, rej) => {
             resolve = res;
+            reject = rej;
         });
         const onMessage = (event: MessageEvent) => {
             if (event.source !== workerIframe.contentWindow) {
                 return;
             }
+            window.removeEventListener('message', onMessage);
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
             if (event.data?.type !== 'pitch-changer-extension-worker-iframe-init') {
-                throw new Error(`MAIN: Unknown message type from worker iframe: ${JSON.stringify(event.data)}`);
+                reject(new Error(`MAIN: Unknown message type from worker iframe: ${anyToString(event.data)}`));
+                return;
             }
             const data = event.data as WorkerIframeInit;
             resolve({ iframe: workerIframe, port: data.audioProcessorClientPort });
-            window.removeEventListener('message', onMessage);
         };
         window.addEventListener('message', onMessage);
 
-        workerIframe.src = workerIframeUrlParsed.href;
-        workerIframe.hidden = true;
-        document.body.appendChild(workerIframe);
+        try {
+            workerIframe.src = workerIframeUrlParsed.href;
+            workerIframe.style.display = 'none';
+            document.body.appendChild(workerIframe);
+        } catch (error) {
+            window.removeEventListener('message', onMessage);
+            throw new Error(`Failed to insert the worker iframe into the page: ${anyToString(error)}`, {
+                cause: error,
+            });
+        }
 
         return promise;
     }
@@ -95,40 +108,53 @@ import {
         pitchChangerOverrideNumUnderruns = 0;
         pitchChangerOverrideQueueLength = 0;
 
-        constructor(contextOptions?: AudioContextOptions | undefined) {
+        constructor(contextOptions?: AudioContextOptions) {
             super(contextOptions);
             debugLog('PitchChangerOverrideAudioContext constructed with:', contextOptions);
         }
 
         get destination(): AudioDestinationNode {
-            if (!this.pitchChangerOverrideRealDestination) {
-                debugLog('PitchChangerOverrideAudioContext getting destination');
+            try {
+                if (!this.pitchChangerOverrideRealDestination) {
+                    debugLog('PitchChangerOverrideAudioContext getting destination');
 
-                this.pitchChangerOverrideRealDestination = super.destination;
-                const gainNode = this.createGain();
-                gainNode.connect(this.pitchChangerOverrideRealDestination);
-                // GainNode does not satisfy AudioDestinationNode, because it does not have one property. We simply add
-                // this property to it. All the other solutions did not get accepted by other AudioNode.connect() for
-                // some reason.
-                //@ts-expect-error We are monkey-patching the live object,
-                gainNode.maxChannelCount = this.pitchChangerOverrideRealDestination.maxChannelCount;
-                this.pitchChangerOverrideGainNode = gainNode as unknown as AudioDestinationNode;
+                    this.pitchChangerOverrideRealDestination = super.destination;
+                    const gainNode = this.createGain();
+                    gainNode.connect(this.pitchChangerOverrideRealDestination);
+                    // GainNode does not satisfy AudioDestinationNode, because it does not have one property. We simply add
+                    // this property to it. All the other solutions did not get accepted by other AudioNode.connect() for
+                    // some reason.
+                    //@ts-expect-error We are monkey-patching the live object,
+                    gainNode.maxChannelCount = this.pitchChangerOverrideRealDestination.maxChannelCount;
+                    this.pitchChangerOverrideGainNode = gainNode as unknown as AudioDestinationNode;
 
-                overriddenAudioContexts.add(this.pitchChangerOverrideRef);
+                    overriddenAudioContexts.add(this.pitchChangerOverrideRef);
 
-                this.pitchChangerOverrideApplySettings();
+                    this.pitchChangerOverrideApplySettings().catch((error: unknown) => {
+                        console.error('MAIN: failed to apply settings to a new AudioContext', error);
+                    });
+                }
+
+                return this.pitchChangerOverrideGainNode as unknown as AudioDestinationNode;
+            } catch (error) {
+                throw new Error(`Failed to set up the overridden AudioContext destination: ${anyToString(error)}`, {
+                    cause: error,
+                });
             }
-
-            return this.pitchChangerOverrideGainNode as unknown as AudioDestinationNode;
         }
 
         async close(): Promise<void> {
             debugLog('PitchChangerOverrideAudioContext close');
             overriddenAudioContexts.delete(this.pitchChangerOverrideRef);
             this.pitchChangerOverrideClosed = true;
-            if (this.pitchChangerOverrideWorkerIframe) {
-                this.pitchChangerOverrideWorkerIframe.remove();
-                this.pitchChangerOverrideWorkerIframe = null;
+            try {
+                if (this.pitchChangerOverrideWorkerIframe) {
+                    this.pitchChangerOverrideWorkerIframe.remove();
+                    this.pitchChangerOverrideWorkerIframe = null;
+                }
+            } catch (error) {
+                // Failing to remove the iframe must not prevent closing the context.
+                console.error('MAIN: failed to remove the audio processor worker iframe', error);
             }
 
             await super.close();
@@ -145,21 +171,28 @@ import {
                 const pitchChangerOverrideWorkletNode = await this.getPitchChangerOverrideWorkletNode();
                 // Re-check the condition after await.
                 if (settings.enabled && !this.pitchChangerOverrideClosed) {
-                    if (!this.pitchChangerOverrideWasEnabled) {
-                        // We cannot reach this point if the destination() has not been called: this means that
-                        // PitchChangerOverrideAudioContext has not been published in overriddenAudioContexts.
-                        this.pitchChangerOverrideGainNode!.disconnect();
-                        this.pitchChangerOverrideGainNode!.connect(pitchChangerOverrideWorkletNode);
-                        pitchChangerOverrideWorkletNode.connect(this.pitchChangerOverrideRealDestination!);
-                        this.pitchChangerOverrideWasEnabled = true;
+                    try {
+                        if (!this.pitchChangerOverrideWasEnabled) {
+                            // We cannot reach this point if the destination() has not been called: this means that
+                            // PitchChangerOverrideAudioContext has not been published in overriddenAudioContexts.
+                            this.pitchChangerOverrideGainNode!.disconnect();
+                            this.pitchChangerOverrideGainNode!.connect(pitchChangerOverrideWorkletNode);
+                            pitchChangerOverrideWorkletNode.connect(this.pitchChangerOverrideRealDestination!);
+                            this.pitchChangerOverrideWasEnabled = true;
+                        }
+                        pitchChangerOverrideWorkletNode.port.postMessage({
+                            type: 'pitch-changer-extension-processor-set-params',
+                            processingMode: settings.processingMode,
+                            pitchValue: settings.pitchValue,
+                            targetLatency: settings.targetLatency,
+                            enablePassthroughOptimization: settings.enablePassthroughOptimization,
+                        } satisfies ProcessorSetParams);
+                    } catch (error) {
+                        throw new Error(
+                            `Failed to enable pitch processing for the overridden AudioContext: ${anyToString(error)}`,
+                            { cause: error },
+                        );
                     }
-                    pitchChangerOverrideWorkletNode.port.postMessage({
-                        type: 'pitch-changer-extension-processor-set-params',
-                        processingMode: settings.processingMode,
-                        pitchValue: settings.pitchValue,
-                        targetLatency: settings.targetLatency,
-                        enablePassthroughOptimization: settings.enablePassthroughOptimization,
-                    } as ProcessorSetParams);
                 }
             } else {
                 // Do nothing if we haven't started initializing worklet node: this can happen only when we get
@@ -168,13 +201,20 @@ import {
                     const pitchChangerOverrideWorkletNode = await this.pitchChangerOverrideWorkletNode;
                     // Re-check the condition after await.
                     if (!settings.enabled && !this.pitchChangerOverrideClosed) {
-                        if (this.pitchChangerOverrideWasEnabled) {
-                            pitchChangerOverrideWorkletNode.disconnect();
-                            // We cannot reach this point if the destination() has not been called: this means that
-                            // PitchChangerOverrideAudioContext has not been published in overriddenAudioContexts.
-                            this.pitchChangerOverrideGainNode!.disconnect();
-                            this.pitchChangerOverrideGainNode!.connect(this.pitchChangerOverrideRealDestination!);
-                            this.pitchChangerOverrideWasEnabled = false;
+                        try {
+                            if (this.pitchChangerOverrideWasEnabled) {
+                                pitchChangerOverrideWorkletNode.disconnect();
+                                // We cannot reach this point if the destination() has not been called: this means that
+                                // PitchChangerOverrideAudioContext has not been published in overriddenAudioContexts.
+                                this.pitchChangerOverrideGainNode!.disconnect();
+                                this.pitchChangerOverrideGainNode!.connect(this.pitchChangerOverrideRealDestination!);
+                                this.pitchChangerOverrideWasEnabled = false;
+                            }
+                        } catch (error) {
+                            throw new Error(
+                                'failed to disable pitch processing for the overridden AudioContext: ${anyToString(error)}',
+                                { cause: error },
+                            );
                         }
                     }
                 }
@@ -189,29 +229,39 @@ import {
         }
 
         async initPitchChangerOverrideWorkletNode(): Promise<AudioWorkletNode> {
-            await this.audioWorklet.addModule(processorUrl);
+            try {
+                await this.audioWorklet.addModule(processorUrl);
+            } catch (error) {
+                throw new Error(`Failed to load the processor module from ${processorUrl}`, { cause: error });
+            }
 
             // We cannot reach this point if the destination() has not been called: this means that
             // PitchChangerOverrideAudioContext has not been published in overriddenAudioContexts.
             const destChannelCount = this.pitchChangerOverrideRealDestination!.channelCount;
-            const result = new AudioWorkletNode(this, PROCESSOR_NAME, {
-                // Force the WebAudio do up/downmixing for us.
-                channelCount: destChannelCount,
-                channelCountMode: 'explicit',
-                outputChannelCount: [destChannelCount],
-                processorOptions: {
-                    numChannels: destChannelCount,
-                } as ProcessorOptions,
-            });
+            let result: AudioWorkletNode;
+            try {
+                result = new AudioWorkletNode(this, PROCESSOR_NAME, {
+                    // Force the WebAudio do up/downmixing for us.
+                    channelCount: destChannelCount,
+                    channelCountMode: 'explicit',
+                    outputChannelCount: [destChannelCount],
+                    processorOptions: {
+                        numChannels: destChannelCount,
+                    } satisfies ProcessorOptions,
+                });
+            } catch (error) {
+                throw new Error(`Failed to create the ${PROCESSOR_NAME} AudioWorkletNode: ${anyToString(error)}`, {
+                    cause: error,
+                });
+            }
             result.onprocessorerror = (event: ErrorEvent) => {
-                console.error(
-                    `Error from PitchChangerProcessor: ${event.message}, ${event.filename}:${event.lineno}, ${event.error}`,
-                );
+                console.error(`Error from PitchChangerProcessor: ${event.message}, ${event.filename}:${event.lineno}`);
             };
             result.port.onmessage = (event: MessageEvent<ProcessorStats>) => {
                 const message = event.data;
                 if (message.type !== 'pitch-changer-extension-processor-stats') {
-                    throw new Error(`MAIN: Unknown message type from processor: ${JSON.stringify(message)}`);
+                    console.error(`MAIN: Unknown message type from processor: ${anyToString(message)}`);
+                    return;
                 }
                 this.pitchChangerOverrideFastPathActive = message.fastPathActive;
                 this.pitchChangerOverrideCurrentLatencyMs = message.currentLatencyMs;
@@ -226,20 +276,26 @@ import {
             } else {
                 this.pitchChangerOverrideWorkerIframe = iframe;
             }
-            result.port.postMessage(
-                {
-                    type: 'pitch-changer-extension-processor-init',
-                    audioProcessorClientPort: audioProcessorClientPort,
-                } as ProcessorInit,
-                [audioProcessorClientPort],
-            );
-            result.port.postMessage({
-                type: 'pitch-changer-extension-processor-set-params',
-                processingMode: settings.processingMode,
-                pitchValue: settings.pitchValue,
-                targetLatency: settings.targetLatency,
-                enablePassthroughOptimization: settings.enablePassthroughOptimization,
-            } as ProcessorSetParams);
+            try {
+                result.port.postMessage(
+                    {
+                        type: 'pitch-changer-extension-processor-init',
+                        audioProcessorClientPort: audioProcessorClientPort,
+                    } satisfies ProcessorInit,
+                    [audioProcessorClientPort],
+                );
+                result.port.postMessage({
+                    type: 'pitch-changer-extension-processor-set-params',
+                    processingMode: settings.processingMode,
+                    pitchValue: settings.pitchValue,
+                    targetLatency: settings.targetLatency,
+                    enablePassthroughOptimization: settings.enablePassthroughOptimization,
+                } satisfies ProcessorSetParams);
+            } catch (error) {
+                throw new Error(`failed to send initialization messages to the processor: ${anyToString(error)}`, {
+                    cause: error,
+                });
+            }
             debugLog(`Loaded processor from ${processorUrl} and worker from ${audioProcessorWorkerUrl} in MAIN`);
 
             return result;
@@ -248,13 +304,15 @@ import {
 
     function applySettings(newSettings: ExtensionSettings) {
         debugLog(
-            `Applying new settings in MAIN: ${JSON.stringify(newSettings)}, current settings ${JSON.stringify(settings)}`,
+            `Applying new settings in MAIN: ${anyToString(newSettings)}, current settings ${anyToString(settings)}`,
         );
         settings = newSettings;
 
         for (const context of liveAudioContexts()) {
             // We intentionally do not await this.
-            context.pitchChangerOverrideApplySettings();
+            context.pitchChangerOverrideApplySettings().catch((error: unknown) => {
+                console.error('MAIN: failed to apply settings to an overridden AudioContext', error);
+            });
         }
     }
 
@@ -298,6 +356,7 @@ import {
             if (event.source !== window) {
                 return;
             }
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
             if (event.data?.type === 'pitch-changer-extension-override-init') {
                 const init = event.data as PitchChangerOverrideInit;
                 debugLog('Audio Pitch Changer: Initializing MAIN content script, settings', init.settings);
@@ -308,7 +367,9 @@ import {
 
                 for (const context of liveAudioContexts()) {
                     // We intentionally do not await this.
-                    context.pitchChangerOverrideApplySettings();
+                    context.pitchChangerOverrideApplySettings().catch((error: unknown) => {
+                        console.error('MAIN: failed to apply settings to an overridden AudioContext', error);
+                    });
                 }
 
                 window.removeEventListener('message', onMessage);

@@ -1,19 +1,20 @@
 import {
+    disabledSettings,
     loadSettings,
     PROCESSOR_NAME,
     type ContentScriptExports,
     type ExtensionSettings,
     type PitchChangerOverrideInit,
     type ProcessorInit,
-    type ProcessorOptions,
     type ProcessorSetParams,
     type ProcessorStats,
     type StatsResult,
     type WorkerIframeInit,
 } from './common.js';
+import { anyToString } from '../../src/common-utils.js';
 
 function debugLog(...args: unknown[]): void {
-    if (settings?.debugLogging) {
+    if (settings.debugLogging) {
         console.debug(...args);
     }
 }
@@ -47,14 +48,20 @@ function debugLog(...args: unknown[]): void {
 // Each overridden AudioContext has its own AudioWorkletNode.
 //
 // MAIN world content script is run first before all the other scripts are loaded to override the AudioContext
-// constructor, the ISOLATED content script is ran much later, because it needs to complete initialization of MAIN world
-// content script. Unlike the ISOLATED world content script, MAIN world content script cannot access chrome.runtime APIs
-// and cannot get the URLs of extension scripts/wasm files or current settings.
+// constructor, the ISOLATED content script is run later, because it needs to complete initialization of MAIN world
+// content script (see order of scripts in manifest.json and
+// https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/content_scripts#load_order).
+// Unlike the ISOLATED world content script, MAIN world content script cannot access chrome.runtime APIs and cannot get
+// the URLs of extension scripts/wasm files or current settings.
 
-let settings: ExtensionSettings;
+// Initializing global values is much easier than leaving them undefined.
+let settings: ExtensionSettings = disabledSettings();
 
-let globalAudioContext: Promise<AudioContext> | null = null;
-let globalWorkletNode: Promise<AudioWorkletNode> | null = null;
+interface WorkletState {
+    context: AudioContext;
+    node: AudioWorkletNode;
+}
+let globalState: Promise<WorkletState> | null = null;
 
 // Statistics reported by the worklet processor via messages.
 let workletProcessorNumUnderruns = 0;
@@ -62,40 +69,99 @@ let workletProcessorFastPathActive = true;
 let workletProcessorQueueLength = 0;
 let workletProcessorCurrentLatencyMs = 0;
 
-// WeakMap would have been nice here, but it is not iterable and we have a MutationObserver anyway.
+// All HTMLMediaElements in the document get registered in the mediaElements as soon as they get played for the first
+// time. NOTE: we miss the shadow DOM or detached elements, those may be caught only by overriding constructors in MAIN
+// world script.
 //
-// Because of the unsolved https://github.com/WebAudio/web-audio-api/issues/1202 this map may contain somewhat stale
-// data: we add the elements to this map when the processing is enabled, but not when it is disabled. If the extension
-// is enabled after the page was loaded, we re-scan all elements and add the new ones to the map.
+// While we register the elements on play, we do not immediately reroute them to our worklet, if the extension is
+// disabled - this is what 'registered' type means. If the extension is enabled, we reroute its output via
+// createMediaElementSource(). We cannot destroy the created MediaElementAudioSourceNode (see
+// https://github.com/WebAudio/web-audio-api/issues/1202), once the element becomes 'rerouted' it stays that way until
+// it gets destroyed.
 //
-// Basically, we try not to add worklets to elements if extension is disabled, but we never remove them from active
-// elements.
-const nodesMap = new Map<HTMLMediaElement, ElementState>();
+// We skip creating MediaElementAudioSourceNode for the elements that we assume will be muted when they are played --
+// see isMediaElementSafeForWebAudio. Unfortunately, it still may break because the audio may change to the unsafe src
+// after playing from safe src.
+type ElementState =
+    | { type: 'registered'; element: WeakRef<HTMLMediaElement> }
+    | { type: 'rerouted'; element: WeakRef<HTMLMediaElement>; sourceNode: WeakRef<AudioNode> };
+const mediaElements = new Set<ElementState>();
+// We keep the list of playing elements to suspend the audio context when no elements are playing. We track this set
+// even if the extension is disabled. Unlike mediaElements we use regular references here, because we remove elements
+// from this set when stop playing.
+const playingElements = new Set<HTMLMediaElement>();
 
-// The WebAudio source node is created (or not created, depending on CORS) lazily when the element first plays. Before
-// that the element in registered in nodesMap, but not touched in any way.
-type ElementState = { type: 'added' } | { type: 'initialized'; sourceNode: AudioNode };
-
-// We do not immediately disconnect and remove elements in MutationObserver: they may get reparented immediately or
-// after short amount of time. Instead we put the element into the "queue" and disconnect them only after delay.
-const nodesPendingRemove = new Map<HTMLMediaElement, number>();
-// A single timeout shared by all pending removals.
-let pendingRemoveTimer: number | null = null;
-const PENDING_REMOVE_DELAY_MS = 10_000;
-
-async function initAudioContext(): Promise<AudioContext> {
-    const newAudioContext = new AudioContext();
+async function initWorkletState(): Promise<WorkletState> {
+    const context = new AudioContext();
     const processorUrl = chrome.runtime.getURL('pitch-changer-processor.js');
-    await newAudioContext.audioWorklet.addModule(processorUrl);
-    debugLog(`Created shared AudioContext and loaded processor from ${processorUrl} in ISOLATED`);
-    return newAudioContext;
-}
-
-async function getWorkletAudioContext(): Promise<AudioContext> {
-    if (!globalAudioContext) {
-        globalAudioContext = initAudioContext();
+    try {
+        await context.audioWorklet.addModule(processorUrl);
+    } catch (error) {
+        throw new Error(`Failed to load the processor module from ${processorUrl}: ${anyToString(error)}`, {
+            cause: error,
+        });
     }
-    return globalAudioContext;
+    debugLog(`Created shared AudioContext and loaded processor from ${processorUrl} in ISOLATED`);
+
+    const destChannelCount = context.destination.channelCount;
+    let node: AudioWorkletNode;
+    try {
+        node = new AudioWorkletNode(context, PROCESSOR_NAME, {
+            // Force the WebAudio do up/downmixing for us.
+            channelCount: destChannelCount,
+            channelCountMode: 'explicit',
+            outputChannelCount: [destChannelCount],
+            // processorOptions: { numChannels: 2 },
+        });
+    } catch (error) {
+        throw new Error(`Failed to create the ${PROCESSOR_NAME} AudioWorkletNode: ${anyToString(error)}`, {
+            cause: error,
+        });
+    }
+
+    try {
+        const audioProcessorClientPort = await createWorkerInIframe();
+        node.port.postMessage(
+            {
+                type: 'pitch-changer-extension-processor-init',
+                audioProcessorClientPort: audioProcessorClientPort,
+            } satisfies ProcessorInit,
+            [audioProcessorClientPort],
+        );
+        node.port.postMessage({
+            type: 'pitch-changer-extension-processor-set-params',
+            processingMode: settings.processingMode,
+            pitchValue: settings.pitchValue,
+            targetLatency: settings.targetLatency,
+            enablePassthroughOptimization: settings.enablePassthroughOptimization,
+        } satisfies ProcessorSetParams);
+    } catch (error) {
+        throw new Error(`Failed to set the processor parameters: ${anyToString(error)}`, { cause: error });
+    }
+
+    node.port.onmessage = (event: MessageEvent<ProcessorStats>) => {
+        const message = event.data;
+        if (message.type !== 'pitch-changer-extension-processor-stats') {
+            console.error(`ISOLATED: Unknown message type from processor: ${anyToString(message)}`);
+        }
+        workletProcessorFastPathActive = message.fastPathActive;
+        workletProcessorCurrentLatencyMs = message.currentLatencyMs;
+        workletProcessorNumUnderruns = message.numUnderruns;
+        workletProcessorQueueLength = message.queueLength;
+    };
+
+    node.connect(context.destination);
+    if (context.state !== 'running') {
+        context.resume().catch((error: unknown) => {
+            console.error('ISOLATED: failed to resume the shared AudioContext', error);
+        });
+    }
+
+    debugLog(`Created shared worklet node, channelCount ${destChannelCount}`);
+    return {
+        context,
+        node,
+    };
 }
 
 // Unfortunately due to https://issues.chromium.org/issues/41098022 we cannot directly create a worker using the script
@@ -111,79 +177,42 @@ async function createWorkerInIframe(): Promise<MessagePort> {
     workerIframeUrl.searchParams.append('worker_url', chrome.runtime.getURL('audio-processor-worker.js'));
 
     let resolve: (value: MessagePort) => void;
-    const promise = new Promise<MessagePort>((res) => {
+    let reject: (reason?: unknown) => void;
+    const promise = new Promise<MessagePort>((res, rej) => {
         resolve = res;
+        reject = rej;
     });
     const onMessage = (event: MessageEvent) => {
         if (event.source !== workerIframe.contentWindow) {
             return;
         }
+        window.removeEventListener('message', onMessage);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
         if (event.data?.type !== 'pitch-changer-extension-worker-iframe-init') {
-            throw new Error(`ISOLATED: Unknown message type from worker iframe: ${JSON.stringify(event.data)}`);
+            reject(new Error(`ISOLATED: Unknown message type from worker iframe: ${anyToString(event.data)}`));
+            return;
         }
         const data = event.data as WorkerIframeInit;
         resolve(data.audioProcessorClientPort);
-        window.removeEventListener('message', onMessage);
     };
     window.addEventListener('message', onMessage);
 
     workerIframe.src = workerIframeUrl.href;
-    workerIframe.hidden = true;
+    workerIframe.style.display = 'none';
     document.body.appendChild(workerIframe);
 
     return promise;
 }
 
-async function getWorkletNode(context: AudioContext): Promise<AudioWorkletNode> {
-    if (!globalWorkletNode) {
-        globalWorkletNode = initWorkletNode(context);
+async function getWorkletState(): Promise<WorkletState> {
+    if (!globalState) {
+        globalState = initWorkletState();
     }
-    return globalWorkletNode;
+    return globalState;
 }
 
-async function initWorkletNode(context: AudioContext): Promise<AudioWorkletNode> {
-    const destChannelCount = context.destination.channelCount;
-    const result = new AudioWorkletNode(context, PROCESSOR_NAME, {
-        // Force the WebAudio do up/downmixing for us.
-        channelCount: destChannelCount,
-        channelCountMode: 'explicit',
-        outputChannelCount: [destChannelCount],
-        processorOptions: {
-            numChannels: destChannelCount,
-        } as ProcessorOptions,
-    });
-
-    const audioProcessorClientPort = await createWorkerInIframe();
-    result.port.postMessage(
-        {
-            type: 'pitch-changer-extension-processor-init',
-            audioProcessorClientPort: audioProcessorClientPort,
-        } as ProcessorInit,
-        [audioProcessorClientPort],
-    );
-    result.port.postMessage({
-        type: 'pitch-changer-extension-processor-set-params',
-        processingMode: settings.processingMode,
-        pitchValue: settings.pitchValue,
-        targetLatency: settings.targetLatency,
-        enablePassthroughOptimization: settings.enablePassthroughOptimization,
-    } as ProcessorSetParams);
-
-    result.port.onmessage = (event: MessageEvent<ProcessorStats>) => {
-        const message = event.data;
-        if (message.type !== 'pitch-changer-extension-processor-stats') {
-            throw new Error(`ISOLATED: Unknown message type from processor: ${JSON.stringify(message)}`);
-        }
-        workletProcessorFastPathActive = message.fastPathActive;
-        workletProcessorCurrentLatencyMs = message.currentLatencyMs;
-        workletProcessorNumUnderruns = message.numUnderruns;
-        workletProcessorQueueLength = message.queueLength;
-    };
-
-    result.connect(context.destination);
-
-    debugLog(`Created shared worklet node, channelCount ${destChannelCount}`);
-    return result;
+function isWorkletStateInitialized(): boolean {
+    return globalState !== null;
 }
 
 // Rerouting an element through WebAudio (via createMediaElementSource()) silences it if the resource is cross-origin
@@ -207,295 +236,303 @@ function isMediaElementSafeForWebAudio(element: HTMLMediaElement): boolean {
     return element.crossOrigin !== null;
 }
 
-// Create the MediaElementAudioSourceNode for a registered element, if it is safe to do so. Assumes that the extension
-// is enabled and connects the newly created node to the worklet.
-function initializeSourceNode(element: HTMLMediaElement, context: AudioContext, workletNode: AudioWorkletNode) {
-    const state = nodesMap.get(element);
-    if (!state || state.type === 'initialized') {
-        return;
-    }
-
-    try {
-        if (!isMediaElementSafeForWebAudio(element)) {
-            // Leave the element playing unprocessed instead of silencing it.
-            debugLog(`Not attaching worklet to CORS-unsafe element ${element.id} (${element.currentSrc})`);
-            return;
+function findElementState(e: HTMLMediaElement): ElementState | null {
+    for (const state of mediaElements) {
+        const element = state.element.deref();
+        if (element === e) {
+            // We stop iterating here and do not clean up all the stale elements.
+            return state;
         }
+        // Do cooperative cleanup of mediaElements.
+        if (!element) {
+            mediaElements.delete(state);
+        }
+    }
+    return null;
+}
 
-        const sourceNode = context.createMediaElementSource(element);
-        sourceNode.connect(workletNode);
-        nodesMap.set(element, { type: 'initialized', sourceNode });
-        debugLog(`Added source to shared worklet for element ${element.id}, channelCount ${sourceNode.channelCount}`);
+function isElementRegistered(e: HTMLMediaElement): boolean {
+    // This loop is responsible for two things: checking if the element is present and removing the stale element, do
+    // not short circuit it.
+    let result = false;
+    for (const state of mediaElements) {
+        const element = state.element.deref();
+        if (element === e) {
+            // We already registered the element.
+            result = true;
+            continue;
+        }
+        // Do cooperative cleanup of mediaElements.
+        if (!element) {
+            mediaElements.delete(state);
+        }
+    }
+    return result;
+}
+
+// Perform registration, all element re-routing is now done in play/pause handlers of the element.
+function registerElement(element: HTMLMediaElement) {
+    const state: ElementState = {
+        type: 'registered',
+        element: new WeakRef(element),
+    };
+    mediaElements.add(state);
+
+    // If registerElement() is called from onWindowPlay(), onElementPlay() will be called later, see
+    // https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener
+    //
+    // > However, the new listener may be triggered during a later stage of event flow, such as during the bubbling
+    // phase.
+    element.addEventListener('play', () => onElementPlay(element));
+    element.addEventListener('pause', () => onElementPause(element));
+}
+
+async function onElementPlay(element: HTMLMediaElement) {
+    try {
+        await onElementPlayImpl(element);
     } catch (error) {
-        console.error('Error adding worklet to node', error);
+        console.error('ISOLATED: onElementPlay() failed', error);
     }
 }
 
-async function applyWorklet(element: HTMLMediaElement) {
-    if (nodesMap.get(element)?.type === 'initialized') {
-        return;
-    }
-    if (!settings.enabled) {
-        console.error('Trying to add element when the extension is disabled', element);
-        return;
+async function onElementPlayImpl(element: HTMLMediaElement) {
+    if (element.paused) {
+        throw new Error(`Got paused element in onElementPlay: ${element.nodeName}, ${element.id}`);
     }
 
-    try {
-        const context = await getWorkletAudioContext();
-        const workletNode = await getWorkletNode(context);
-        if (nodesMap.get(element)?.type === 'initialized') {
-            // Re-check if a concurrent applyWorklet already attached the element.
-            return;
-        }
-        if (!element.isConnected) {
-            // The element was removed from the document while we were awaiting audio context or workletNode; if it is
-            // re-inserted, the observer will call applyWorklet again.
-            return;
-        }
-
-        if (!nodesMap.get(element)) {
-            // This event registers as user interaction in Chrome apparently.
-            element.addEventListener('play', () => {
-                if (!nodesMap.has(element)) {
-                    // The element was detached from the document and dropped after PENDING_REMOVE_DELAY_MS, but still
-                    // played: print a warning.
-                    debugLog(`WARNING: Element ${element.id} (${element.currentSrc}) plays after being removed`);
-                    return;
-                }
-                if (!settings.enabled) {
-                    return;
-                }
-                if (context.state === 'suspended') {
-                    // Required for Chrome
-                    debugLog('Context got suspended, resuming');
-                    context.resume();
-                }
-                initializeSourceNode(element, context, workletNode);
+    playingElements.add(element);
+    // Re-enable the context if it has been created.
+    if (playingElements.size === 1 && isWorkletStateInitialized()) {
+        const worklet = await getWorkletState();
+        // The context could be suspended either by us, or by the browser itself.
+        if (worklet.context.state !== 'running') {
+            debugLog(`Context state ${worklet.context.state}, resuming`);
+            worklet.context.resume().catch((error: unknown) => {
+                console.error('ISOLATED: failed to resume the shared AudioContext', error);
             });
-
-            nodesMap.set(element, { type: 'added' });
-            debugLog(`Registered element ${element.id}`);
         }
-
-        // The element may already be playing (e.g. it was playing before the extension was enabled): the play event has
-        // already fired, so initialize the element right away.
-        if (!element.paused) {
-            initializeSourceNode(element, context, workletNode);
-        }
-    } catch (error) {
-        console.error('Error adding worklet to node', error);
-    }
-}
-
-function removeWorklet(element: HTMLMediaElement) {
-    const state = nodesMap.get(element);
-    if (!state) {
-        console.error('Removing non-added element', element);
-        return;
     }
 
-    try {
-        if (state.type === 'initialized') {
-            state.sourceNode.disconnect();
-        }
-        nodesMap.delete(element);
-        debugLog(`Removed element ${element.id}`);
-    } catch (error) {
-        console.error('Error removing worklet from element:', error);
-    }
-}
-
-function setPendingRemoveTimer() {
-    if (pendingRemoveTimer !== null) {
-        // The timer is already armed, skip it.
-        return;
-    }
-    pendingRemoveTimer = setTimeout(doPendingRemove, PENDING_REMOVE_DELAY_MS);
-}
-
-function doPendingRemove() {
-    pendingRemoveTimer = null;
-    const now = performance.now();
-    nodesPendingRemove.forEach((removedAt, element) => {
-        if (removedAt + PENDING_REMOVE_DELAY_MS > now) {
-            return;
-        }
-        nodesPendingRemove.delete(element);
-        if (element.isConnected) {
-            debugLog(`Element ${element.id} is connected again, keeping its worklet`);
-            return;
-        }
-        if (!nodesMap.has(element)) {
-            return;
-        }
-        debugLog(`Grace period for element ${element.id} expired, removing worklet`);
-        removeWorklet(element);
-    })
-
-    // Re-arm the timer if the map is still non-empty.
-    if (nodesPendingRemove.size > 0) {
-        setPendingRemoveTimer();
-    }
-}
-
-function schedulePendingRemove(element: HTMLMediaElement) {
-    if (!nodesMap.has(element)) {
-        return;
-    }
-    nodesPendingRemove.set(element, performance.now());
-    setPendingRemoveTimer();
-    debugLog(`Scheduled worklet removal for element ${element.id} in ${PENDING_REMOVE_DELAY_MS / 1000}s`);
-}
-
-function cancelPendingRemove(element: HTMLMediaElement) {
-    if (nodesPendingRemove.delete(element)) {
-        debugLog(`Canceled pending worklet removal for element ${element.id}`);
-    }
-}
-
-function applyWorkletToChildren(node: Element | Document) {
-    if (node instanceof HTMLMediaElement) {
-        applyWorklet(node);
-        return;
-    }
-    const elements = node.querySelectorAll('audio, video');
-    if (elements.length === 0) {
-        debugLog(`Found no audio/video elements in ${node}`);
-        return;
-    }
-    debugLog(`Found ${elements.length} audio/video elements in ${node}, adding worklet`);
-
-    elements.forEach((e) => {
-        if (e instanceof HTMLMediaElement) {
-            applyWorklet(e);
-        } else {
-            console.error('Got element which is not audio/video', e);
-        }
-    });
-}
-
-function schedulePendingRemoveOfChildren(node: Element) {
-    if (node instanceof HTMLMediaElement) {
-        schedulePendingRemove(node);
-        return;
-    }
-    const elements = node.querySelectorAll('audio, video');
-    if (elements.length === 0) {
-        debugLog(`Found no audio/video elements in ${node}`);
-        return;
-    }
-    debugLog(`Found ${elements.length} audio/video elements in ${node}, scheduling worklet removal`);
-
-    elements.forEach((e) => {
-        if (e instanceof HTMLMediaElement) {
-            schedulePendingRemove(e);
-        } else {
-            console.error('Got element which is not audio/video', e);
-        }
-    });
-}
-
-function cancelPendingRemoveOfChildren(node: Element) {
-    if (nodesPendingRemove.size === 0) {
-        return;
-    }
-    if (node instanceof HTMLMediaElement) {
-        cancelPendingRemove(node);
-        return;
-    }
-    node.querySelectorAll('audio, video').forEach((e) => {
-        if (e instanceof HTMLMediaElement) {
-            cancelPendingRemove(e);
-        }
-    });
-}
-
-function applyStoredSettings() {
     if (!settings.enabled) {
-        debugLog('Extension is disabled');
         return;
     }
-    debugLog('Applying stored settings', settings);
-    applyWorkletToChildren(document);
+    const worklet = await getWorkletState();
+    // Re-check after await.
+    if (!settings.enabled) {
+        return;
+    }
+
+    const state = findElementState(element);
+    if (!state) {
+        console.error(`ISOLATED: playing element is missing: ${element.nodeName} ${element.id}, did it get deleted?`);
+        return;
+    }
+
+    if (state.type === 'registered') {
+        rerouteElement(state, worklet);
+    }
+}
+
+function rerouteElement(state: ElementState, worklet: WorkletState) {
+    try {
+        rerouteElementImpl(state, worklet);
+    } catch (error) {
+        console.error('ISOLATED: rerouteElement() failed', error);
+    }
+}
+
+function rerouteElementImpl(state: ElementState, worklet: WorkletState) {
+    const element = state.element.deref();
+    if (!element) {
+        console.error('ISOLATED: cannot reroute a media element which has been deleted');
+        return;
+    }
+
+    if (!isMediaElementSafeForWebAudio(element)) {
+        // Leave the element playing unprocessed instead of silencing it.
+        debugLog(
+            `Not rerouting worklet to CORS-unsafe element ${element.nodeName} ${element.id} (${element.currentSrc})`,
+        );
+        return;
+    }
+
+    let sourceNode: MediaElementAudioSourceNode;
+    try {
+        sourceNode = worklet.context.createMediaElementSource(element);
+    } catch (error) {
+        throw new Error(
+            `Failed to create a MediaElementAudioSourceNode for ${element.nodeName} ${element.id}: ${anyToString(error)}`,
+            { cause: error },
+        );
+    }
+    try {
+        sourceNode.connect(worklet.node);
+    } catch (error) {
+        throw new Error(
+            `Failed to connect ${element.nodeName} ${element.id} to the worklet node: ${anyToString(error)}`,
+            { cause: error },
+        );
+    }
+    mediaElements.delete(state);
+    mediaElements.add({
+        type: 'rerouted',
+        element: new WeakRef(element),
+        sourceNode: new WeakRef(sourceNode),
+    });
+    debugLog(`Rerouted element ${element.nodeName} ${element.id}, channelCount ${sourceNode.channelCount}`);
+}
+
+async function onElementPause(element: HTMLMediaElement) {
+    try {
+        await onElementPauseImpl(element);
+    } catch (error) {
+        console.error('ISOLATED: onElementPause() failed', error);
+    }
+}
+
+// Disconnecting the worklet is not enough for process() callback to stop being called, instead we suspend the whole
+// context. See https://github.com/WebAudio/web-audio-api/issues/2658
+async function onElementPauseImpl(element: HTMLMediaElement) {
+    if (!element.paused) {
+        throw new Error(`Got not paused element in onElementPause: ${element.nodeName}, ${element.id}`);
+    }
+
+    playingElements.delete(element);
+    if (playingElements.size === 0 && isWorkletStateInitialized()) {
+        const worklet = await getWorkletState();
+        if (worklet.context.state === 'running') {
+            debugLog(`No playing elements, suspending the context`);
+            void worklet.context.suspend();
+        }
+    }
+}
+
+// This function must be used only for initial registration of media elements. After that we react to 'play' and 'pause'
+// on the elements themselves.
+function onWindowPlay(ev: Event) {
+    try {
+        onWindowPlayImpl(ev);
+    } catch (error) {
+        console.error('ISOLATED: onWindowPlay() failed', error);
+    }
+}
+
+function onWindowPlayImpl(ev: Event) {
+    if (!ev.target || !(ev.target instanceof HTMLMediaElement)) {
+        console.error('ISOLATED: expected "play" to fire on HTMLMediaElement, got', ev.target);
+        return;
+    }
+
+    if (isElementRegistered(ev.target)) {
+        return;
+    }
+
+    registerElement(ev.target);
 }
 
 function applySettings(newSettings: ExtensionSettings) {
-    debugLog(
-        `Applying new settings in ISOLATED: ${JSON.stringify(newSettings)}, current settings ${JSON.stringify(settings)}`,
-    );
-    const gotEnabled = settings && !settings.enabled && newSettings.enabled;
-    const gotDisabled = settings && settings.enabled && !newSettings.enabled;
-    settings = newSettings;
+    try {
+        // debugLog(
+        //     `Applying new settings in ISOLATED: ${anyToString(newSettings)}, current settings ${anyToString(settings)}`,
+        // );
+        const gotEnabled = newSettings.enabled && !settings.enabled;
+        const gotDisabled = !newSettings.enabled && settings.enabled;
+        settings = newSettings;
 
-    // Do not await the future, so that applySettings exits asap.
-    applySettingsImpl(gotEnabled, gotDisabled);
+        applySettingsImpl(gotEnabled, gotDisabled).catch((error: unknown) => {
+            console.error('ISOLATED: failed to apply settings', error);
+        });
+    } catch (error) {
+        console.error('ISOLATED: failed to apply settings', error);
+    }
 }
 
 async function applySettingsImpl(gotEnabled: boolean, gotDisabled: boolean) {
     if (gotEnabled) {
-        debugLog('Re-enabling pitch shift for page');
-        // Re-scan for any media elements that appeared while extension was disabled.
-        applyWorkletToChildren(document);
-
-        if (nodesMap.size > 0) {
-            // Route all nodes through our worklet (newly added nodes in applyWorkletToChildren are already routed
-            // through worklet, for those it will do a no-op).
-            const context = await getWorkletAudioContext();
-            const worklet = await getWorkletNode(context);
-            for (const state of nodesMap.values()) {
-                if (state.type !== 'initialized') {
+        debugLog('Re-enabling processing for page');
+        // Re-route all elements via sourceNode
+        if (mediaElements.size > 0) {
+            const worklet = await getWorkletState();
+            for (const state of mediaElements) {
+                const element = state.element.deref();
+                if (!element) {
                     continue;
                 }
-                state.sourceNode.disconnect();
-                state.sourceNode.connect(worklet);
+                try {
+                    switch (state.type) {
+                        case 'registered':
+                            if (!element.paused) {
+                                rerouteElement(state, worklet);
+                            }
+                            break;
+                        case 'rerouted': {
+                            const sourceNode = state.sourceNode.deref();
+                            if (!sourceNode) {
+                                continue;
+                            }
+                            sourceNode.disconnect();
+                            sourceNode.connect(worklet.node);
+                            break;
+                        }
+                    }
+                } catch (error) {
+                    throw new Error(
+                        `Failed to enable processing for ${element.nodeName} ${element.id}: ${anyToString(error)}`,
+                        { cause: error },
+                    );
+                }
             }
         }
     }
+
     if (gotDisabled) {
-        if (nodesMap.size > 0) {
-            // Route all nodes through default destination.
-            const context = await getWorkletAudioContext();
-            for (const state of nodesMap.values()) {
-                if (state.type !== 'initialized') {
+        debugLog('Disabling processing for page');
+        if (mediaElements.size > 0) {
+            const worklet = await getWorkletState();
+            // Re-route all elements via context destination.
+            for (const state of mediaElements) {
+                if (state.type !== 'rerouted') {
                     continue;
                 }
-                state.sourceNode.disconnect();
-                state.sourceNode.connect(context.destination);
+                const sourceNode = state.sourceNode.deref();
+                if (!sourceNode) {
+                    continue;
+                }
+                const element = state.element.deref();
+                try {
+                    sourceNode.disconnect();
+                    sourceNode.connect(worklet.context.destination);
+                } catch (error) {
+                    throw new Error(
+                        `Failed to disable processing for ${element?.nodeName} ${element?.id}: ${anyToString(error)}`,
+                        { cause: error },
+                    );
+                }
             }
         }
     }
 
     // Update the parameters of the worklet if it exists.
-    if (globalWorkletNode) {
-        (await globalWorkletNode).port.postMessage({
+    if (globalState) {
+        const worklet = await globalState;
+        worklet.node.port.postMessage({
             type: 'pitch-changer-extension-processor-set-params',
             processingMode: settings.processingMode,
             pitchValue: settings.pitchValue,
             targetLatency: settings.targetLatency,
             enablePassthroughOptimization: settings.enablePassthroughOptimization,
-        } as ProcessorSetParams);
+        } satisfies ProcessorSetParams);
     }
 }
 
 function getStats(): StatsResult {
-    const response: StatsResult = {
-        numAudioElements: 0,
-        numVideoElements: 0,
+    return {
+        numPlayingElements: playingElements.size,
         fastPathActive: workletProcessorFastPathActive,
         currentLatencyMs: workletProcessorCurrentLatencyMs,
         numUnderruns: workletProcessorNumUnderruns,
         queueLength: workletProcessorQueueLength,
     };
-    for (const node of nodesMap.keys()) {
-        if (node instanceof HTMLAudioElement) {
-            response.numAudioElements++;
-        } else if (node instanceof HTMLVideoElement) {
-            response.numVideoElements++;
-        } else {
-            console.error('Strange node in nodesMap', node);
-        }
-    }
-    return response;
 }
 
 function setupExports() {
@@ -506,9 +543,11 @@ function setupExports() {
 async function init(): Promise<void> {
     setupExports();
 
-    settings = await loadSettings();
+    window.addEventListener('play', onWindowPlay, true);
+    document.documentElement.append(document.createElement('a'));
+
+    applySettings(await loadSettings());
     debugLog('Audio Pitch Changer: Initializing ISOLATED content script');
-    applyStoredSettings();
 
     // Complete initialization of the MAIN content script. Ideally we would simply use executeScript from ISOLATED
     // content script to run MAIN init, but browser does not allow getting current tab id :-(
@@ -519,34 +558,34 @@ async function init(): Promise<void> {
             workerIframeUrl: chrome.runtime.getURL('worker-iframe.html'),
             audioProcessorWorkerUrl: chrome.runtime.getURL('audio-processor-worker.js'),
             settings: settings,
-        } as PitchChangerOverrideInit,
+        } satisfies PitchChangerOverrideInit,
         '*',
     );
 
-    const observer = new MutationObserver((mutations) => {
-        for (const mutation of mutations) {
-            // Canceling pending removals must not depend on settings.enabled: removals are scheduled regardless
-            // of it, and a re-parented element must not end up disconnected after the grace period.
-            if (mutation.addedNodes) {
-                mutation.addedNodes.forEach((node) => {
-                    if (node instanceof Element) {
-                        cancelPendingRemoveOfChildren(node);
-                        if (settings.enabled) {
-                            applyWorkletToChildren(node);
-                        }
-                    }
-                });
-            }
-            if (mutation.removedNodes) {
-                mutation.removedNodes.forEach((node) => {
-                    if (node instanceof Element) {
-                        schedulePendingRemoveOfChildren(node);
-                    }
-                });
-            }
+    // Our content script is running relatively. We do this to e.g. catch document.write() which updates the blank
+    // iframe. This means that e.g. the document could've started autoplaying and we need to catch this element.
+    for (const element of document.querySelectorAll('audio, video')) {
+        if (!(element instanceof HTMLMediaElement)) {
+            continue;
         }
-    });
-    observer.observe(document, { subtree: true, childList: true });
+        if (element.paused) {
+            continue;
+        }
+        try {
+            debugLog(`Caught autoplaying element ${element.nodeName} ${element.id}`);
+            if (!isElementRegistered(element)) {
+                registerElement(element);
+                void onElementPlay(element);
+            }
+        } catch (error) {
+            throw new Error(
+                `Failed to register autoplaying element ${element.nodeName} ${element.id}: ${anyToString(error)}`,
+                { cause: error },
+            );
+        }
+    }
 }
 
-init();
+init().catch((error: unknown) => {
+    console.error('Audio Pitch Changer: ISOLATED content script initialization failed', error);
+});

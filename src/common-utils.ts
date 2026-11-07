@@ -3,7 +3,7 @@ import { showError } from './notify';
 // Convert an arbitrary value into a string for messages.
 export function anyToString(value: unknown): string {
     if (value instanceof Error) {
-        return value.stack ?? `${value.name}: ${value.message}`;
+        return `${value.name}: ${value.message}`;
     }
     if (typeof value === 'object' && value !== null) {
         try {

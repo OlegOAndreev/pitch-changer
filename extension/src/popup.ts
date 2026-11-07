@@ -10,7 +10,7 @@ import {
     SETTINGS_KEY,
 } from './common.js';
 // Note: yes, this is an intended import
-import { debounce } from '../../src/common-utils.js';
+import { anyToString, debounce, setupWindowOnError } from '../../src/common-utils.js';
 
 const currentSettings: ExtensionSettings = await loadSettings();
 
@@ -30,8 +30,7 @@ const latencyButtons = document.querySelectorAll('#latencySelector button');
 const advancedSection = document.getElementById('advancedSection') as HTMLDetailsElement;
 const passthroughCheckbox = document.getElementById('enablePassthroughOptimization') as HTMLInputElement;
 const debugLoggingCheckbox = document.getElementById('debugLogging') as HTMLInputElement;
-const numAudioElementsValue = document.getElementById('numAudioElements') as HTMLSpanElement;
-const numVideoElementsValue = document.getElementById('numVideoElements') as HTMLSpanElement;
+const numPlayingElementsValue = document.getElementById('numPlayingElements') as HTMLSpanElement;
 const numAudioContextDestinationsValue = document.getElementById('numAudioContextDestinations') as HTMLSpanElement;
 const fastPathActiveValue = document.getElementById('fastPathActive') as HTMLSpanElement;
 const maxCurrentLatencyMsValue = document.getElementById('maxCurrentLatencyMs') as HTMLSpanElement;
@@ -43,7 +42,7 @@ const HIDE_ERROR_AFTER = 10000;
 const STATS_UPDATE_INTERVAL = 100;
 
 function showStatus(error: unknown) {
-    statusValue.textContent = JSON.stringify(error);
+    statusValue.textContent = anyToString(error);
     statusValue.hidden = false;
     setTimeout(() => {
         statusValue.hidden = true;
@@ -141,6 +140,7 @@ function shouldApplyToTab(tab: chrome.tabs.Tab | undefined): boolean {
 }
 
 async function applySettingsToTabs() {
+    console.log(`Start applying`);
     const tabs = await chrome.tabs.query({});
     for (const tab of tabs) {
         if (!shouldApplyToTab(tab)) {
@@ -150,6 +150,7 @@ async function applySettingsToTabs() {
         try {
             await chrome.scripting.executeScript({
                 func: (settings) => {
+                    // eslint-disable-next-line @typescript-eslint/unbound-method
                     const applySettings = (globalThis as unknown as ContentScriptExports).exportApplySettings;
                     // Skip the frames we did not get injected into for whatever reason.
                     if (applySettings) {
@@ -162,6 +163,7 @@ async function applySettingsToTabs() {
             });
             await chrome.scripting.executeScript({
                 func: (settings) => {
+                    // eslint-disable-next-line @typescript-eslint/unbound-method
                     const applySettings = (globalThis as unknown as OverrideScriptExports)
                         .exportPitchChangerExtensionOverrideApplySettings;
                     // Skip the frames we did not get injected into for whatever reason.
@@ -174,12 +176,15 @@ async function applySettingsToTabs() {
                 world: 'MAIN',
             });
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
+            const message = anyToString(error);
             // Injection into restricted/quarantined hosts always fails; this is expected, so just log it.
-            if (message.includes('Cannot access contents of the page')) {
+            if (
+                message.includes('Cannot access contents of the page') ||
+                message.includes('Missing host permission for the tab or frames')
+            ) {
                 console.debug(`Could not apply settings to tab ${tab.url}, skipping`, error);
             } else {
-                console.error(`Could not apply settings to tab ${tab.url} ISOLATED`, error);
+                console.error(`Could not apply settings to tab ${tab.url} ISOLATED, ASDF${message}QWER`, error);
                 showStatus(error);
             }
         }
@@ -188,8 +193,7 @@ async function applySettingsToTabs() {
 
 async function updateDebugStats() {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    let numAudioElements = 0;
-    let numVideoElements = 0;
+    let numPlayingElements = 0;
     let numAudioContextDestinations = 0;
     let fastPathActive = true;
     let maxCurrentLatencyMs = 0;
@@ -200,6 +204,7 @@ async function updateDebugStats() {
             // We need to call two functions: one in pitch-changer-content.ts and one in pitch-changer-override.ac.ts
             const results = await chrome.scripting.executeScript({
                 func: () => {
+                    // eslint-disable-next-line @typescript-eslint/unbound-method
                     const getStats = (globalThis as unknown as ContentScriptExports).exportGetStats;
                     // Skip the frames we did not get injected into for whatever reason.
                     if (getStats) {
@@ -217,8 +222,7 @@ async function updateDebugStats() {
             for (const result of results) {
                 const data = result.result as StatsResult;
                 if (data) {
-                    numAudioElements += data.numAudioElements;
-                    numVideoElements += data.numVideoElements;
+                    numPlayingElements += data.numPlayingElements;
                     fastPathActive = fastPathActive && data.fastPathActive;
                     maxCurrentLatencyMs = Math.max(maxCurrentLatencyMs, data.currentLatencyMs);
                     numUnderruns += data.numUnderruns;
@@ -228,6 +232,7 @@ async function updateDebugStats() {
 
             const overrideResults = await chrome.scripting.executeScript({
                 func: () => {
+                    // eslint-disable-next-line @typescript-eslint/unbound-method
                     const getStats = (globalThis as unknown as OverrideScriptExports)
                         .exportPitchChangerExtensionOverrideGetStats;
                     // Skip the frames we did not get injected into for whatever reason.
@@ -258,8 +263,7 @@ async function updateDebugStats() {
             showStatus(error);
         }
     }
-    numAudioElementsValue.textContent = numAudioElements.toString();
-    numVideoElementsValue.textContent = numVideoElements.toString();
+    numPlayingElementsValue.textContent = numPlayingElements.toString();
     numAudioContextDestinationsValue.textContent = numAudioContextDestinations.toString();
     fastPathActiveValue.textContent = fastPathActive.toString();
     maxCurrentLatencyMsValue.textContent = Math.round(maxCurrentLatencyMs).toString();
@@ -267,12 +271,13 @@ async function updateDebugStats() {
     maxQueueLengthValue.textContent = maxQueueLength.toString();
 }
 
-async function init(): Promise<void> {
+function init() {
     debugLog('Audio Pitch Changer popup initialized');
+    setupWindowOnError();
 
-    toggleEnabled.checked = currentSettings.enabled !== false;
-    passthroughCheckbox.checked = currentSettings.enablePassthroughOptimization !== false;
-    debugLoggingCheckbox.checked = currentSettings.debugLogging !== false;
+    toggleEnabled.checked = currentSettings.enabled;
+    passthroughCheckbox.checked = currentSettings.enablePassthroughOptimization;
+    debugLoggingCheckbox.checked = currentSettings.debugLogging;
     setEnabled();
     updatePitchDisplay();
     updateActiveModeDisplay(currentSettings.processingMode);
@@ -281,49 +286,54 @@ async function init(): Promise<void> {
     toggleEnabled.addEventListener('change', async () => {
         currentSettings.enabled = toggleEnabled.checked;
         setEnabled();
-        saveSettings();
-        applySettingsToTabs();
+        await applySettingsToTabs();
+        // Do not await saveSettings because it is wrapped in debounce.
+        void saveSettings();
     });
 
-    pitchSlider.addEventListener('input', () => {
+    pitchSlider.addEventListener('input', async () => {
         currentSettings.pitchValue = parseFloat(pitchSlider.value);
         updatePitchDisplay();
-        saveSettings();
-        applySettingsToTabs();
+        await applySettingsToTabs();
+        // Do not await saveSettings because it is wrapped in debounce.
+        void saveSettings();
     });
 
-    debugLoggingCheckbox.addEventListener('change', () => {
+    debugLoggingCheckbox.addEventListener('change', async () => {
         currentSettings.debugLogging = debugLoggingCheckbox.checked;
-        saveSettings();
-        applySettingsToTabs();
+        await applySettingsToTabs();
+        // Do not await saveSettings because it is wrapped in debounce.
+        void saveSettings();
     });
 
-    passthroughCheckbox.addEventListener('change', () => {
+    passthroughCheckbox.addEventListener('change', async () => {
         currentSettings.enablePassthroughOptimization = passthroughCheckbox.checked;
-        saveSettings();
-        applySettingsToTabs();
+        await applySettingsToTabs();
+        // Do not await saveSettings because it is wrapped in debounce.
+        void saveSettings();
     });
 
-    advancedSection.addEventListener('toggle', () => {
+    advancedSection.addEventListener('toggle', async () => {
         if (advancedSection.open) {
-            updateDebugStats();
+            await updateDebugStats();
         }
     });
 
-    setInterval(() => {
+    setInterval(async () => {
         if (advancedSection.open) {
-            updateDebugStats();
+            await updateDebugStats();
         }
     }, STATS_UPDATE_INTERVAL);
 
     modeButtons.forEach((btn) => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
             const mode = (btn as HTMLButtonElement).dataset.mode;
             if (mode === 'pitch' || mode === 'formant-preserving-pitch') {
                 currentSettings.processingMode = mode;
                 updateActiveModeDisplay(mode);
-                saveSettings();
-                applySettingsToTabs();
+                await applySettingsToTabs();
+                // Do not await saveSettings because it is wrapped in debounce.
+                void saveSettings();
             } else {
                 console.warn('Invalid mode:', mode);
             }
@@ -331,13 +341,14 @@ async function init(): Promise<void> {
     });
 
     latencyButtons.forEach((btn) => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
             const latency = (btn as HTMLButtonElement).dataset.latency;
             if (latency === 'normal' || latency === 'high') {
                 currentSettings.targetLatency = latency;
                 updateActiveLatencyDisplay(latency);
-                saveSettings();
-                applySettingsToTabs();
+                await applySettingsToTabs();
+                // Do not await saveSettings because it is wrapped in debounce.
+                void saveSettings();
             } else {
                 console.warn('Invalid latency:', latency);
             }

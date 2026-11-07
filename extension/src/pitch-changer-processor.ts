@@ -1,10 +1,11 @@
 import { AudioProcessorClient } from '../../src/audio-processor-client.js';
-import { fftSizeForSampleRate } from '../../src/common-utils.js';
+import { anyToString } from '../../src/common-utils.js';
 import { SamplesQueue } from '../../src/samples-queue.js';
+import { fftSizeForSampleRate } from '../../src/utils.js';
 import {
     PROCESSOR_NAME,
     type ProcessingMode,
-    type ProcessorOptions,
+    // type ProcessorOptions,
     type ProcessorRequest,
     type ProcessorSetParams,
     type ProcessorStats,
@@ -61,15 +62,21 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
     // Do not send messages if we are in the zero fast path and have already reported that we are in the fast path.
     private fastPathStatsSent = false;
 
-    constructor(options: AudioWorkletNodeOptions) {
+    constructor() {
+    // constructor(options: AudioWorkletNodeOptions) {
         super();
 
-        const processorOptions = options.processorOptions as ProcessorOptions;
-        this.numChannels = processorOptions.numChannels;
+        // const processorOptions = options.processorOptions as ProcessorOptions;
+        // this.numChannels = processorOptions.numChannels;
+        this.numChannels = 2;
         this.queue = new SamplesQueue(this.numChannels);
 
         this.port.onmessage = (event: MessageEvent<ProcessorRequest>) => {
-            this.onMessage(event.data);
+            try {
+                this.onMessage(event.data);
+            } catch (error) {
+                console.error('PitchChangerProcessor: failed to handle a message from the main thread', error);
+            }
         };
     }
 
@@ -87,14 +94,19 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
                 break;
 
             default:
-                throw new Error(`PitchChangerProcessor: Unknown message type: ${JSON.stringify(message)}`);
+                throw new Error(`PitchChangerProcessor: Unknown message type: ${anyToString(message)}`);
         }
     }
 
     setParams(params: ProcessorSetParams) {
+        if (!this.client) {
+            throw new Error(
+                'PitchChangerProcessor: cannot set params before the audio processor client is initialized',
+            );
+        }
         // Use the smaller sampling rate to make latency lower.
         const fftSize = fftSizeForSampleRate(sampleRate, 40);
-        this.client!.setParams(params.processingMode, params.pitchValue, sampleRate, this.numChannels, fftSize);
+        this.client.setParams(params.processingMode, params.pitchValue, sampleRate, this.numChannels, fftSize);
         switch (params.targetLatency) {
             case 'normal':
                 this.requiredLatency = fftSize + fftSize / 2;
@@ -121,12 +133,25 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
         this.zeroPathThreshold = fftSize * 4;
     }
 
-    process(inputs: Float32Array[][], outputs: Float32Array[][], _parameters: Record<string, Float32Array>): boolean {
+    process(inputs: Float32Array[][], outputs: Float32Array[][], parameters: Record<string, Float32Array>): boolean {
+        try {
+            return this.processImpl(inputs, outputs, parameters);
+        } catch (error) {
+            console.error('PitchChangerProcessor: failed to process audio samples', error);
+            return true;
+        }
+    }
+
+    private processImpl(
+        inputs: Float32Array[][],
+        outputs: Float32Array[][],
+        _parameters: Record<string, Float32Array>,
+    ): boolean {
         // numberOfInputs and numberOfOutputs are 1 by default, WebAudio does mixing of multiple connected nodes itself.
         const input = inputs[0];
         const output = outputs[0];
         if (!input || input.length === 0) {
-            this.fillZeros(output);
+            // We should return false here, but unfortunately after that there is no way to restart the processing.
             return true;
         }
 
@@ -160,7 +185,6 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
                 // Do not touch queue or currentLatency: the queue should contain only zeros and will be used as soon as
                 // we receive the first non-zero input sample. The async part of filling the queue does not matter as
                 // well: essentially we reorder zeros with zeros.
-                this.fillZeros(output);
                 this.fastPathActive = true;
                 this.maybeSendStats(inputLen);
                 return true;
@@ -216,7 +240,6 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
         if (this.currentLatency < this.requiredLatency) {
             // This happens either at the start of processing, or after changing latency to a higher one. We assume that
             // output quantum always divides latency.
-            this.fillZeros(output);
             return;
         } else if (this.currentLatency > this.requiredLatency) {
             // Skip the queued elements which are already late.
@@ -224,7 +247,6 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
             this.currentLatency -= skipped;
             // Check if the queue became empty after skipping,
             if (this.currentLatency > this.requiredLatency) {
-                this.fillZeros(output);
                 return;
             }
         }
@@ -247,12 +269,6 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
         return true;
     }
 
-    private fillZeros(outputChannels: Float32Array[]): void {
-        for (const channel of outputChannels) {
-            channel.fill(0.0);
-        }
-    }
-
     private maybeSendStats(numSamples: number): void {
         if (this.fastPathActive && this.fastPathStatsSent) {
             return;
@@ -271,9 +287,13 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
             currentLatencyMs: this.fastPathActive ? 0 : (this.currentLatency / sampleRate) * 1000,
             numUnderruns: this.numUnderruns,
             queueLength: this.fastPathActive ? 0 : this.queue.length,
-        } as ProcessorStats);
+        } satisfies ProcessorStats);
         this.fastPathStatsSent = this.fastPathActive;
     }
 }
 
-registerProcessor(PROCESSOR_NAME, PitchChangerProcessor);
+try {
+    registerProcessor(PROCESSOR_NAME, PitchChangerProcessor);
+} catch (error) {
+    console.error(`PitchChangerProcessor: failed to register ${PROCESSOR_NAME}`, error);
+}

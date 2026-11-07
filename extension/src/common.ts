@@ -17,8 +17,7 @@ export interface ExtensionSettings {
 }
 
 export interface StatsResult {
-    numAudioElements: number;
-    numVideoElements: number;
+    numPlayingElements: number;
     fastPathActive: boolean;
     currentLatencyMs: number;
     numUnderruns: number;
@@ -80,6 +79,14 @@ export type ProcessorRequest = ProcessorInit | ProcessorSetParams;
 
 export interface ProcessorOptions {
     numChannels: number;
+}
+
+// Initialize settings with default values, but leave enabled: false.
+export function disabledSettings(): ExtensionSettings {
+    return {
+        ...defaultSettings,
+        enabled: false,
+    };
 }
 
 export async function loadSettings(): Promise<ExtensionSettings> {
