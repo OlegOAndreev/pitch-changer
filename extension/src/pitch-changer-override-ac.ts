@@ -5,7 +5,6 @@ import {
     type OverrideStatsResult,
     type PitchChangerOverrideInit,
     type ProcessorInit,
-    type ProcessorOptions,
     type ProcessorSetParams,
     type ProcessorStats,
     type WorkerIframeInit,
@@ -245,9 +244,6 @@ import { anyToString } from '../../src/common-utils.js';
                     channelCount: destChannelCount,
                     channelCountMode: 'explicit',
                     outputChannelCount: [destChannelCount],
-                    processorOptions: {
-                        numChannels: destChannelCount,
-                    } satisfies ProcessorOptions,
                 });
             } catch (error) {
                 throw new Error(`Failed to create the ${PROCESSOR_NAME} AudioWorkletNode: ${anyToString(error)}`, {
@@ -280,6 +276,7 @@ import { anyToString } from '../../src/common-utils.js';
                 result.port.postMessage(
                     {
                         type: 'pitch-changer-extension-processor-init',
+                        numChannels: destChannelCount,
                         audioProcessorClientPort: audioProcessorClientPort,
                     } satisfies ProcessorInit,
                     [audioProcessorClientPort],

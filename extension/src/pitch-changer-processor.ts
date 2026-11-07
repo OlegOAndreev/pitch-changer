@@ -31,8 +31,8 @@ const STATS_MESSAGE_EVERY_SEC = 1;
 class PitchChangerProcessor extends AudioWorkletProcessor {
     // The worklet node is created with explicit channel count, so WebAudio up/downmixes the input into exactly
     // numChannels channels.
-    private readonly numChannels: number;
-    private readonly queue: SamplesQueue;
+    private numChannels: number = 0;
+    private queue: SamplesQueue | null = null;
     private client: AudioProcessorClient | null = null;
     private prevProcessingMode: ProcessingMode | null = null;
 
@@ -63,13 +63,7 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
     private fastPathStatsSent = false;
 
     constructor() {
-    // constructor(options: AudioWorkletNodeOptions) {
         super();
-
-        // const processorOptions = options.processorOptions as ProcessorOptions;
-        // this.numChannels = processorOptions.numChannels;
-        this.numChannels = 2;
-        this.queue = new SamplesQueue(this.numChannels);
 
         this.port.onmessage = (event: MessageEvent<ProcessorRequest>) => {
             try {
@@ -83,6 +77,12 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
     private onMessage(message: ProcessorRequest) {
         switch (message.type) {
             case 'pitch-changer-extension-processor-init':
+                if (this.client) {
+                    throw new Error('PitchChangerProcessor must be initialized once');
+                }
+                this.numChannels = message.numChannels;
+                this.queue = new SamplesQueue(message.numChannels);
+
                 this.client = new AudioProcessorClient(
                     message.audioProcessorClientPort,
                     this.onProcessedSamples.bind(this),
@@ -196,7 +196,7 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
         // Do a reset+flush after returning from passthrough fast path.
         if (this.resetRequired) {
             this.client.reset();
-            this.queue.skip(this.queue.length);
+            this.queue!.skip(this.queue!.length);
             // This requires that client is reset beforehand.
             this.currentLatency = 0;
             this.resetRequired = false;
@@ -233,7 +233,7 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
 
     // We never close the client, finished is always false.
     private onProcessedSamples(samples: Float32Array, _finished: boolean): void {
-        this.queue.pushInterleaved(samples);
+        this.queue!.pushInterleaved(samples);
     }
 
     private writeOutput(output: Float32Array[]): void {
@@ -243,7 +243,7 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
             return;
         } else if (this.currentLatency > this.requiredLatency) {
             // Skip the queued elements which are already late.
-            const skipped = this.queue.skip(this.currentLatency - this.requiredLatency);
+            const skipped = this.queue!.skip(this.currentLatency - this.requiredLatency);
             this.currentLatency -= skipped;
             // Check if the queue became empty after skipping,
             if (this.currentLatency > this.requiredLatency) {
@@ -251,7 +251,7 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
             }
         }
 
-        const written = this.queue.popNonInterleaved(output);
+        const written = this.queue!.popNonInterleaved(output);
         this.currentLatency -= written;
         if (written < output[0].length) {
             this.numUnderruns++;
@@ -286,7 +286,7 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
             // The queue and latency are stale/meaningless when the fast path is active, report them as zero.
             currentLatencyMs: this.fastPathActive ? 0 : (this.currentLatency / sampleRate) * 1000,
             numUnderruns: this.numUnderruns,
-            queueLength: this.fastPathActive ? 0 : this.queue.length,
+            queueLength: this.fastPathActive ? 0 : this.queue!.length,
         } satisfies ProcessorStats);
         this.fastPathStatsSent = this.fastPathActive;
     }

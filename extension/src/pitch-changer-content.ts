@@ -106,12 +106,13 @@ async function initWorkletState(): Promise<WorkletState> {
     const destChannelCount = context.destination.channelCount;
     let node: AudioWorkletNode;
     try {
+        // We originally passed channelCount via processorOptions, but this breaks in Firefox even for simplest objects.
+        // The node.port on the other hand works perfectly.
         node = new AudioWorkletNode(context, PROCESSOR_NAME, {
             // Force the WebAudio do up/downmixing for us.
             channelCount: destChannelCount,
             channelCountMode: 'explicit',
             outputChannelCount: [destChannelCount],
-            // processorOptions: { numChannels: 2 },
         });
     } catch (error) {
         throw new Error(`Failed to create the ${PROCESSOR_NAME} AudioWorkletNode: ${anyToString(error)}`, {
@@ -124,6 +125,7 @@ async function initWorkletState(): Promise<WorkletState> {
         node.port.postMessage(
             {
                 type: 'pitch-changer-extension-processor-init',
+                numChannels: destChannelCount,
                 audioProcessorClientPort: audioProcessorClientPort,
             } satisfies ProcessorInit,
             [audioProcessorClientPort],

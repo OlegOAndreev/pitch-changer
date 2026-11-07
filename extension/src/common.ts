@@ -56,6 +56,7 @@ export interface WorkerIframeInit {
 
 export interface ProcessorInit {
     type: 'pitch-changer-extension-processor-init';
+    numChannels: number;
     audioProcessorClientPort: MessagePort;
 }
 
@@ -76,10 +77,6 @@ export interface ProcessorStats {
 }
 
 export type ProcessorRequest = ProcessorInit | ProcessorSetParams;
-
-export interface ProcessorOptions {
-    numChannels: number;
-}
 
 // Initialize settings with default values, but leave enabled: false.
 export function disabledSettings(): ExtensionSettings {
