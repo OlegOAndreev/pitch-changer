@@ -17,15 +17,9 @@ export interface ExtensionSettings {
 }
 
 export interface StatsResult {
-    numPlayingElements: number;
-    fastPathActive: boolean;
-    currentLatencyMs: number;
-    numUnderruns: number;
-    queueLength: number;
-}
-
-export interface OverrideStatsResult {
+    type: 'pitch-changer-extension-stats-result';
     numAudioContexts: number;
+    numPlayingElements: number;
     fastPathActive: boolean;
     currentLatencyMs: number;
     numUnderruns: number;
@@ -41,12 +35,25 @@ const defaultSettings: ExtensionSettings = {
     enablePassthroughOptimization: true,
 };
 
-export interface PitchChangerOverrideInit {
-    type: 'pitch-changer-extension-override-init';
+export interface MessageWithType {
+    type: string;
+}
+
+export interface MainWorldInit {
+    type: 'pitch-changer-extension-main-world-init';
     processorUrl: string;
     workerIframeUrl: string;
     audioProcessorWorkerUrl: string;
     settings: ExtensionSettings;
+}
+
+export interface ApplySettings {
+    type: 'pitch-changer-extension-apply-settings';
+    settings: ExtensionSettings;
+}
+
+export interface GetStats {
+    type: 'pitch-changer-extension-get-stats';
 }
 
 export interface WorkerIframeInit {
@@ -99,20 +106,6 @@ export async function loadSettings(): Promise<ExtensionSettings> {
     return result;
 }
 
-// The following two interfaces are hacks for allowing calling functions in content scripts from popup script. We store
-// function pointers in globalThis properties via those interfaces.
-//
-// An alternative would be either a) passing messages or b) exporting those functions using modules. Both those options
-// require more code and look more fragile, because we need to run both in ISOLATED world and MAIN world: while ISOLATED
-// world can listen to messages and settings changes, MAIN cannot and we would need to communicate with it through
-// messages with ISOLATED world.
-export interface ContentScriptExports {
-    exportGetStats?(): StatsResult;
-    exportApplySettings?(newSettings: ExtensionSettings): void;
-}
-
-// The function names must be unique: we are injecting into global user-visible namespace.
-export interface OverrideScriptExports {
-    exportPitchChangerExtensionOverrideGetStats?(): OverrideStatsResult;
-    exportPitchChangerExtensionOverrideApplySettings?(newSettings: ExtensionSettings): void;
+export function isMessageWithType(data: unknown): data is MessageWithType {
+    return typeof data === 'object' && data !== null && 'type' in data;
 }

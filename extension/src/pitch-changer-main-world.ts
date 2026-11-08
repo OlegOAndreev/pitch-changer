@@ -1,13 +1,14 @@
 import {
     PROCESSOR_NAME,
     type ExtensionSettings,
-    type OverrideScriptExports,
-    type OverrideStatsResult,
-    type PitchChangerOverrideInit,
+    type MainWorldInit,
     type ProcessorInit,
     type ProcessorSetParams,
     type ProcessorStats,
     type WorkerIframeInit,
+    isMessageWithType,
+    type ApplySettings,
+    type StatsResult,
 } from './common.js';
 import { anyToString } from '../../src/common-utils.js';
 
@@ -57,15 +58,14 @@ import { anyToString } from '../../src/common-utils.js';
             reject = rej;
         });
         const onMessage = (event: MessageEvent) => {
-            if (event.source !== workerIframe.contentWindow) {
+            if (event.source !== workerIframe.contentWindow || !isMessageWithType(event.data)) {
                 return;
             }
-            window.removeEventListener('message', onMessage);
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-            if (event.data?.type !== 'pitch-changer-extension-worker-iframe-init') {
+            if (event.data.type !== 'pitch-changer-extension-worker-iframe-init') {
                 reject(new Error(`MAIN: Unknown message type from worker iframe: ${anyToString(event.data)}`));
                 return;
             }
+            window.removeEventListener('message', onMessage);
             const data = event.data as WorkerIframeInit;
             resolve({ iframe: workerIframe, port: data.audioProcessorClientPort });
         };
@@ -313,7 +313,7 @@ import { anyToString } from '../../src/common-utils.js';
         }
     }
 
-    function getStats(): OverrideStatsResult {
+    function getStats(): StatsResult {
         let fastPathActive = true;
         let currentLatencyMs = 0;
         let numUnderruns = 0;
@@ -327,6 +327,8 @@ import { anyToString } from '../../src/common-utils.js';
             queueLength = Math.max(queueLength, context.pitchChangerOverrideQueueLength);
         }
         return {
+            type: 'pitch-changer-extension-stats-result',
+            numPlayingElements: 0,
             numAudioContexts: numAudioContexts,
             fastPathActive: fastPathActive,
             currentLatencyMs: currentLatencyMs,
@@ -335,10 +337,19 @@ import { anyToString } from '../../src/common-utils.js';
         };
     }
 
-    function setupExports() {
-        (globalThis as unknown as OverrideScriptExports).exportPitchChangerExtensionOverrideGetStats = getStats;
-        (globalThis as unknown as OverrideScriptExports).exportPitchChangerExtensionOverrideApplySettings =
-            applySettings;
+    function completeInit(init: MainWorldInit) {
+        debugLog('Audio Pitch Changer: Initializing MAIN content script, settings', init.settings);
+        settings = init.settings;
+        processorUrl = init.processorUrl;
+        workerIframeUrl = init.workerIframeUrl;
+        audioProcessorWorkerUrl = init.audioProcessorWorkerUrl;
+
+        for (const context of liveAudioContexts()) {
+            // We intentionally do not await this.
+            context.pitchChangerOverrideApplySettings().catch((error: unknown) => {
+                console.error('MAIN: failed to apply settings to an overridden AudioContext', error);
+            });
+        }
     }
 
     // This must be run at document_start for two reasons:
@@ -347,32 +358,22 @@ import { anyToString } from '../../src/common-utils.js';
     function init() {
         globalThis.AudioContext = PitchChangerOverrideAudioContext;
 
-        setupExports();
-
-        const onMessage = (event: MessageEvent) => {
-            if (event.source !== window) {
+        window.addEventListener('message', (event: MessageEvent) => {
+            if (event.source !== window || !isMessageWithType(event.data)) {
                 return;
             }
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-            if (event.data?.type === 'pitch-changer-extension-override-init') {
-                const init = event.data as PitchChangerOverrideInit;
-                debugLog('Audio Pitch Changer: Initializing MAIN content script, settings', init.settings);
-                settings = init.settings;
-                processorUrl = init.processorUrl;
-                workerIframeUrl = init.workerIframeUrl;
-                audioProcessorWorkerUrl = init.audioProcessorWorkerUrl;
-
-                for (const context of liveAudioContexts()) {
-                    // We intentionally do not await this.
-                    context.pitchChangerOverrideApplySettings().catch((error: unknown) => {
-                        console.error('MAIN: failed to apply settings to an overridden AudioContext', error);
-                    });
-                }
-
-                window.removeEventListener('message', onMessage);
+            switch (event.data.type) {
+                case 'pitch-changer-extension-main-world-init':
+                    completeInit(event.data as MainWorldInit);
+                    break;
+                case 'pitch-changer-extension-apply-settings':
+                    applySettings((event.data as ApplySettings).settings);
+                    break;
+                case 'pitch-changer-extension-get-stats':
+                    window.postMessage(getStats(), '*');
+                    break;
             }
-        };
-        window.addEventListener('message', onMessage);
+        });
     }
 
     init();

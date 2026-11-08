@@ -1,16 +1,15 @@
 import {
-    type ContentScriptExports,
     type ExtensionSettings,
-    type OverrideScriptExports,
-    type OverrideStatsResult,
     type ProcessingMode,
     type StatsResult,
     type TargetLatency,
     loadSettings,
     SETTINGS_KEY,
+    type ApplySettings,
+    type GetStats,
 } from './common.js';
 // Note: yes, this is an intended import
-import { anyToString, debounce, setupWindowOnError } from '../../src/common-utils.js';
+import { anyToString, debounce, setupWindowOnError, sleep } from '../../src/common-utils.js';
 
 const currentSettings: ExtensionSettings = await loadSettings();
 
@@ -20,7 +19,6 @@ function debugLog(...args: unknown[]): void {
     }
 }
 
-const statusValue = document.getElementById('status') as HTMLDivElement;
 const toggleEnabled = document.getElementById('toggleEnabled') as HTMLInputElement;
 const pitchSlider = document.getElementById('pitchSlider') as HTMLInputElement;
 const pitchValue = document.getElementById('pitchValue') as HTMLDivElement;
@@ -38,23 +36,13 @@ const numUnderrunsValue = document.getElementById('numUnderruns') as HTMLSpanEle
 const maxQueueLengthValue = document.getElementById('maxQueueLength') as HTMLSpanElement;
 
 const SAVE_SETTINGS_DEBOUNCE = 50;
-const HIDE_ERROR_AFTER = 10000;
 const STATS_UPDATE_INTERVAL = 100;
-
-function showStatus(error: unknown) {
-    statusValue.textContent = anyToString(error);
-    statusValue.hidden = false;
-    setTimeout(() => {
-        statusValue.hidden = true;
-    }, HIDE_ERROR_AFTER);
-}
 
 const saveSettings = debounce(SAVE_SETTINGS_DEBOUNCE, async () => {
     try {
         await chrome.storage.local.set({ [SETTINGS_KEY]: currentSettings });
     } catch (error) {
         console.error('Error saving settings:', error);
-        showStatus(error);
     }
 });
 
@@ -140,54 +128,27 @@ function shouldApplyToTab(tab: chrome.tabs.Tab | undefined): boolean {
 }
 
 async function applySettingsToTabs() {
-    console.log(`Start applying`);
     const tabs = await chrome.tabs.query({});
     for (const tab of tabs) {
         if (!shouldApplyToTab(tab)) {
             continue;
         }
+
         debugLog(`Applying to ${tab.url}`);
-        try {
-            await chrome.scripting.executeScript({
-                func: (settings) => {
-                    // eslint-disable-next-line @typescript-eslint/unbound-method
-                    const applySettings = (globalThis as unknown as ContentScriptExports).exportApplySettings;
-                    // Skip the frames we did not get injected into for whatever reason.
-                    if (applySettings) {
-                        applySettings(settings);
-                    }
-                },
-                args: [currentSettings],
-                target: { tabId: tab.id!, allFrames: true },
-                world: 'ISOLATED',
+        chrome.tabs
+            .sendMessage(tab.id!, {
+                type: 'pitch-changer-extension-apply-settings',
+                settings: currentSettings,
+            } satisfies ApplySettings)
+            .catch((error: unknown) => {
+                const message = anyToString(error);
+                // Skip the pages which have not been properly initialized.
+                if (message.includes('Receiving end does not exist')) {
+                    console.debug(`Could not apply settings to tab ${tab.url}, skipping`, error);
+                } else {
+                    console.error(`Could not apply settings to tab ${tab.url}, ${anyToString(error)}`, error);
+                }
             });
-            await chrome.scripting.executeScript({
-                func: (settings) => {
-                    // eslint-disable-next-line @typescript-eslint/unbound-method
-                    const applySettings = (globalThis as unknown as OverrideScriptExports)
-                        .exportPitchChangerExtensionOverrideApplySettings;
-                    // Skip the frames we did not get injected into for whatever reason.
-                    if (applySettings) {
-                        applySettings(settings);
-                    }
-                },
-                args: [currentSettings],
-                target: { tabId: tab.id!, allFrames: true },
-                world: 'MAIN',
-            });
-        } catch (error) {
-            const message = anyToString(error);
-            // Injection into restricted/quarantined hosts always fails; this is expected, so just log it.
-            if (
-                message.includes('Cannot access contents of the page') ||
-                message.includes('Missing host permission for the tab or frames')
-            ) {
-                console.debug(`Could not apply settings to tab ${tab.url}, skipping`, error);
-            } else {
-                console.error(`Could not apply settings to tab ${tab.url} ISOLATED, ASDF${message}QWER`, error);
-                showStatus(error);
-            }
-        }
     }
 }
 
@@ -200,68 +161,36 @@ async function updateDebugStats() {
     let numUnderruns = 0;
     let maxQueueLength = 0;
     if (shouldApplyToTab(tab)) {
-        try {
-            // We need to call two functions: one in pitch-changer-content.ts and one in pitch-changer-override.ac.ts
-            const results = await chrome.scripting.executeScript({
-                func: () => {
-                    // eslint-disable-next-line @typescript-eslint/unbound-method
-                    const getStats = (globalThis as unknown as ContentScriptExports).exportGetStats;
-                    // Skip the frames we did not get injected into for whatever reason.
-                    if (getStats) {
-                        return getStats();
-                    } else {
-                        return null;
-                    }
-                },
-                target: { tabId: tab.id!, allFrames: true },
-                world: 'ISOLATED',
-                // Set to true, otherwise the execution may hang for a looong time while the various iframes are being
-                // loaded.
-                injectImmediately: true,
-            });
-            for (const result of results) {
-                const data = result.result as StatsResult;
-                if (data) {
-                    numPlayingElements += data.numPlayingElements;
-                    fastPathActive = fastPathActive && data.fastPathActive;
-                    maxCurrentLatencyMs = Math.max(maxCurrentLatencyMs, data.currentLatencyMs);
-                    numUnderruns += data.numUnderruns;
-                    maxQueueLength = Math.max(maxQueueLength, data.queueLength);
+        chrome.tabs
+            .sendMessage(tab.id!, {
+                type: 'pitch-changer-extension-get-stats',
+            } satisfies GetStats)
+            .catch((error: unknown) => {
+                const message = anyToString(error);
+                // Skip the pages which have not been properly initialized.
+                if (message.includes('Receiving end does not exist')) {
+                    console.debug(`Could not apply settings to tab ${tab.url}, skipping`, error);
+                } else {
+                    console.error(`Could not apply settings to tab ${tab.url}, ${anyToString(error)}`, error);
                 }
-            }
+            });
 
-            const overrideResults = await chrome.scripting.executeScript({
-                func: () => {
-                    // eslint-disable-next-line @typescript-eslint/unbound-method
-                    const getStats = (globalThis as unknown as OverrideScriptExports)
-                        .exportPitchChangerExtensionOverrideGetStats;
-                    // Skip the frames we did not get injected into for whatever reason.
-                    if (getStats) {
-                        return getStats();
-                    } else {
-                        return null;
-                    }
-                },
-                target: { tabId: tab.id!, allFrames: true },
-                world: 'MAIN',
-                // Set to true, otherwise the execution may hang for a looong time while the various iframes are being
-                // loaded.
-                injectImmediately: true,
-            });
-            for (const result of overrideResults) {
-                const data = result.result as OverrideStatsResult;
-                if (data) {
-                    numAudioContextDestinations += data.numAudioContexts;
-                    fastPathActive = fastPathActive && data.fastPathActive;
-                    maxCurrentLatencyMs = Math.max(maxCurrentLatencyMs, data.currentLatencyMs);
-                    numUnderruns += data.numUnderruns;
-                    maxQueueLength = Math.max(maxQueueLength, data.queueLength);
-                }
+        // This is hack: we request stats from all frames and then wait for some fixed amount of time until they
+        // respond.
+        const onMessage = (data: StatsResult) => {
+            if (data.type !== 'pitch-changer-extension-stats-result') {
+                return;
             }
-        } catch (error) {
-            console.error(`Could not get stats from tab ${tab.url}`, error);
-            showStatus(error);
-        }
+            numPlayingElements += data.numPlayingElements;
+            numAudioContextDestinations += data.numAudioContexts;
+            fastPathActive = fastPathActive && data.fastPathActive;
+            maxCurrentLatencyMs = Math.max(maxCurrentLatencyMs, data.currentLatencyMs);
+            numUnderruns += data.numUnderruns;
+            maxQueueLength = Math.max(maxQueueLength, data.queueLength);
+        };
+        chrome.runtime.onMessage.addListener(onMessage);
+        await sleep(STATS_UPDATE_INTERVAL / 2);
+        chrome.runtime.onMessage.removeListener(onMessage);
     }
     numPlayingElementsValue.textContent = numPlayingElements.toString();
     numAudioContextDestinationsValue.textContent = numAudioContextDestinations.toString();

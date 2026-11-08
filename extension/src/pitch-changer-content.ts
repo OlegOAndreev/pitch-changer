@@ -1,10 +1,12 @@
 import {
     disabledSettings,
+    isMessageWithType,
     loadSettings,
     PROCESSOR_NAME,
-    type ContentScriptExports,
+    type ApplySettings,
     type ExtensionSettings,
-    type PitchChangerOverrideInit,
+    type GetStats,
+    type MainWorldInit,
     type ProcessorInit,
     type ProcessorSetParams,
     type ProcessorStats,
@@ -24,7 +26,7 @@ function debugLog(...args: unknown[]): void {
 // The extension does two things:
 // 1. it re-routes all audio and video elements through AudioContext and applies AudioWorklet with pitch processing
 //    if enabled (this can be done in the ISOLATED environment from this script)
-// 2. it overrides AudioWorklet constructor (this must be done in the MAIN environment from pitch-changer-override-ac:
+// 2. it overrides AudioWorklet constructor (this must be done in the MAIN environment from pitch-changer-main-world:
 //    we need to replace the global variable)
 //
 // We want to process all frames (it's extremely frequent that audio/video elements are inside iframes) in the tab.
@@ -185,15 +187,14 @@ async function createWorkerInIframe(): Promise<MessagePort> {
         reject = rej;
     });
     const onMessage = (event: MessageEvent) => {
-        if (event.source !== workerIframe.contentWindow) {
+        if (event.source !== workerIframe.contentWindow || !isMessageWithType(event.data)) {
             return;
         }
-        window.removeEventListener('message', onMessage);
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-        if (event.data?.type !== 'pitch-changer-extension-worker-iframe-init') {
+        if (event.data.type !== 'pitch-changer-extension-worker-iframe-init') {
             reject(new Error(`ISOLATED: Unknown message type from worker iframe: ${anyToString(event.data)}`));
             return;
         }
+        window.removeEventListener('message', onMessage);
         const data = event.data as WorkerIframeInit;
         resolve(data.audioProcessorClientPort);
     };
@@ -432,24 +433,14 @@ function onWindowPlayImpl(ev: Event) {
     registerElement(ev.target);
 }
 
-function applySettings(newSettings: ExtensionSettings) {
-    try {
-        // debugLog(
-        //     `Applying new settings in ISOLATED: ${anyToString(newSettings)}, current settings ${anyToString(settings)}`,
-        // );
-        const gotEnabled = newSettings.enabled && !settings.enabled;
-        const gotDisabled = !newSettings.enabled && settings.enabled;
-        settings = newSettings;
+async function applySettings(newSettings: ExtensionSettings) {
+    debugLog(
+        `Applying new settings in ISOLATED: ${anyToString(newSettings)}, current settings ${anyToString(settings)}`,
+    );
+    const gotEnabled = newSettings.enabled && !settings.enabled;
+    const gotDisabled = !newSettings.enabled && settings.enabled;
+    settings = newSettings;
 
-        applySettingsImpl(gotEnabled, gotDisabled).catch((error: unknown) => {
-            console.error('ISOLATED: failed to apply settings', error);
-        });
-    } catch (error) {
-        console.error('ISOLATED: failed to apply settings', error);
-    }
-}
-
-async function applySettingsImpl(gotEnabled: boolean, gotDisabled: boolean) {
     if (gotEnabled) {
         debugLog('Re-enabling processing for page');
         // Re-route all elements via sourceNode
@@ -478,10 +469,7 @@ async function applySettingsImpl(gotEnabled: boolean, gotDisabled: boolean) {
                         }
                     }
                 } catch (error) {
-                    throw new Error(
-                        `Failed to enable processing for ${element.nodeName} ${element.id}: ${anyToString(error)}`,
-                        { cause: error },
-                    );
+                    console.error(`Failed to enable processing for ${element.nodeName} ${element.id}`, error);
                 }
             }
         }
@@ -505,10 +493,7 @@ async function applySettingsImpl(gotEnabled: boolean, gotDisabled: boolean) {
                     sourceNode.disconnect();
                     sourceNode.connect(worklet.context.destination);
                 } catch (error) {
-                    throw new Error(
-                        `Failed to disable processing for ${element?.nodeName} ${element?.id}: ${anyToString(error)}`,
-                        { cause: error },
-                    );
+                    console.error(`Failed to disable processing for ${element?.nodeName} ${element?.id}`, error);
                 }
             }
         }
@@ -529,6 +514,8 @@ async function applySettingsImpl(gotEnabled: boolean, gotDisabled: boolean) {
 
 function getStats(): StatsResult {
     return {
+        type: 'pitch-changer-extension-stats-result',
+        numAudioContexts: 0,
         numPlayingElements: playingElements.size,
         fastPathActive: workletProcessorFastPathActive,
         currentLatencyMs: workletProcessorCurrentLatencyMs,
@@ -537,30 +524,50 @@ function getStats(): StatsResult {
     };
 }
 
-function setupExports() {
-    (globalThis as unknown as ContentScriptExports).exportGetStats = getStats;
-    (globalThis as unknown as ContentScriptExports).exportApplySettings = applySettings;
-}
-
 async function init(): Promise<void> {
-    setupExports();
-
     window.addEventListener('play', onWindowPlay, true);
-    document.documentElement.append(document.createElement('a'));
 
-    applySettings(await loadSettings());
+    chrome.runtime.onMessage.addListener((message: ApplySettings | GetStats) => {
+        // Pass the settings to the MAIN world content script.
+        window.postMessage(message, '*');
+
+        switch (message.type) {
+            case 'pitch-changer-extension-apply-settings':
+                applySettings(message.settings).catch((error: unknown) => {
+                    console.error('ISOLATED: Failed to apply settings', error);
+                });
+                break;
+            case 'pitch-changer-extension-get-stats':
+                chrome.runtime.sendMessage(getStats()).catch((error: unknown) => {
+                    console.error('ISOLATED: Send stats', error);
+                });
+                break;
+        }
+    });
+    window.addEventListener('message', (event: MessageEvent) => {
+        if (event.source !== window || !isMessageWithType(event.data)) {
+            return;
+        }
+        if (event.data.type === 'pitch-changer-extension-stats-result') {
+            chrome.runtime.sendMessage(event.data).catch((error: unknown) => {
+                console.error('ISOLATED: Forward stats', error);
+            });
+        }
+    });
+
+    await applySettings(await loadSettings());
     debugLog('Audio Pitch Changer: Initializing ISOLATED content script');
 
     // Complete initialization of the MAIN content script. Ideally we would simply use executeScript from ISOLATED
     // content script to run MAIN init, but browser does not allow getting current tab id :-(
     window.postMessage(
         {
-            type: 'pitch-changer-extension-override-init',
+            type: 'pitch-changer-extension-main-world-init',
             processorUrl: chrome.runtime.getURL('pitch-changer-processor.js'),
             workerIframeUrl: chrome.runtime.getURL('worker-iframe.html'),
             audioProcessorWorkerUrl: chrome.runtime.getURL('audio-processor-worker.js'),
             settings: settings,
-        } satisfies PitchChangerOverrideInit,
+        } satisfies MainWorldInit,
         '*',
     );
 
