@@ -211,6 +211,7 @@ class AudioProcessorWorker {
         }
 
         this.processorNumChannels = this.params.numChannels;
+        this.processorFftSize = this.params.fftSize;
         this.paramsAreDirty = false;
 
         return this.processor;

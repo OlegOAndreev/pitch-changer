@@ -184,9 +184,9 @@ async function updateDebugStats() {
                 const message = anyToString(error);
                 // Skip the pages which have not been properly initialized.
                 if (message.includes('Receiving end does not exist')) {
-                    console.debug(`Could not apply settings to tab ${tab.url}, skipping`, error);
+                    console.debug(`Could not get stats from tab ${tab.url}, skipping`, error);
                 } else {
-                    console.error(`Could not apply settings to tab ${tab.url}, ${anyToString(error)}`, error);
+                    console.error(`Could not get stats from tab ${tab.url}, ${anyToString(error)}`, error);
                 }
             });
 

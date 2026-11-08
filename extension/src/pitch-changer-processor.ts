@@ -5,7 +5,6 @@ import { fftSizeForSampleRate } from '../../src/utils.js';
 import {
     PROCESSOR_NAME,
     type ProcessingMode,
-    // type ProcessorOptions,
     type ProcessorRequest,
     type ProcessorSetParams,
     type ProcessorStats,
@@ -125,6 +124,7 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
             this.resetRequired = true;
         }
         this.prevProcessingMode = params.processingMode;
+        this.prevFftSize = fftSize;
         this.passthroughEnabled = params.enablePassthroughOptimization && params.pitchValue === 1.0;
         if (this.passthroughEnabled && this.currentLatency === 0) {
             // Hack: if we are just setting params, immediately enable passthrough so that we do not get a click on new
