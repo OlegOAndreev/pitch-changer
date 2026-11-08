@@ -42,6 +42,10 @@ Conversion happens only at the Web Audio boundaries.
 ### Conventions
 - Prefer id-based CSS selectors; add class-based rules only when they remove duplication.
 
+## Extension
+This project also contains a browser extension which allows changing the pitch of audio on the web pages, see extension/
+for details.
+
 ## References
 
 Original source: https://github.com/OlegOAndreev/scratch/blob/master/audio-stretch/audio-stretch.cpp. Unlike the
