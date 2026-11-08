@@ -7,6 +7,7 @@ import {
     SETTINGS_KEY,
     type ApplySettings,
     type GetStats,
+    type Quality,
 } from './common.js';
 // Note: yes, this is an intended import
 import { anyToString, debounce, setupWindowOnError, sleep } from '../../src/common-utils.js';
@@ -25,6 +26,7 @@ const pitchValue = document.getElementById('pitchValue') as HTMLDivElement;
 const noteValue = document.getElementById('noteValue') as HTMLDivElement;
 const modeButtons = document.querySelectorAll('#modeSelector button');
 const latencyButtons = document.querySelectorAll('#latencySelector button');
+const qualityButtons = document.querySelectorAll('#qualitySelector button');
 const advancedSection = document.getElementById('advancedSection') as HTMLDetailsElement;
 const passthroughCheckbox = document.getElementById('enablePassthroughOptimization') as HTMLInputElement;
 const debugLoggingCheckbox = document.getElementById('debugLogging') as HTMLInputElement;
@@ -50,12 +52,14 @@ function setEnabled() {
     if (currentSettings.enabled) {
         modeButtons.forEach((btn) => btn.classList.remove('disabled'));
         latencyButtons.forEach((btn) => btn.classList.remove('disabled'));
+        qualityButtons.forEach((btn) => btn.classList.remove('disabled'));
         pitchSlider.classList.remove('disabled');
         passthroughCheckbox.classList.remove('disabled');
         debugLoggingCheckbox.classList.remove('disabled');
     } else {
         modeButtons.forEach((btn) => btn.classList.add('disabled'));
         latencyButtons.forEach((btn) => btn.classList.add('disabled'));
+        qualityButtons.forEach((btn) => btn.classList.add('disabled'));
         pitchSlider.classList.add('disabled');
         passthroughCheckbox.classList.add('disabled');
         debugLoggingCheckbox.classList.add('disabled');
@@ -102,6 +106,17 @@ function updateActiveLatencyDisplay(latency: TargetLatency): void {
     });
 }
 
+function updateQualityDisplay(quality: Quality): void {
+    qualityButtons.forEach((btn) => {
+        const button = btn as HTMLButtonElement;
+        if (button.dataset.quality === quality) {
+            button.classList.add('active');
+        } else {
+            button.classList.remove('active');
+        }
+    });
+}
+
 function shouldApplyToTab(tab: chrome.tabs.Tab | undefined): boolean {
     if (!tab) {
         return false;
@@ -137,7 +152,7 @@ async function applySettingsToTabs() {
         debugLog(`Applying to ${tab.url}`);
         chrome.tabs
             .sendMessage(tab.id!, {
-                type: 'pitch-changer-extension-apply-settings',
+                type: 'pitchChangerExtensionApplySettings',
                 settings: currentSettings,
             } satisfies ApplySettings)
             .catch((error: unknown) => {
@@ -163,7 +178,7 @@ async function updateDebugStats() {
     if (shouldApplyToTab(tab)) {
         chrome.tabs
             .sendMessage(tab.id!, {
-                type: 'pitch-changer-extension-get-stats',
+                type: 'pitchChangerExtensionGetStats',
             } satisfies GetStats)
             .catch((error: unknown) => {
                 const message = anyToString(error);
@@ -178,7 +193,7 @@ async function updateDebugStats() {
         // This is hack: we request stats from all frames and then wait for some fixed amount of time until they
         // respond.
         const onMessage = (data: StatsResult) => {
-            if (data.type !== 'pitch-changer-extension-stats-result') {
+            if (data.type !== 'pitchChangerExtensionStatsResult') {
                 return;
             }
             numPlayingElements += data.numPlayingElements;
@@ -211,6 +226,7 @@ function init() {
     updatePitchDisplay();
     updateActiveModeDisplay(currentSettings.processingMode);
     updateActiveLatencyDisplay(currentSettings.targetLatency);
+    updateQualityDisplay(currentSettings.quality);
 
     toggleEnabled.addEventListener('change', async () => {
         currentSettings.enabled = toggleEnabled.checked;
@@ -280,6 +296,21 @@ function init() {
                 void saveSettings();
             } else {
                 console.warn('Invalid latency:', latency);
+            }
+        });
+    });
+
+    qualityButtons.forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            const quality = (btn as HTMLButtonElement).dataset.quality;
+            if (quality === 'low' || quality === 'high') {
+                currentSettings.quality = quality;
+                updateQualityDisplay(quality);
+                await applySettingsToTabs();
+                // Do not await saveSettings because it is wrapped in debounce.
+                void saveSettings();
+            } else {
+                console.warn('Invalid quality:', quality);
             }
         });
     });

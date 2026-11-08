@@ -7,17 +7,20 @@ export type ProcessingMode = 'pitch' | 'formant-preserving-pitch';
 // Latency matters if your system is under load: the chances of skipping/cracks are higher with lower latencies.
 export type TargetLatency = 'normal' | 'high';
 
+export type Quality = 'low' | 'high';
+
 export interface ExtensionSettings {
     enabled: boolean;
     debugLogging: boolean;
     processingMode: ProcessingMode;
     pitchValue: number;
     targetLatency: TargetLatency;
+    quality: Quality;
     enablePassthroughOptimization: boolean;
 }
 
 export interface StatsResult {
-    type: 'pitch-changer-extension-stats-result';
+    type: 'pitchChangerExtensionStatsResult';
     numAudioContexts: number;
     numPlayingElements: number;
     fastPathActive: boolean;
@@ -32,6 +35,7 @@ const defaultSettings: ExtensionSettings = {
     processingMode: 'pitch',
     pitchValue: 1.0,
     targetLatency: 'normal',
+    quality: 'high',
     enablePassthroughOptimization: true,
 };
 
@@ -40,7 +44,7 @@ export interface MessageWithType {
 }
 
 export interface MainWorldInit {
-    type: 'pitch-changer-extension-main-world-init';
+    type: 'pitchChangerExtensionMainWorldInit';
     processorUrl: string;
     workerIframeUrl: string;
     audioProcessorWorkerUrl: string;
@@ -48,35 +52,36 @@ export interface MainWorldInit {
 }
 
 export interface ApplySettings {
-    type: 'pitch-changer-extension-apply-settings';
+    type: 'pitchChangerExtensionApplySettings';
     settings: ExtensionSettings;
 }
 
 export interface GetStats {
-    type: 'pitch-changer-extension-get-stats';
+    type: 'pitchChangerExtensionGetStats';
 }
 
 export interface WorkerIframeInit {
-    type: 'pitch-changer-extension-worker-iframe-init';
+    type: 'pitchChangerExtensionWorkerIframeInit';
     audioProcessorClientPort: MessagePort;
 }
 
 export interface ProcessorInit {
-    type: 'pitch-changer-extension-processor-init';
+    type: 'pitchChangerExtensionProcessorInit';
     numChannels: number;
     audioProcessorClientPort: MessagePort;
 }
 
 export interface ProcessorSetParams {
-    type: 'pitch-changer-extension-processor-set-params';
+    type: 'pitchChangerExtensionProcessorSetParams';
     processingMode: ProcessingMode;
     pitchValue: number;
     targetLatency: TargetLatency;
+    quality: Quality;
     enablePassthroughOptimization: boolean;
 }
 
 export interface ProcessorStats {
-    type: 'pitch-changer-extension-processor-stats';
+    type: 'pitchChangerExtensionProcessorStats';
     fastPathActive: boolean;
     currentLatencyMs: number;
     numUnderruns: number;

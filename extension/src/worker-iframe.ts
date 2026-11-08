@@ -35,7 +35,7 @@ async function init() {
     try {
         window.parent.postMessage(
             {
-                type: 'pitch-changer-extension-worker-iframe-init',
+                type: 'pitchChangerExtensionWorkerIframeInit',
                 audioProcessorClientPort: clientPort,
             } satisfies WorkerIframeInit,
             '*',

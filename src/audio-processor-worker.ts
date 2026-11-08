@@ -27,6 +27,7 @@ class AudioProcessorWorker {
     private wasmInit: Promise<void> | undefined;
     private processor: MultiPitchShifter | undefined;
     private processorNumChannels: number | undefined;
+    private processorFftSize: number | undefined;
     private inputVec: Float32Vec | undefined;
     private processedVec: Float32Vec | undefined;
     private clientPort: MessagePort | undefined;
@@ -191,7 +192,11 @@ class AudioProcessorWorker {
                 params.quefrency_cutoff = 2.0;
             }
 
-            if (this.processor && this.processorNumChannels === this.params.numChannels) {
+            if (
+                this.processor &&
+                this.processorNumChannels === this.params.numChannels &&
+                this.processorFftSize === this.params.fftSize
+            ) {
                 // console.debug(`Player worker: Updating processor parameters to ${params.to_debug_string()}`);
                 this.processor.update_params(params);
             } else {

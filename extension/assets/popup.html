@@ -223,7 +223,7 @@
       #advancedSection summary {
         font-weight: bold;
         cursor: pointer;
-        padding: 8px 0;
+        margin: 8px 0;
       }
 
       .checkbox-row {
@@ -255,12 +255,28 @@
       }
 
       #latencyRow {
+        margin-top: 8px;
+        margin-bottom: 8px;
         display: flex;
         align-items: center;
         justify-content: space-between;
       }
 
       #latencySelector button {
+        padding: 4px 12px;
+        font-size: 12px;
+        --segmented-radius: 6px;
+      }
+
+      #qualityRow {
+        margin-top: 8px;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      #qualitySelector button {
         padding: 4px 12px;
         font-size: 12px;
         --segmented-radius: 6px;
@@ -307,6 +323,13 @@
             <div id="latencySelector" class="segmented">
               <button class="active" id="latencyNormal" data-latency="normal">Normal</button>
               <button id="latencyHigh" data-latency="high">High</button>
+            </div>
+          </div>
+          <div id="qualityRow">
+            <span>Quality:</span>
+            <div id="qualitySelector" class="segmented">
+              <button class="active" id="qualityLow" data-quality="low">Low</button>
+              <button id="qualityHigh" data-quality="high">High</button>
             </div>
           </div>
           <div id="passthroughCheckbox" class="checkbox-row">

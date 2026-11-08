@@ -40,21 +40,22 @@ export class AudioProcessorManager {
             resolve();
         };
 
-        const message: WorkerInitMessage = {
+        this.worker.postMessage({
             type: 'init',
-        };
-        this.worker.postMessage(message);
+        } satisfies WorkerInitMessage);
         return promise;
     }
 
     // Creates a port which must be passed to AudioProcessorClient constructor
     createClientPort(): MessagePort {
         const channel = new MessageChannel();
-        const message: SetClientPortMessage = {
-            type: 'setClientPort',
-            clientPort: channel.port1,
-        };
-        this.worker!.postMessage(message, [channel.port1]);
+        this.worker!.postMessage(
+            {
+                type: 'setClientPort',
+                clientPort: channel.port1,
+            } satisfies SetClientPortMessage,
+            [channel.port1],
+        );
         return channel.port2;
     }
 
@@ -66,7 +67,7 @@ export class AudioProcessorManager {
         numChannels: number,
         fftSize: number,
     ): void {
-        const message: SetParamsMessage = {
+        this.worker!.postMessage({
             type: 'setParams',
             params: {
                 processingMode,
@@ -75,8 +76,7 @@ export class AudioProcessorManager {
                 numChannels,
                 fftSize,
             },
-        };
-        this.worker!.postMessage(message);
+        } satisfies SetParamsMessage);
     }
 
     // Terminates the worker, the manager must not be used afterwards.

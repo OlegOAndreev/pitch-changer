@@ -1,6 +1,6 @@
-// AudioProcessorClient allows controlling AudioProcessorWorker from another Worker/AudioWorklet. It wraps a
-// MessagePort and provides request/response messaging for sample processing: source sample buffers are transferred from
-// the client to the worker, processed sample buffers are transferred from the worker to the client.
+// AudioProcessorClient allows controlling AudioProcessorWorker from another Worker/AudioWorklet. It wraps a MessagePort
+// and provides request/response messaging for sample processing: source sample buffers are transferred from the client
+// to the worker, processed sample buffers are transferred from the worker to the client.
 import type {
     FinishProcessRequest,
     ProcessSamplesRequest,
@@ -29,19 +29,20 @@ export class AudioProcessorClient {
 
     // Resets the processor, should be called before processing new audio
     reset(): void {
-        const message: ResetRequest = {
+        this.port.postMessage({
             type: 'resetRequest',
-        };
-        this.port.postMessage(message);
+        } satisfies ResetRequest);
     }
 
     // Request processing samples from the worker. The `samples` buffer will be transferred to avoid copying.
     processSamples(samples: Float32Array): void {
-        const message: ProcessSamplesRequest = {
-            type: 'processSamplesRequest',
-            samples,
-        };
-        this.port.postMessage(message, [samples.buffer]);
+        this.port.postMessage(
+            {
+                type: 'processSamplesRequest',
+                samples,
+            } satisfies ProcessSamplesRequest,
+            [samples.buffer],
+        );
     }
 
     // Update processing params. This method may be called at any time.
@@ -52,7 +53,7 @@ export class AudioProcessorClient {
         numChannels: number,
         fftSize: number,
     ): void {
-        const message: SetParamsMessage = {
+        this.port.postMessage({
             type: 'setParams',
             params: {
                 processingMode,
@@ -61,15 +62,13 @@ export class AudioProcessorClient {
                 numChannels,
                 fftSize,
             },
-        };
-        this.port.postMessage(message);
+        } satisfies SetParamsMessage);
     }
 
     // Complete processing, previously sent samples will be flushed.
     finish(): void {
-        const message: FinishProcessRequest = {
+        this.port.postMessage({
             type: 'finishRequest',
-        };
-        this.port.postMessage(message);
+        } satisfies FinishProcessRequest);
     }
 }

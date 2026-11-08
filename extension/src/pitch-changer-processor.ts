@@ -35,6 +35,7 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
     private queue: SamplesQueue | null = null;
     private client: AudioProcessorClient | null = null;
     private prevProcessingMode: ProcessingMode | null = null;
+    private prevFftSize: number = 0;
 
     // requiredLatency is in samples
     private requiredLatency = 0;
@@ -76,7 +77,7 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
 
     private onMessage(message: ProcessorRequest) {
         switch (message.type) {
-            case 'pitch-changer-extension-processor-init':
+            case 'pitchChangerExtensionProcessorInit':
                 if (this.client) {
                     throw new Error('PitchChangerProcessor must be initialized once');
                 }
@@ -89,7 +90,7 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
                 );
                 break;
 
-            case 'pitch-changer-extension-processor-set-params':
+            case 'pitchChangerExtensionProcessorSetParams':
                 this.setParams(message);
                 break;
 
@@ -104,8 +105,9 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
                 'PitchChangerProcessor: cannot set params before the audio processor client is initialized',
             );
         }
-        // Use the smaller sampling rate to make latency lower.
-        const fftSize = fftSizeForSampleRate(sampleRate, 40);
+        // Use the smaller fft size to make latency lower (2048 for normal, 4096 for high. 1024 is way too low for
+        // sound).
+        const fftSize = fftSizeForSampleRate(sampleRate, params.quality === 'low' ? 40 : 80);
         this.client.setParams(params.processingMode, params.pitchValue, sampleRate, this.numChannels, fftSize);
         switch (params.targetLatency) {
             case 'normal':
@@ -117,6 +119,9 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
         }
         if (this.prevProcessingMode && this.prevProcessingMode !== params.processingMode) {
             // Flush the queues if we changed the processing mode, otherwise we get the incorrect latency.
+            this.resetRequired = true;
+        }
+        if (this.prevFftSize !== fftSize) {
             this.resetRequired = true;
         }
         this.prevProcessingMode = params.processingMode;
@@ -281,7 +286,7 @@ class PitchChangerProcessor extends AudioWorkletProcessor {
 
         this.samplesSinceStatsMessage = 0;
         this.port.postMessage({
-            type: 'pitch-changer-extension-processor-stats',
+            type: 'pitchChangerExtensionProcessorStats',
             fastPathActive: this.fastPathActive,
             // The queue and latency are stale/meaningless when the fast path is active, report them as zero.
             currentLatencyMs: this.fastPathActive ? 0 : (this.currentLatency / sampleRate) * 1000,

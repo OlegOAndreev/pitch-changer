@@ -126,17 +126,18 @@ async function initWorkletState(): Promise<WorkletState> {
         const audioProcessorClientPort = await createWorkerInIframe();
         node.port.postMessage(
             {
-                type: 'pitch-changer-extension-processor-init',
+                type: 'pitchChangerExtensionProcessorInit',
                 numChannels: destChannelCount,
                 audioProcessorClientPort: audioProcessorClientPort,
             } satisfies ProcessorInit,
             [audioProcessorClientPort],
         );
         node.port.postMessage({
-            type: 'pitch-changer-extension-processor-set-params',
+            type: 'pitchChangerExtensionProcessorSetParams',
             processingMode: settings.processingMode,
             pitchValue: settings.pitchValue,
             targetLatency: settings.targetLatency,
+            quality: settings.quality,
             enablePassthroughOptimization: settings.enablePassthroughOptimization,
         } satisfies ProcessorSetParams);
     } catch (error) {
@@ -145,7 +146,7 @@ async function initWorkletState(): Promise<WorkletState> {
 
     node.port.onmessage = (event: MessageEvent<ProcessorStats>) => {
         const message = event.data;
-        if (message.type !== 'pitch-changer-extension-processor-stats') {
+        if (message.type !== 'pitchChangerExtensionProcessorStats') {
             console.error(`ISOLATED: Unknown message type from processor: ${anyToString(message)}`);
         }
         workletProcessorFastPathActive = message.fastPathActive;
@@ -190,7 +191,7 @@ async function createWorkerInIframe(): Promise<MessagePort> {
         if (event.source !== workerIframe.contentWindow || !isMessageWithType(event.data)) {
             return;
         }
-        if (event.data.type !== 'pitch-changer-extension-worker-iframe-init') {
+        if (event.data.type !== 'pitchChangerExtensionWorkerIframeInit') {
             reject(new Error(`ISOLATED: Unknown message type from worker iframe: ${anyToString(event.data)}`));
             return;
         }
@@ -503,10 +504,11 @@ async function applySettings(newSettings: ExtensionSettings) {
     if (globalState) {
         const worklet = await globalState;
         worklet.node.port.postMessage({
-            type: 'pitch-changer-extension-processor-set-params',
+            type: 'pitchChangerExtensionProcessorSetParams',
             processingMode: settings.processingMode,
             pitchValue: settings.pitchValue,
             targetLatency: settings.targetLatency,
+            quality: settings.quality,
             enablePassthroughOptimization: settings.enablePassthroughOptimization,
         } satisfies ProcessorSetParams);
     }
@@ -514,7 +516,7 @@ async function applySettings(newSettings: ExtensionSettings) {
 
 function getStats(): StatsResult {
     return {
-        type: 'pitch-changer-extension-stats-result',
+        type: 'pitchChangerExtensionStatsResult',
         numAudioContexts: 0,
         numPlayingElements: playingElements.size,
         fastPathActive: workletProcessorFastPathActive,
@@ -532,12 +534,12 @@ async function init(): Promise<void> {
         window.postMessage(message, '*');
 
         switch (message.type) {
-            case 'pitch-changer-extension-apply-settings':
+            case 'pitchChangerExtensionApplySettings':
                 applySettings(message.settings).catch((error: unknown) => {
                     console.error('ISOLATED: Failed to apply settings', error);
                 });
                 break;
-            case 'pitch-changer-extension-get-stats':
+            case 'pitchChangerExtensionGetStats':
                 chrome.runtime.sendMessage(getStats()).catch((error: unknown) => {
                     console.error('ISOLATED: Send stats', error);
                 });
@@ -548,7 +550,7 @@ async function init(): Promise<void> {
         if (event.source !== window || !isMessageWithType(event.data)) {
             return;
         }
-        if (event.data.type === 'pitch-changer-extension-stats-result') {
+        if (event.data.type === 'pitchChangerExtensionStatsResult') {
             chrome.runtime.sendMessage(event.data).catch((error: unknown) => {
                 console.error('ISOLATED: Forward stats', error);
             });
@@ -562,7 +564,7 @@ async function init(): Promise<void> {
     // content script to run MAIN init, but browser does not allow getting current tab id :-(
     window.postMessage(
         {
-            type: 'pitch-changer-extension-main-world-init',
+            type: 'pitchChangerExtensionMainWorldInit',
             processorUrl: chrome.runtime.getURL('pitch-changer-processor.js'),
             workerIframeUrl: chrome.runtime.getURL('worker-iframe.html'),
             audioProcessorWorkerUrl: chrome.runtime.getURL('audio-processor-worker.js'),

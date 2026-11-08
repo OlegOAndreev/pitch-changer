@@ -61,7 +61,7 @@ import { anyToString } from '../../src/common-utils.js';
             if (event.source !== workerIframe.contentWindow || !isMessageWithType(event.data)) {
                 return;
             }
-            if (event.data.type !== 'pitch-changer-extension-worker-iframe-init') {
+            if (event.data.type !== 'pitchChangerExtensionWorkerIframeInit') {
                 reject(new Error(`MAIN: Unknown message type from worker iframe: ${anyToString(event.data)}`));
                 return;
             }
@@ -180,10 +180,11 @@ import { anyToString } from '../../src/common-utils.js';
                             this.pitchChangerOverrideWasEnabled = true;
                         }
                         pitchChangerOverrideWorkletNode.port.postMessage({
-                            type: 'pitch-changer-extension-processor-set-params',
+                            type: 'pitchChangerExtensionProcessorSetParams',
                             processingMode: settings.processingMode,
                             pitchValue: settings.pitchValue,
                             targetLatency: settings.targetLatency,
+                            quality: settings.quality,
                             enablePassthroughOptimization: settings.enablePassthroughOptimization,
                         } satisfies ProcessorSetParams);
                     } catch (error) {
@@ -255,7 +256,7 @@ import { anyToString } from '../../src/common-utils.js';
             };
             result.port.onmessage = (event: MessageEvent<ProcessorStats>) => {
                 const message = event.data;
-                if (message.type !== 'pitch-changer-extension-processor-stats') {
+                if (message.type !== 'pitchChangerExtensionProcessorStats') {
                     console.error(`MAIN: Unknown message type from processor: ${anyToString(message)}`);
                     return;
                 }
@@ -275,17 +276,18 @@ import { anyToString } from '../../src/common-utils.js';
             try {
                 result.port.postMessage(
                     {
-                        type: 'pitch-changer-extension-processor-init',
+                        type: 'pitchChangerExtensionProcessorInit',
                         numChannels: destChannelCount,
                         audioProcessorClientPort: audioProcessorClientPort,
                     } satisfies ProcessorInit,
                     [audioProcessorClientPort],
                 );
                 result.port.postMessage({
-                    type: 'pitch-changer-extension-processor-set-params',
+                    type: 'pitchChangerExtensionProcessorSetParams',
                     processingMode: settings.processingMode,
                     pitchValue: settings.pitchValue,
                     targetLatency: settings.targetLatency,
+                    quality: settings.quality,
                     enablePassthroughOptimization: settings.enablePassthroughOptimization,
                 } satisfies ProcessorSetParams);
             } catch (error) {
@@ -327,7 +329,7 @@ import { anyToString } from '../../src/common-utils.js';
             queueLength = Math.max(queueLength, context.pitchChangerOverrideQueueLength);
         }
         return {
-            type: 'pitch-changer-extension-stats-result',
+            type: 'pitchChangerExtensionStatsResult',
             numPlayingElements: 0,
             numAudioContexts: numAudioContexts,
             fastPathActive: fastPathActive,
@@ -363,13 +365,13 @@ import { anyToString } from '../../src/common-utils.js';
                 return;
             }
             switch (event.data.type) {
-                case 'pitch-changer-extension-main-world-init':
+                case 'pitchChangerExtensionMainWorldInit':
                     completeInit(event.data as MainWorldInit);
                     break;
-                case 'pitch-changer-extension-apply-settings':
+                case 'pitchChangerExtensionApplySettings':
                     applySettings((event.data as ApplySettings).settings);
                     break;
-                case 'pitch-changer-extension-get-stats':
+                case 'pitchChangerExtensionGetStats':
                     window.postMessage(getStats(), '*');
                     break;
             }
