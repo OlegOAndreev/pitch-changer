@@ -3,12 +3,12 @@
   "name": "Audio Pitch Changer",
   "version": "0.0.2",
   "description": "A simple audio pitch changer",
-  "permissions": ["scripting", "storage", "tabs"],
+  "permissions": ["storage", "tabs"],
   "host_permissions": ["<all_urls>"],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["pitch-changer-main-world.js"],
+      "js": ["content-main-world.js"],
       "all_frames": true,
       "match_about_blank": true,
       "match_origin_as_fallback": true,
@@ -17,7 +17,7 @@
     },
     {
       "matches": ["<all_urls>"],
-      "js": ["pitch-changer-content.js"],
+      "js": ["content.js"],
       "all_frames": true,
       "match_about_blank": true,
       "match_origin_as_fallback": true,
@@ -40,7 +40,7 @@
     {
       "resources": [
         "audio-processor-worker.js",
-        "pitch-changer-processor.js",
+        "processor.js",
         "wasm_main_module_bg.wasm",
         "worker-iframe.html",
         "worker-iframe.js"

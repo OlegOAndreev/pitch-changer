@@ -26,8 +26,8 @@ function debugLog(...args: unknown[]): void {
 // The extension does two things:
 // 1. it re-routes all audio and video elements through AudioContext and applies AudioWorklet with pitch processing
 //    if enabled (this can be done in the ISOLATED environment from this script)
-// 2. it overrides AudioWorklet constructor (this must be done in the MAIN environment from pitch-changer-main-world:
-//    we need to replace the global variable)
+// 2. it overrides AudioWorklet constructor (this must be done in the MAIN environment in content-main-world: we need to
+//    replace the global variable)
 //
 // We want to process all frames (it's extremely frequent that audio/video elements are inside iframes) in the tab.
 //
@@ -35,11 +35,8 @@ function debugLog(...args: unknown[]): void {
 // is by adding to manifest.json. The alternative of calling executeScript() is harder to pull off: getting current tab
 // is an async operation, getting current frame is non-trivial.
 //
-// We propagate changes from popup to tabs via calling executeScript. The standard way of communicating between scripts
-// (e.g. popup <-> content scripts) is sendMessage, but a) this is a very verbose way of doing it, b) you can't
-// sendMessage into a MAIN environment on Firefox and c) you have to enumerate frames if we need to get results from all
-// frames. Instead we call functions using executeScript(): in order to do that we store the references to those
-// functions in globalThis, which looks like a hack but works. See ContentScriptExports and OverrideScriptExports.
+// We propagate changed settings from popup to tabs and also get stats via messages. In case of MAIN world we proxy the
+// messages from ISOLATED to MAIN using window.postMessage().
 //
 // Another way to propagate changes would be listening to storage.onChanged, but we debounce writes and want to have
 // immediate feedback when changing the parameters.
@@ -95,7 +92,7 @@ const playingElements = new Set<HTMLMediaElement>();
 
 async function initWorkletState(): Promise<WorkletState> {
     const context = new AudioContext();
-    const processorUrl = chrome.runtime.getURL('pitch-changer-processor.js');
+    const processorUrl = chrome.runtime.getURL('processor.js');
     try {
         await context.audioWorklet.addModule(processorUrl);
     } catch (error) {
@@ -301,7 +298,8 @@ async function onElementPlay(element: HTMLMediaElement) {
 
 async function onElementPlayImpl(element: HTMLMediaElement) {
     if (element.paused) {
-        throw new Error(`Got paused element in onElementPlay: ${element.nodeName}, ${element.id}`);
+        console.log(`Got paused element in onElementPlay: ${element.nodeName}, ${element.id}`);
+        return;
     }
 
     playingElements.add(element);
@@ -398,7 +396,8 @@ async function onElementPause(element: HTMLMediaElement) {
 // context. See https://github.com/WebAudio/web-audio-api/issues/2658
 async function onElementPauseImpl(element: HTMLMediaElement) {
     if (!element.paused) {
-        throw new Error(`Got not paused element in onElementPause: ${element.nodeName}, ${element.id}`);
+        console.log(`Got not paused element in onElementPause: ${element.nodeName}, ${element.id}`);
+        return;
     }
 
     playingElements.delete(element);
@@ -565,7 +564,7 @@ async function init(): Promise<void> {
     window.postMessage(
         {
             type: 'pitchChangerExtensionMainWorldInit',
-            processorUrl: chrome.runtime.getURL('pitch-changer-processor.js'),
+            processorUrl: chrome.runtime.getURL('processor.js'),
             workerIframeUrl: chrome.runtime.getURL('worker-iframe.html'),
             audioProcessorWorkerUrl: chrome.runtime.getURL('audio-processor-worker.js'),
             settings: settings,
