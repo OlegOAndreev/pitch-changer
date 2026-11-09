@@ -525,6 +525,30 @@ function getStats(): StatsResult {
     };
 }
 
+function registerChildren(rootElement: Element) {
+    const children = rootElement.matches('audio, video') ? [rootElement] : rootElement.querySelectorAll('audio, video');
+    for (const element of children) {
+        if (!(element instanceof HTMLMediaElement)) {
+            continue;
+        }
+        if (element.paused) {
+            continue;
+        }
+        try {
+            debugLog(`Caught autoplaying element ${element.nodeName} ${element.id}`);
+            if (!isElementRegistered(element)) {
+                registerElement(element);
+                void onElementPlay(element);
+            }
+        } catch (error) {
+            throw new Error(
+                `Failed to register autoplaying element ${element.nodeName} ${element.id}: ${anyToString(error)}`,
+                { cause: error },
+            );
+        }
+    }
+}
+
 async function init(): Promise<void> {
     window.addEventListener('play', onWindowPlay, true);
 
@@ -572,28 +596,26 @@ async function init(): Promise<void> {
         '*',
     );
 
-    // Our content script is running relatively. We do this to e.g. catch document.write() which updates the blank
+    // Our content script is running relatively late. We do this to e.g. catch document.write() which updates the blank
     // iframe. This means that e.g. the document could've started autoplaying and we need to catch this element.
-    for (const element of document.querySelectorAll('audio, video')) {
-        if (!(element instanceof HTMLMediaElement)) {
-            continue;
-        }
-        if (element.paused) {
-            continue;
-        }
-        try {
-            debugLog(`Caught autoplaying element ${element.nodeName} ${element.id}`);
-            if (!isElementRegistered(element)) {
-                registerElement(element);
-                void onElementPlay(element);
+    registerChildren(document.documentElement);
+
+    // If the page contents get replaced with a new page with autoplaying elements (e.g. Netflix when you click on
+    // Play), the window 'play' events also does not get fired. Use MutationObserver to catch all such autoplaying
+    // elements.
+    const observer = new MutationObserver((records) => {
+        for (const record of records) {
+            if (record.type !== 'childList') {
+                continue;
             }
-        } catch (error) {
-            throw new Error(
-                `Failed to register autoplaying element ${element.nodeName} ${element.id}: ${anyToString(error)}`,
-                { cause: error },
-            );
+            for (const node of record.addedNodes) {
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    registerChildren(node as Element);
+                }
+            }
         }
-    }
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
 }
 
 init().catch((error: unknown) => {
