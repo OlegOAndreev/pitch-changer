@@ -443,6 +443,12 @@ async function applySettings(newSettings: ExtensionSettings) {
 
     if (gotEnabled) {
         debugLog('Re-enabling processing for page');
+        // 1. Our content script is running relatively late. We do this to e.g. catch document.write() which updates the
+        //    blank iframe. This means that e.g. the document could've started autoplaying and we need to catch this
+        //    element.
+        // 2. We disable observer scanning when the extension is disabled, so we want to re-scan elements after it gets
+        //    enabled.
+        registerChildren(document.documentElement);
         // Re-route all elements via sourceNode
         if (mediaElements.size > 0) {
             const worklet = await getWorkletState();
@@ -580,6 +586,28 @@ async function init(): Promise<void> {
         }
     });
 
+    // If the page contents get replaced with a new page with autoplaying elements (e.g. Netflix when you click on
+    // Play), the window 'play' events also does not get fired. Use MutationObserver to catch all such autoplaying
+    // elements.
+    const observer = new MutationObserver((records) => {
+        // Don't do document scans when disabled.
+        if (!settings.enabled) {
+            return;
+        }
+
+        for (const record of records) {
+            if (record.type !== 'childList') {
+                continue;
+            }
+            for (const node of record.addedNodes) {
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    registerChildren(node as Element);
+                }
+            }
+        }
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+
     await applySettings(await loadSettings());
     debugLog('Audio Pitch Changer: Initializing ISOLATED content script');
 
@@ -595,27 +623,6 @@ async function init(): Promise<void> {
         } satisfies MainWorldInit,
         '*',
     );
-
-    // Our content script is running relatively late. We do this to e.g. catch document.write() which updates the blank
-    // iframe. This means that e.g. the document could've started autoplaying and we need to catch this element.
-    registerChildren(document.documentElement);
-
-    // If the page contents get replaced with a new page with autoplaying elements (e.g. Netflix when you click on
-    // Play), the window 'play' events also does not get fired. Use MutationObserver to catch all such autoplaying
-    // elements.
-    const observer = new MutationObserver((records) => {
-        for (const record of records) {
-            if (record.type !== 'childList') {
-                continue;
-            }
-            for (const node of record.addedNodes) {
-                if (node.nodeType === Node.ELEMENT_NODE) {
-                    registerChildren(node as Element);
-                }
-            }
-        }
-    });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
 }
 
 init().catch((error: unknown) => {
