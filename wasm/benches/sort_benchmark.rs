@@ -8,7 +8,7 @@ use std::hint::black_box;
 #[derive(PartialEq, PartialOrd, Clone, Copy, Debug)]
 struct Pair {
     key: f32,
-    value: usize,
+    value: u32,
 }
 
 impl Eq for Pair {}
@@ -26,13 +26,13 @@ struct CompressedPair {
 }
 
 impl CompressedPair {
-    fn new(key: f32, value: usize) -> Self {
+    fn new(key: f32, value: u32) -> Self {
         let repr = (key.to_bits() as i64) << 32 | value as i64;
         Self { repr }
     }
 
-    fn value(&self) -> usize {
-        (self.repr & 0xFFFFFFFF) as usize
+    fn value(&self) -> u32 {
+        (self.repr & 0xFFFFFFFF) as u32
     }
 
     fn key(&self) -> f32 {
@@ -45,7 +45,7 @@ fn generate_random_vec(size: usize) -> Vec<Pair> {
     let mut arr = Vec::with_capacity(size);
     for i in 0..size {
         let key = rng.random_range(0.0..1.0);
-        arr.push(Pair { key, value: i });
+        arr.push(Pair { key, value: i as u32 });
     }
     arr
 }

@@ -5,7 +5,7 @@ use anyhow::{Result, bail};
 use std::ffi::c_int;
 use std::os::raw::c_void;
 
-use realfft::num_complex::Complex;
+use rustfft::num_complex::Complex;
 
 // FFI bindings to the PFFFT C library
 #[repr(C)]
